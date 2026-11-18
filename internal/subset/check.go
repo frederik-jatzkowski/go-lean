@@ -21,6 +21,7 @@ type Checked struct {
 	loops     map[*ssa.Function]*CountedLoop
 	ranges    map[*ssa.Function]*RangeFold
 	builds    map[*ssa.Function]*SliceBuild
+	chains    map[*ssa.Function]*ChainRecursion
 }
 
 func (c Checked) Root() *ssa.Package         { return c.root }
@@ -31,6 +32,8 @@ func (c Checked) CountedLoop(fn *ssa.Function) *CountedLoop { return c.loops[fn]
 func (c Checked) RangeFold(fn *ssa.Function) *RangeFold { return c.ranges[fn] }
 
 func (c Checked) SliceBuild(fn *ssa.Function) *SliceBuild { return c.builds[fn] }
+
+func (c Checked) ChainRecursion(fn *ssa.Function) *ChainRecursion { return c.chains[fn] }
 
 func (c Checked) ArrayInitializer(value ssa.Value) *ssa.Store {
 	cell, _ := value.(*ssa.Alloc)
@@ -55,6 +58,7 @@ func Check(program gosource.Program) (Checked, error) {
 		loops:     make(map[*ssa.Function]*CountedLoop),
 		ranges:    make(map[*ssa.Function]*RangeFold),
 		builds:    make(map[*ssa.Function]*SliceBuild),
+		chains:    make(map[*ssa.Function]*ChainRecursion),
 		freshMaps: make(map[*ssa.MakeMap]bool),
 	}
 	for _, fn := range program.Roots {
@@ -64,7 +68,7 @@ func Check(program gosource.Program) (Checked, error) {
 	}
 	return Checked{
 		root: program.Package, functions: c.ordered, records: c.records, arrays: c.arrays, loops: c.loops,
-		ranges: c.ranges, builds: c.builds,
+		ranges: c.ranges, builds: c.builds, chains: c.chains,
 	}, nil
 }
 
@@ -78,6 +82,7 @@ type checker struct {
 	loops     map[*ssa.Function]*CountedLoop
 	ranges    map[*ssa.Function]*RangeFold
 	builds    map[*ssa.Function]*SliceBuild
+	chains    map[*ssa.Function]*ChainRecursion
 	freshMaps map[*ssa.MakeMap]bool
 }
 
@@ -127,14 +132,20 @@ func (c *checker) function(fn *ssa.Function) error {
 	if instance && (build == nil || build.Callback == nil) {
 		return diagnostic(fn, fn.Pos(), "calls to generic functions are unsupported outside validated callback slice construction")
 	}
+	chain := checkChainRecursion(fn)
 	for _, param := range fn.Params {
-		if Type(param.Type()) == "" && !(instance && param == build.Callback) {
+		if Type(param.Type()) == "" && !(instance && param == build.Callback) && !(chain != nil && param == chain.Input) {
+			if _, _, linked := chainFields(param.Type()); linked {
+				return diagnostic(fn, param.Pos(), "linked-list inputs require nil-guarded read-only recursion on the direct next field")
+			}
 			return diagnostic(fn, param.Pos(), "parameter must have a supported scalar or record type")
 		}
 	}
 	c.visiting[fn] = true
 	if build != nil {
 		c.builds[fn] = build
+	} else if chain != nil {
+		c.chains[fn] = chain
 	} else if err := c.checkBody(fn); err != nil {
 		return err
 	}

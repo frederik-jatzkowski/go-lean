@@ -162,25 +162,29 @@ func pureInt64Steps(instructions []ssa.Instruction, skip ssa.Instruction, availa
 		if ins == skip {
 			continue
 		}
-		switch op := ins.(type) {
-		case *ssa.BinOp:
-			if Type(op.Type()) != ir.Int64 || op.Op != token.ADD && op.Op != token.SUB && op.Op != token.MUL ||
-				!loopValue(op.X, available) || !loopValue(op.Y, available) {
-				return nil, false
-			}
-			available[op] = true
-			steps = append(steps, op)
-		case *ssa.UnOp:
-			if Type(op.Type()) != ir.Int64 || op.Op != token.SUB || !loopValue(op.X, available) {
-				return nil, false
-			}
-			available[op] = true
-			steps = append(steps, op)
-		default:
+		step := pureInt64Step(ins, available)
+		if step == nil {
 			return nil, false
 		}
+		available[step] = true
+		steps = append(steps, step)
 	}
 	return steps, true
+}
+
+func pureInt64Step(ins ssa.Instruction, available map[ssa.Value]bool) ssa.Value {
+	switch op := ins.(type) {
+	case *ssa.BinOp:
+		if Type(op.Type()) == ir.Int64 && (op.Op == token.ADD || op.Op == token.SUB || op.Op == token.MUL) &&
+			loopValue(op.X, available) && loopValue(op.Y, available) {
+			return op
+		}
+	case *ssa.UnOp:
+		if Type(op.Type()) == ir.Int64 && op.Op == token.SUB && loopValue(op.X, available) {
+			return op
+		}
+	}
+	return nil
 }
 
 func matchLoopBlocks(fn *ssa.Function) (loopBlocks, bool) {

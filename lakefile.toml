@@ -6,6 +6,7 @@ moreLeanArgs = ["-DwarningAsError=true"]
 name = "ExampleProofs"
 srcDir = "examples/provable"
 roots = [
+  "acyclic_list.acyclic_list_gen", "acyclic_list.acyclic_list_proofs",
   "arithmetic.arithmetic_gen", "arithmetic.arithmetic_proofs",
   "array_bounds.array_bounds_gen", "array_bounds.array_bounds_proofs",
   "boolean_implication.boolean_implication_gen", "boolean_implication.boolean_implication_proofs",

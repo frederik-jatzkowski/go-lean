@@ -35,7 +35,13 @@ func Render(program ir.Program) string {
 		if fn.Loop != nil {
 			r.renderCountedLoop(&out, *fn.Loop)
 		}
-		fmt.Fprintf(&out, "\ndef %s", symbolName(fn.Symbol))
+		name := symbolName(fn.Symbol)
+		recursion, recursive := fn.Body.Result.(ir.ListRecursion)
+		if recursive {
+			fmt.Fprintf(&out, "\nnamespace %s\n", symbolNamespace(fn.Symbol))
+			name = quoted(fn.Symbol.Name)
+		}
+		fmt.Fprintf(&out, "\ndef %s", name)
 		for _, param := range fn.TypeParams {
 			fmt.Fprintf(&out, " {%s : Type}", param)
 		}
@@ -46,6 +52,10 @@ func Render(program ir.Program) string {
 			fmt.Fprintf(&out, " : %s :=\n", r.leanType(fn.Result))
 		}
 		r.renderBody(&out, fn.Body, "  ", fn.CanPanic)
+		if recursive {
+			fmt.Fprintf(&out, "termination_by structural %s\n", binderName(recursion.Input))
+			fmt.Fprintf(&out, "\nend %s\n", symbolNamespace(fn.Symbol))
+		}
 	}
 	out.WriteString("\nend GoLean\n")
 	return out.String()
@@ -155,6 +165,15 @@ func (r renderer) renderBody(out *strings.Builder, body ir.Body, indent string, 
 		out.WriteString(" =>\n")
 		r.renderBindings(out, result.Steps, indent+"  ")
 		fmt.Fprintf(out, "%s%s) %s\n", indent+"  ", r.renderExpr(result.Next), r.renderExpr(result.Sequence))
+	case ir.ListRecursion:
+		head := "_"
+		if result.Head != nil {
+			head = binderName(*result.Head)
+		}
+		fmt.Fprintf(out, "%smatch %s with\n", indent, binderName(result.Input))
+		fmt.Fprintf(out, "%s| [] => %s\n", indent, r.renderExpr(result.Base))
+		fmt.Fprintf(out, "%s| %s :: %s =>\n", indent, head, binderName(result.Tail))
+		r.renderBody(out, result.Step, indent+"  ", false)
 	default:
 		panic("unexpected IR result")
 	}
@@ -271,6 +290,8 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 		return "_root_.GoLean." + symbolName(ir.Symbol(expr))
 	case ir.Apply:
 		return "(" + r.renderExpr(expr.Function) + " " + r.renderExpr(expr.Argument) + ")"
+	case ir.SelfCall:
+		return "(" + quoted(expr.Name) + " " + r.renderExpr(expr.Argument) + ")"
 	default:
 		panic("unexpected IR expression")
 	}

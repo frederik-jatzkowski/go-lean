@@ -187,10 +187,20 @@ type ListBuild struct {
 	Next     Expr
 }
 
-func (Return) result()    {}
-func (If) result()        {}
-func (ListFold) result()  {}
-func (ListBuild) result() {}
+// ListRecursion exposes the tail as the structurally smaller input.
+type ListRecursion struct {
+	Input Binder
+	Head  *Binder
+	Tail  Binder
+	Base  Expr
+	Step  Body
+}
+
+func (Return) result()        {}
+func (If) result()            {}
+func (ListFold) result()      {}
+func (ListBuild) result()     {}
+func (ListRecursion) result() {}
 
 type Expr interface{ expr() }
 
@@ -271,6 +281,11 @@ type Apply struct {
 	Argument Expr
 }
 
+type SelfCall struct {
+	Name     string
+	Argument Expr
+}
+
 type Binary struct {
 	Op          Operator
 	Left, Right Expr
@@ -303,6 +318,7 @@ func (Binary) expr()             {}
 func (Call) expr()               {}
 func (FunctionRef) expr()        {}
 func (Apply) expr()              {}
+func (SelfCall) expr()           {}
 
 type Operator int
 

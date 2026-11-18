@@ -36,9 +36,12 @@ func FromSSA(checked subset.Checked, sourceStem string, wordBits int64) ir.Progr
 		for _, capture := range fn.FreeVars {
 			result.Params = append(result.Params, l.bindAs(capture, l.captureType(capture)))
 		}
+		chain := checked.ChainRecursion(fn)
 		for _, param := range fn.Params {
 			if build := checked.SliceBuild(fn); build != nil && param == build.Callback {
 				result.Params = append(result.Params, l.bindAs(param, build.CallbackType()))
+			} else if chain != nil && param == chain.Input {
+				result.Params = append(result.Params, l.bindAs(param, ir.SliceType(ir.Int64)))
 			} else {
 				result.Params = append(result.Params, l.bind(param))
 			}
@@ -49,6 +52,8 @@ func FromSSA(checked subset.Checked, sourceStem string, wordBits int64) ir.Progr
 			result.Body.Result = l.lowerRangeFold(fold)
 		} else if build := checked.SliceBuild(fn); build != nil {
 			result.Body.Result = l.lowerSliceBuild(build)
+		} else if chain != nil {
+			result.Body.Result = l.lowerChainRecursion(chain)
 		} else {
 			result.Body = l.body(fn.Blocks[0], nil)
 		}
@@ -72,7 +77,7 @@ func (l *lowerer) lowerCountedLoop(fn *ir.Function, loop *subset.CountedLoop) {
 			call.Args = append(call.Args, ir.Ref(param))
 		}
 	}
-	helper.Steps = l.lowerLoopSteps(loop.Steps)
+	helper.Steps = l.lowerPureSteps(loop.Steps)
 	helper.Next = l.value(loop.Next)
 	call.Args = append(call.Args, ir.ToNat{Value: l.value(loop.Bound)}, l.value(loop.Initial))
 	fn.Body.Result = ir.Return{Value: call}
@@ -84,7 +89,7 @@ func (l *lowerer) lowerRangeFold(fold *subset.RangeFold) ir.ListFold {
 		Sequence: l.value(fold.Source), Initial: l.value(fold.Initial),
 		State: l.bind(fold.State), Element: l.bind(fold.Element),
 	}
-	result.Steps = l.lowerLoopSteps(fold.Steps)
+	result.Steps = l.lowerPureSteps(fold.Steps)
 	result.Next = l.value(fold.Next)
 	return result
 }
@@ -92,12 +97,24 @@ func (l *lowerer) lowerRangeFold(fold *subset.RangeFold) ir.ListFold {
 func (l *lowerer) lowerSliceBuild(build *subset.SliceBuild) ir.ListBuild {
 	l.canPanic = true // Keep the checked construction in the panic-result model.
 	result := ir.ListBuild{Sequence: l.value(build.Source), Element: l.bind(build.Element)}
-	result.Steps = l.lowerLoopSteps(build.Steps)
+	result.Steps = l.lowerPureSteps(build.Steps)
 	result.Next = l.value(build.Value)
 	return result
 }
 
-func (l *lowerer) lowerLoopSteps(values []ssa.Value) []ir.Binding {
+func (l *lowerer) lowerChainRecursion(chain *subset.ChainRecursion) ir.ListRecursion {
+	input := l.bindings[chain.Input]
+	result := ir.ListRecursion{Input: input, Tail: l.bindAs(chain.Tail, input.Type), Base: l.value(chain.Base)}
+	if chain.Head != nil {
+		head := l.bind(chain.Head)
+		result.Head = &head
+	}
+	result.Step.Bindings = l.lowerPureSteps(chain.Steps)
+	result.Step.Result = ir.Return{Value: l.value(chain.Result)}
+	return result
+}
+
+func (l *lowerer) lowerPureSteps(values []ssa.Value) []ir.Binding {
 	var steps []ir.Binding
 	for _, step := range values {
 		var expr ir.Expr
@@ -107,7 +124,12 @@ func (l *lowerer) lowerLoopSteps(values []ssa.Value) []ir.Binding {
 		case *ssa.UnOp:
 			expr = ir.Negate{Value: l.value(step.X)}
 		case *ssa.Call:
-			expr = ir.Apply{Function: l.value(step.Call.Value), Argument: l.value(step.Call.Args[0])}
+			arg := l.value(step.Call.Args[0])
+			if callee := step.Call.StaticCallee(); callee != nil {
+				expr = ir.SelfCall{Name: l.symbol(callee).Name, Argument: arg}
+			} else {
+				expr = ir.Apply{Function: l.value(step.Call.Value), Argument: arg}
+			}
 		}
 		steps = append(steps, ir.Binding{Binder: l.bind(step), Value: expr})
 	}

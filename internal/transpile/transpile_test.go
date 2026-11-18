@@ -306,6 +306,30 @@ func TestRejectGenericSliceCallbacks(t *testing.T) {
 	}
 }
 
+func TestChainRecursionPreservesBaseAndStep(t *testing.T) {
+	dir := newModule(t)
+	writeFile(t, filepath.Join(dir, "input.go"), `package sample
+type cell struct { link *cell; weight int64 }
+//golean:verify
+func weighted(p *cell) int64 {
+	if nil != p {
+		return p.weight * 2 + weighted(p.link)
+	}
+	return 7
+}
+`)
+	outputs, err := transpile.Generate(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := outputs[0].Source
+	for _, want := range []string{"| [] => (Int64.ofInt (7))", " :: ", "(«weighted» ", "Int64.ofInt (2)", " * ", " + ", "termination_by structural"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in output:\n%s", want, got)
+		}
+	}
+}
+
 func TestRejectUnsupportedSSA(t *testing.T) {
 	tests := []struct {
 		name, source, want string
@@ -349,6 +373,10 @@ func TestRejectUnsupportedSSA(t *testing.T) {
 		{"range mutates slice", "func f(xs []int64) int64 { var acc int64; for i, v := range xs { xs[i] = 0; acc += v }; return acc }", "control-flow loops are unsupported"},
 		{"global", "func f() int64 { return n }; var n int64", "unsupported unary operation *"},
 		{"recursion", "func f(x int64) int64 { return f(x) }", "recursive calls are unsupported"},
+		{"linked list recurses on original", "func f(p *cell) int64 { if p == nil { return 0 }; return 1+f(p) }; type cell struct { next *cell; value int64 }", "linked-list inputs require nil-guarded read-only recursion"},
+		{"linked list without nil guard", "func f(p *cell) int64 { return 1+f(p.next) }; type cell struct { next *cell; value int64 }", "linked-list inputs require nil-guarded read-only recursion"},
+		{"linked list skips nullable link", "func f(p *cell) int64 { if p == nil { return 0 }; return 1+f(p.next.next) }; type cell struct { next *cell; value int64 }", "linked-list inputs require nil-guarded read-only recursion"},
+		{"linked list mutation", "func f(p *cell) int64 { if p == nil { return 0 }; p.value++; return f(p.next) }; type cell struct { next *cell; value int64 }", "linked-list inputs require nil-guarded read-only recursion"},
 		{"panic", "func f(x int64) int64 { panic(x) }", "unsupported SSA instruction"},
 	}
 	for _, test := range tests {

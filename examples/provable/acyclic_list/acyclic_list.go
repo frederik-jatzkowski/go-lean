@@ -1,5 +1,3 @@
-//go:build golean_planned
-
 package acyclic_list
 
 type Node struct {

@@ -15,12 +15,13 @@
 - Direct calls to local closures can use immutable captured values as extra parameters. Captured cells must be initialized once before use, and closure values stay local to direct calls.
 - Named structs with scalar or nested record fields lower to Lean structures. Promoted fields follow the same projection chain as explicit selectors. Field initialization must finish before a local record is read, and the initialization addresses stay local.
 - Read-only, nonrecursive record pointer inputs use `Option` to distinguish nil from a record value. Dereferencing nil propagates a panic outcome.
+- A nil-guarded, read-only self-recursion on a singly linked input with an `int64` payload lowers to structural recursion on a Lean list. The checker verifies that the step follows the direct next field and uses only pure `int64` arithmetic. The Go input must be a finite, acyclic chain for the proof to apply.
 - Read-only slices of supported value elements use Lean lists for indexing by supported Go integer types. Both negative and out-of-range indices propagate a panic at element address formation. Nil and empty slices have the same indexing behavior.
 - Read-only maps with integer keys and values use Lean association lists with unique keys. A comma-ok lookup preserves presence separately from the value and gives the Go zero value when a key is absent. Nil and empty maps have the same lookup behavior.
 - A function can return a fresh integer map it allocates without a size hint and accesses in straight-line code. The allocation stays local until return. Each write replaces the entry for its key and preserves the other entries. The result uses `Option` to model panic outcomes.
 - A function can return a fresh slice matching an input slice's element representation and length, with capacity equal to that length. It initializes each output element once at the current iteration index, using the input element, supported pure arithmetic, or a validated callback in a generic instance. Other functions can return the result of a checked call that constructs a fresh slice. The checker rejects writes to caller-owned storage and escape before return. The result uses `Option` to model panic outcomes.
 - Unnamed Go arrays passed by value use fixed-length Lean vectors, with the same checked indexing as slices. Any local SSA array cell must hold an initialized, read-only copy whose address stays local.
-- Local bindings, assignments, early returns, branches with boolean conditions, and value and tagless switches. Control-flow joins select the supported scalar value from the branch taken. Short-circuit expressions evaluate their right operand only when needed. The checker rejects unsupported loops, recursive or indirect calls, and effects such as reads of mutable globals.
+- Local bindings, assignments, early returns, branches with boolean conditions, and value and tagless switches. Control-flow joins select the supported scalar value from the branch taken. Short-circuit expressions evaluate their right operand only when needed. The checker rejects unsupported loop and recursion shapes, indirect calls, and effects such as reads of mutable globals.
 - A canonical counted loop starts its `uint8` counter at zero, increments it by one while it is below an invariant `uint8` parameter or constant, and returns its sole `int64` accumulator. The accumulator starts from a parameter or constant and updates using pure `int64` arithmetic in a straight-line body. Lean recursion uses the iteration count as decreasing natural-number fuel.
 - A range over a read-only `[]int64` parameter updates one `int64` accumulator with straight-line arithmetic and returns it. The checker verifies the generated loop visits each element of the same slice in order, then lowers the update to a Lean left fold over the remaining elements.
 - Checked proofs for arithmetic identities, wraparound, clamp bounds and idempotence, and division panic freedom, signed boundaries, and panic propagation. The `clampimport` example proves the clamp properties using `Min` and `Max` translated from an imported Go package.
@@ -52,15 +53,11 @@ Keep goroutine orchestration outside the initial pure subset. A future extension
 
 ## Recommended next step
 
-Apply the panic model to bounds checks and pointer dereferences.
+Run the 16 rejection fixtures individually in the test suite and assert both the rejection reason and its source location.
 
 ## Example index
 
-`examples/provable/` contains 32 examples. The default build regenerates and checks `arithmetic`, `array_bounds`, `boolean_implication`, `bounded_counter`, `branch_join`, `byte_rune`, `clamp`, `clampimport`, `constant_conversions`, `division_guarded`, `division_precondition`, `division_propagation`, `embedded_struct`, `float32_rounding`, `float64_special`, `generic_identity`, `generic_map`, `immutable_closure`, `machine_words`, `map_build`, `map_lookup`, `narrow_signed`, `nil_dereference`, `range_fold`, `slice_bounds`, `slice_copy`, `string_bytes`, `struct_fields`, `switch_tagless`, `switch_value`, and `unsigned_wrap`. The remaining example has valid Go source behind the `golean_planned` build tag and draft Lean theorem statements with unfinished proofs.
-
-| Area | Pending examples |
-| --- | --- |
-| Aggregates and references | `acyclic_list` |
+`examples/provable/` contains 32 examples with checked Lean proofs. `make generate` regenerates every module, and `make check` verifies every proof. The examples are `acyclic_list`, `arithmetic`, `array_bounds`, `boolean_implication`, `bounded_counter`, `branch_join`, `byte_rune`, `clamp`, `clampimport`, `constant_conversions`, `division_guarded`, `division_precondition`, `division_propagation`, `embedded_struct`, `float32_rounding`, `float64_special`, `generic_identity`, `generic_map`, `immutable_closure`, `machine_words`, `map_build`, `map_lookup`, `narrow_signed`, `nil_dereference`, `range_fold`, `slice_bounds`, `slice_copy`, `string_bytes`, `struct_fields`, `switch_tagless`, `switch_value`, and `unsigned_wrap`.
 
 `examples/reject/` contains 16 draft fixtures behind the `golean_reject` build tag. The table records the intended rejection reasons for future tests.
 
@@ -83,10 +80,9 @@ Apply the panic model to bounds checks and pointer dereferences.
 | `unbounded_loop` | Can run indefinitely on odd inputs |
 | `goroutine` | Spawns a goroutine and communicates through a channel |
 
-To check that the draft sources compile as Go:
+Compile the draft rejection fixtures with the `golean_reject` build tag.
 
 ```sh
-go test -tags=golean_planned ./examples/provable/...
 go test -tags=golean_reject ./examples/reject/...
 ```
 

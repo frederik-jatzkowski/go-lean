@@ -10,4 +10,5 @@ roots = [
   "clamp.clamp_gen", "clamp.clamp_proofs",
   "clampimport.clampimport_gen", "clampimport.clampimport_proofs",
   "division_guarded.division_guarded_gen", "division_guarded.division_guarded_proofs",
+  "division_precondition.division_precondition_gen", "division_precondition.division_precondition_proofs",
 ]

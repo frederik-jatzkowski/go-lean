@@ -5,6 +5,7 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"maps"
 	"math"
 	"net/url"
 	"slices"
@@ -16,10 +17,11 @@ import (
 )
 
 func FromSSA(checked subset.Checked, sourceStem string, wordBits int64) ir.Program {
-	program := ir.Program{Records: make(map[ir.Type]ir.Record)}
+	program := ir.Program{Records: make(map[ir.Type]ir.Record), Contracts: make(map[ir.Type]ir.Contract)}
 	file := url.PathEscape(sourceStem)
 	// The checker orders callees before callers, so their effects are already known.
 	effects := make(map[*ssa.Function]bool)
+	dependencies := make(map[*ssa.Function][]ir.Type)
 	instances := make(map[*ssa.Function]string)
 	for _, fn := range checked.Functions() {
 		if len(fn.TypeArgs()) != 0 {
@@ -28,6 +30,7 @@ func FromSSA(checked subset.Checked, sourceStem string, wordBits int64) ir.Progr
 		l := lowerer{
 			root: checked.Root(), file: file, bindings: make(map[ssa.Value]ir.Binder), effects: effects,
 			checked: checked, records: program.Records, instances: instances,
+			contracts: program.Contracts, dependencies: dependencies, usedContracts: make(map[ir.Type]bool),
 		}
 		result := ir.Function{Symbol: l.symbol(fn), Result: l.valueType(fn.Signature.Results().At(0).Type())}
 		for i := 0; i < fn.Signature.TypeParams().Len(); i++ {
@@ -60,6 +63,8 @@ func FromSSA(checked subset.Checked, sourceStem string, wordBits int64) ir.Progr
 		if l.usesWord {
 			program.WordBits = wordBits
 		}
+		result.Contracts = slices.Sorted(maps.Keys(l.usedContracts))
+		dependencies[fn] = result.Contracts
 		result.CanPanic = l.canPanic
 		effects[fn] = result.CanPanic
 		program.Functions = append(program.Functions, result)
@@ -137,16 +142,19 @@ func (l *lowerer) lowerPureSteps(values []ssa.Value) []ir.Binding {
 }
 
 type lowerer struct {
-	root      *ssa.Package
-	file      string
-	bindings  map[ssa.Value]ir.Binder
-	effects   map[*ssa.Function]bool
-	canPanic  bool
-	next      int
-	usesWord  bool
-	checked   subset.Checked
-	records   map[ir.Type]ir.Record
-	instances map[*ssa.Function]string
+	root          *ssa.Package
+	file          string
+	bindings      map[ssa.Value]ir.Binder
+	effects       map[*ssa.Function]bool
+	canPanic      bool
+	next          int
+	usesWord      bool
+	checked       subset.Checked
+	records       map[ir.Type]ir.Record
+	instances     map[*ssa.Function]string
+	contracts     map[ir.Type]ir.Contract
+	dependencies  map[*ssa.Function][]ir.Type
+	usedContracts map[ir.Type]bool
 }
 
 func (l *lowerer) symbol(fn *ssa.Function) ir.Symbol {
@@ -252,6 +260,18 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 			}
 			result.Bindings = append(result.Bindings, ir.Binding{Binder: binder, Value: value})
 		case *ssa.Call:
+			if ins.Call.IsInvoke() {
+				receiver := ins.Call.Value
+				call := ir.InterfaceCall{
+					Contract: l.valueType(receiver.Type()), Method: ins.Call.Method.Name(),
+					Args: []ir.Expr{l.value(receiver)},
+				}
+				for _, arg := range ins.Call.Args {
+					call.Args = append(call.Args, l.value(arg))
+				}
+				result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: call})
+				continue
+			}
 			if subset.IsLength(ins) {
 				result.Bindings = append(result.Bindings, ir.Binding{
 					Binder: l.bind(ins), Value: ir.ByteLen{Value: l.value(ins.Call.Args[0])},
@@ -259,7 +279,10 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 				continue
 			}
 			target := ins.Call.StaticCallee()
-			call := ir.Call{Callee: l.symbol(target)}
+			call := ir.Call{Callee: l.symbol(target), Contracts: l.dependencies[target]}
+			for _, contract := range call.Contracts {
+				l.usedContracts[contract] = true
+			}
 			if closure, ok := ins.Call.Value.(*ssa.MakeClosure); ok {
 				for _, capture := range closure.Bindings {
 					call.Args = append(call.Args, l.value(capture))
@@ -376,6 +399,10 @@ func (l *lowerer) binary(expr *ssa.BinOp) ir.Binary {
 }
 
 func (l *lowerer) valueType(t types.Type) ir.Type {
+	if handle := subset.InterfaceHandle(t); handle != "" {
+		l.useContract(t, handle)
+		return handle
+	}
 	typ := subset.Type(t)
 	l.usesWord = l.usesWord || typ.IsWord()
 	if typ.Pointee() != "" {
@@ -406,6 +433,34 @@ func (l *lowerer) valueType(t types.Type) ir.Type {
 		}
 	}
 	return typ
+}
+
+func (l *lowerer) useContract(t types.Type, handle ir.Type) {
+	l.usedContracts[handle] = true
+	if _, exists := l.contracts[handle]; exists {
+		return
+	}
+	named := types.Unalias(t).(*types.Named)
+	obj := named.Obj()
+	symbol := ir.Symbol{Package: l.root.Pkg.Path(), File: l.file, Name: obj.Name() + "Contract"}
+	if obj.Pkg() != l.root.Pkg {
+		symbol.Dependency = obj.Pkg().Path()
+	}
+	contract := ir.Contract{Symbol: symbol, Laws: l.checked.InterfaceLaws(t)}
+	for method := range named.Underlying().(*types.Interface).ExplicitMethods() {
+		sig := method.Signature()
+		field := ir.Method{Name: method.Name()}
+		for param := range sig.Params().Variables() {
+			field.Params = append(field.Params, l.valueType(param.Type()))
+		}
+		if result := sig.Results().At(0).Type(); types.Identical(result, t) {
+			field.Result = handle
+		} else {
+			field.Result = l.valueType(result)
+		}
+		contract.Methods = append(contract.Methods, field)
+	}
+	l.contracts[handle] = contract
 }
 
 func (l *lowerer) load(addr ssa.Value) ir.Expr {

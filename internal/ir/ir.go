@@ -9,7 +9,20 @@ import (
 type Program struct {
 	Functions []Function
 	Records   map[Type]Record
+	Contracts map[Type]Contract
 	WordBits  int64
+}
+
+type Contract struct {
+	Symbol  Symbol
+	Methods []Method
+	Laws    []string
+}
+
+type Method struct {
+	Name   string
+	Params []Type
+	Result Type
 }
 
 type Record struct {
@@ -25,6 +38,7 @@ type Field struct {
 type Function struct {
 	Symbol     Symbol
 	TypeParams []Type
+	Contracts  []Type
 	Params     []Binder
 	Result     Type
 	Body       Body
@@ -270,8 +284,15 @@ type Convert struct {
 }
 
 type Call struct {
-	Callee Symbol
-	Args   []Expr
+	Contracts []Type
+	Callee    Symbol
+	Args      []Expr
+}
+
+type InterfaceCall struct {
+	Contract Type
+	Method   string
+	Args     []Expr
 }
 
 type FunctionRef Symbol
@@ -315,10 +336,12 @@ func (OptionIsSome) expr()       {}
 func (CheckedIndex) expr()       {}
 func (Convert) expr()            {}
 func (Binary) expr()             {}
-func (Call) expr()               {}
-func (FunctionRef) expr()        {}
-func (Apply) expr()              {}
-func (SelfCall) expr()           {}
+
+func (InterfaceCall) expr() {}
+func (Call) expr()          {}
+func (FunctionRef) expr()   {}
+func (Apply) expr()         {}
+func (SelfCall) expr()      {}
 
 type Operator int
 

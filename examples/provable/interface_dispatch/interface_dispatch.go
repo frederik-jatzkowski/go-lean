@@ -1,7 +1,10 @@
-//go:build golean_reject
-
 package interface_dispatch
 
+// Evaluator models an evaluation boundary.
+//
+// golean:start
+// evaluate_identity : ∀ s x, Evaluate s x = x
+// golean:end
 type Evaluator interface {
 	Evaluate(int64) int64
 }

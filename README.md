@@ -11,7 +11,8 @@
 - Go strings model raw bytes with Lean `ByteArray`. Concatenation preserves those bytes, and `len` returns the byte count at the Go target's `int` width.
 - `float32` addition uses Lean's binary32 arithmetic. Go constants are emitted as their already-rounded binary32 bits.
 - `float64` supports comparisons under IEEE 754, including unordered NaNs and equality of signed zeros. Typed constants preserve their binary64 bits.
-- Generic definitions can use type parameters with the unrestricted `any` constraint as Lean type variables. Calls can use concrete instances of the validated fresh-slice construction, applying a statically known, capture-free, total Go callback to each input element. The checker rejects dynamic interface values, method constraints, and other generic call shapes.
+- Generic definitions can use type parameters with the unrestricted `any` constraint as Lean type variables. Calls can use concrete instances of the validated fresh-slice construction, applying a statically known, capture-free, total Go callback to each input element. The checker rejects generic method constraints and other generic call shapes.
+- Calls on named interfaces with explicit contracts lower to Lean method projections. The generated function takes a contract containing the method models and their laws.
 - Direct calls to local closures can use immutable captured values as extra parameters. Captured cells must be initialized once before use, and closure values stay local to direct calls.
 - Named structs with scalar or nested record fields lower to Lean structures. Promoted fields follow the same projection chain as explicit selectors. Field initialization must finish before a local record is read, and the initialization addresses stay local.
 - Read-only, nonrecursive record pointer inputs use `Option` to distinguish nil from a record value. Dereferencing nil propagates a panic outcome.
@@ -31,6 +32,26 @@
 Add `//golean:verify` to a top-level function's doc comment and run `go-lean transpile ./...` from the Go module root. The command scans the packages matched by Go's `./...` pattern, using the active build settings. Each marked source file gets one sibling module, so `clamp.go` generates `clamp_gen.lean`. Each module includes all marked functions in that file and their reachable callees, deduplicated within the module.
 
 The transpiler runs SSA loading, subset and call graph checking, lowering to a structured IR, and Lean generation in that order. Every selected function must pass checking before the command writes any modules. If the last directive is removed from a file, remove its old generated module and update any Lean imports as needed.
+
+## Interface contracts
+
+Write Lean law fields between `//golean:start` and `//golean:end` in a method's doc comment. For interface-level doc comments use `// golean:start` and `// golean:end` so `gofmt` preserves the block.
+
+```go
+type KVStore interface {
+    Get(key int64) int64
+    //golean:start
+    // get_after_put : ∀ s k v, Get (Put s k v) k = v
+    //golean:end
+    Put(key, value int64) KVStore
+}
+```
+
+Each generated module includes the contracts it needs for marked functions and their reachable helpers. The generator derives method types from Go, followed by the annotated law fields. Lean checks the fields during `lake build`. Callers take explicit contract arguments, and proofs can use fields such as `contract.get_after_put`.
+
+The contract models valid, non-nil interface handles and total method behavior on those handles. Methods accept supported Go value arguments and return one supported value or a handle of the same interface. Functional updates can return a new handle. Applying a caller proof to Go requires its actual dependency to satisfy the model, including the assumptions about side effects and panics.
+
+The [caller example](examples/provable/kv_store_contract_use/kv_store_contract_use_proofs.lean) proves read-your-writes for any supplied contract. The [implementation example](examples/provable/kv_store_contract_impl/kv_store_contract_impl_proofs.lean) discharges that contract using translated Go functions and specializes the caller theorem. The concrete Go methods delegate to those functions.
 
 ## Planned scope
 
@@ -53,13 +74,13 @@ Keep goroutine orchestration outside the initial pure subset. A future extension
 
 ## Recommended next step
 
-Run the 16 rejection fixtures individually in the test suite and assert both the rejection reason and its source location.
+Run the 15 rejection fixtures individually in the test suite and assert both the rejection reason and its source location.
 
 ## Example index
 
-`examples/provable/` contains 32 examples with checked Lean proofs. `make generate` regenerates every module, and `make check` verifies every proof. The examples are `acyclic_list`, `arithmetic`, `array_bounds`, `boolean_implication`, `bounded_counter`, `branch_join`, `byte_rune`, `clamp`, `clampimport`, `constant_conversions`, `division_guarded`, `division_precondition`, `division_propagation`, `embedded_struct`, `float32_rounding`, `float64_special`, `generic_identity`, `generic_map`, `immutable_closure`, `machine_words`, `map_build`, `map_lookup`, `narrow_signed`, `nil_dereference`, `range_fold`, `slice_bounds`, `slice_copy`, `string_bytes`, `struct_fields`, `switch_tagless`, `switch_value`, and `unsigned_wrap`.
+`examples/provable/` contains 35 examples with checked Lean proofs. `make generate` regenerates every module, and `make check` verifies every proof. The examples are `acyclic_list`, `arithmetic`, `array_bounds`, `boolean_implication`, `bounded_counter`, `branch_join`, `byte_rune`, `clamp`, `clampimport`, `constant_conversions`, `division_guarded`, `division_precondition`, `division_propagation`, `embedded_struct`, `float32_rounding`, `float64_special`, `generic_identity`, `generic_map`, `immutable_closure`, `interface_dispatch`, `kv_store_contract_impl`, `kv_store_contract_use`, `machine_words`, `map_build`, `map_lookup`, `narrow_signed`, `nil_dereference`, `range_fold`, `slice_bounds`, `slice_copy`, `string_bytes`, `struct_fields`, `switch_tagless`, `switch_value`, and `unsigned_wrap`.
 
-`examples/reject/` contains 16 draft fixtures behind the `golean_reject` build tag. The table records the intended rejection reasons for future tests.
+`examples/reject/` contains 15 draft fixtures behind the `golean_reject` build tag. The table records the intended rejection reasons for future tests.
 
 | Fixture | Intended rejection reason |
 | --- | --- |
@@ -68,7 +89,6 @@ Run the 16 rejection fixtures individually in the test suite and assert both the
 | `slice_mutation` | Writes through a caller-owned slice |
 | `map_mutation` | Writes through a caller-owned map |
 | `escaping_alias` | Returns multiple aliases to caller-owned mutable storage |
-| `interface_dispatch` | Calls an open-ended interface method |
 | `type_assertion` | Inspects the runtime type of an unrestricted interface value |
 | `unsafe_pointer` | Exposes a raw memory address |
 | `reflection` | Uses runtime reflection |

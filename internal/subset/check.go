@@ -14,6 +14,7 @@ import (
 
 // Checked holds the validated functions in dependency-first order.
 type Checked struct {
+	contracts map[*types.TypeName][]string
 	root      *ssa.Package
 	functions []*ssa.Function
 	records   map[*ssa.Alloc]RecordCell
@@ -50,6 +51,7 @@ func (c Checked) RecordCell(value ssa.Value) (RecordCell, bool) {
 
 func Check(program gosource.Program) (Checked, error) {
 	c := checker{
+		contracts: make(map[*types.TypeName][]string), interfaceDocs: program.InterfaceDocs,
 		visiting:  make(map[*ssa.Function]bool),
 		done:      make(map[*ssa.Function]bool),
 		cells:     make(map[*ssa.Alloc]*ssa.Store),
@@ -67,23 +69,25 @@ func Check(program gosource.Program) (Checked, error) {
 		}
 	}
 	return Checked{
-		root: program.Package, functions: c.ordered, records: c.records, arrays: c.arrays, loops: c.loops,
+		contracts: c.contracts, root: program.Package, functions: c.ordered, records: c.records, arrays: c.arrays, loops: c.loops,
 		ranges: c.ranges, builds: c.builds, chains: c.chains,
 	}, nil
 }
 
 type checker struct {
-	visiting  map[*ssa.Function]bool
-	done      map[*ssa.Function]bool
-	ordered   []*ssa.Function
-	cells     map[*ssa.Alloc]*ssa.Store
-	records   map[*ssa.Alloc]RecordCell
-	arrays    map[*ssa.Alloc]*ssa.Store
-	loops     map[*ssa.Function]*CountedLoop
-	ranges    map[*ssa.Function]*RangeFold
-	builds    map[*ssa.Function]*SliceBuild
-	chains    map[*ssa.Function]*ChainRecursion
-	freshMaps map[*ssa.MakeMap]bool
+	contracts     map[*types.TypeName][]string
+	interfaceDocs map[*types.TypeName]gosource.InterfaceDoc
+	visiting      map[*ssa.Function]bool
+	done          map[*ssa.Function]bool
+	ordered       []*ssa.Function
+	cells         map[*ssa.Alloc]*ssa.Store
+	records       map[*ssa.Alloc]RecordCell
+	arrays        map[*ssa.Alloc]*ssa.Store
+	loops         map[*ssa.Function]*CountedLoop
+	ranges        map[*ssa.Function]*RangeFold
+	builds        map[*ssa.Function]*SliceBuild
+	chains        map[*ssa.Function]*ChainRecursion
+	freshMaps     map[*ssa.MakeMap]bool
 }
 
 func (c *checker) function(fn *ssa.Function) error {
@@ -99,11 +103,18 @@ func (c *checker) function(fn *ssa.Function) error {
 	sig := fn.Signature
 	instance := len(fn.TypeArgs()) != 0
 	if (!instance && (fn.Pkg == nil || fn.Synthetic != "")) || sig.Recv() != nil ||
-		sig.Variadic() ||
-		sig.Results().Len() != 1 || Type(sig.Results().At(0).Type()) == "" {
+		sig.Variadic() || sig.Results().Len() != 1 {
 		return diagnostic(fn, fn.Pos(), "expected a top-level function with one supported result and no variadic arguments")
 	}
-	if Type(sig.Results().At(0).Type()).Pointee() != "" {
+	result := sig.Results().At(0).Type()
+	if isInterfaceValue(result) {
+		if err := c.checkInterface(fn, fn.Pos(), result); err != nil {
+			return err
+		}
+	} else if Type(result) == "" {
+		return diagnostic(fn, fn.Pos(), "expected a top-level function with one supported result and no variadic arguments")
+	}
+	if Type(result).Pointee() != "" {
 		return diagnostic(fn, fn.Pos(), "record pointers may not escape as results")
 	}
 	if parent := fn.Parent(); parent != nil && parent.TypeParams().Len() != 0 {
@@ -134,6 +145,12 @@ func (c *checker) function(fn *ssa.Function) error {
 	}
 	chain := checkChainRecursion(fn)
 	for _, param := range fn.Params {
+		if InterfaceHandle(param.Type()) != "" {
+			if err := c.checkInterface(fn, param.Pos(), param.Type()); err != nil {
+				return err
+			}
+			continue
+		}
 		if Type(param.Type()) == "" && !(instance && param == build.Callback) && !(chain != nil && param == chain.Input) {
 			if _, _, linked := chainFields(param.Type()); linked {
 				return diagnostic(fn, param.Pos(), "linked-list inputs require nil-guarded read-only recursion on the direct next field")
@@ -270,6 +287,9 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		}
 		return diagnostic(fn, ins.Pos(), "unsupported type change from %s to %s", ins.X.Type(), ins.Type())
 	case *ssa.Call:
+		if ins.Call.IsInvoke() {
+			return c.checkInvoke(fn, ins)
+		}
 		if IsLength(ins) {
 			if hasType(ins.Call.Args[0], ir.Bytes) {
 				return nil
@@ -298,7 +318,7 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 				}
 				continue
 			}
-			if !supportedValue(arg) {
+			if !supportedValue(arg) && !supportedHandle(arg) {
 				return diagnostic(fn, ins.Pos(), "call to %s requires supported arguments", callee)
 			}
 		}
@@ -367,7 +387,19 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 			return nil
 		}
 		return diagnostic(fn, ins.Cond.Pos(), "branch condition must be a supported bool value")
+	case *ssa.MakeInterface, *ssa.ChangeInterface:
+		return diagnostic(fn, ins.Pos(), "unsupported SSA instruction %T: interface conversions are unsupported", ins)
+	case *ssa.TypeAssert:
+		return diagnostic(fn, ins.Pos(), "type assertions are unsupported")
 	case *ssa.Phi:
+		if handle := InterfaceHandle(ins.Type()); handle != "" {
+			for _, edge := range ins.Edges {
+				if !supportedHandle(edge) || InterfaceHandle(edge.Type()) != handle {
+					return diagnostic(fn, ins.Pos(), "interface joins require matching non-nil handles")
+				}
+			}
+			return nil
+		}
 		typ := Type(ins.Type())
 		if typ == "" {
 			return diagnostic(fn, ins.Pos(), "control-flow joins require a supported value type")
@@ -379,7 +411,7 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		}
 		return nil
 	case *ssa.Return:
-		if len(ins.Results) == 1 && supportedValue(ins.Results[0]) {
+		if len(ins.Results) == 1 && (supportedValue(ins.Results[0]) || supportedHandle(ins.Results[0])) {
 			return nil
 		}
 		return diagnostic(fn, ins.Pos(), "return must have one supported value")

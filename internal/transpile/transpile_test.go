@@ -97,9 +97,11 @@ func TestRejectUnsupportedSSA(t *testing.T) {
 		name, source, want string
 	}{
 		{"remainder", "func f(x int64) int64 { return x % 2 }", "unsupported runtime operation %"},
-		{"parameter", "func f(x complex64) int64 { return 0 }", "parameter must have a supported scalar type"},
+		{"parameter", "func f(x complex64) int64 { return 0 }", "parameter must have a supported scalar or record type"},
 		{"result", "func f(x int64) complex64 { return 1 }", "expected a top-level function with one supported result"},
-		{"dynamic any", "func f(x any) int64 { return 0 }", "parameter must have a supported scalar type"},
+		{"dynamic any", "func f(x any) int64 { return 0 }", "parameter must have a supported scalar or record type"},
+		{"record mutation", "func f(x point) point { x.X = 1; return x }; type point struct { X int64 }", "local record must be fully initialized"},
+		{"record escape", "func f(x int64) int64 { p := point{X: x}; saved = &p; return p.X }; type point struct { X int64 }; var saved *point", "local record must be fully initialized"},
 		{"constrained generic", "func f[T interface{ M() }](x T) T { return x }", "must use the unrestricted any constraint"},
 		{"generic call", "func f(x int64) int64 { return id(x) }; func id[T any](x T) T { return x }", "calls to generic functions are unsupported"},
 		{"closure writes capture", "func f(x int64) int64 { add := func() int64 { x++; return x }; return add() }", "closure captures may only be read"},

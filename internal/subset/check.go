@@ -16,23 +16,33 @@ import (
 type Checked struct {
 	root      *ssa.Package
 	functions []*ssa.Function
+	records   map[*ssa.Alloc]RecordCell
 }
 
 func (c Checked) Root() *ssa.Package         { return c.root }
 func (c Checked) Functions() []*ssa.Function { return c.functions }
+
+func (c Checked) RecordCell(value ssa.Value) (RecordCell, bool) {
+	if cell, ok := value.(*ssa.Alloc); ok {
+		record, ok := c.records[cell]
+		return record, ok
+	}
+	return RecordCell{}, false
+}
 
 func Check(program gosource.Program) (Checked, error) {
 	c := checker{
 		visiting: make(map[*ssa.Function]bool),
 		done:     make(map[*ssa.Function]bool),
 		cells:    make(map[*ssa.Alloc]*ssa.Store),
+		records:  make(map[*ssa.Alloc]RecordCell),
 	}
 	for _, fn := range program.Roots {
 		if err := c.function(fn); err != nil {
 			return Checked{}, err
 		}
 	}
-	return Checked{root: program.Package, functions: c.ordered}, nil
+	return Checked{root: program.Package, functions: c.ordered, records: c.records}, nil
 }
 
 type checker struct {
@@ -40,6 +50,7 @@ type checker struct {
 	done     map[*ssa.Function]bool
 	ordered  []*ssa.Function
 	cells    map[*ssa.Alloc]*ssa.Store
+	records  map[*ssa.Alloc]RecordCell
 }
 
 func (c *checker) function(fn *ssa.Function) error {
@@ -69,14 +80,14 @@ func (c *checker) function(fn *ssa.Function) error {
 	}
 	for _, param := range fn.Params {
 		if Type(param.Type()) == "" {
-			return diagnostic(fn, param.Pos(), "parameter must have a supported scalar type")
+			return diagnostic(fn, param.Pos(), "parameter must have a supported scalar or record type")
 		}
 	}
 	c.visiting[fn] = true
 	if err := checkAcyclic(fn); err != nil {
 		return err
 	}
-	if err := c.checkCaptures(fn); err != nil {
+	if err := c.checkLocalMemory(fn); err != nil {
 		return err
 	}
 	for _, block := range fn.Blocks {
@@ -120,7 +131,7 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 	case *ssa.BinOp:
 		op, supported := Binary(ins.Op)
 		typ := Type(ins.X.Type())
-		if supported && scalar(ins.X) && hasType(ins.Y, typ) &&
+		if supported && supportedValue(ins.X) && hasType(ins.Y, typ) &&
 			(typ.IsInteger() ||
 				typ == ir.Bool && (ins.Op == token.EQL || ins.Op == token.NEQ) ||
 				(typ == ir.Bytes || typ == ir.Float32) && ins.Op == token.ADD ||
@@ -129,17 +140,17 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		}
 		return diagnostic(fn, ins.Pos(), "unsupported runtime operation %s on %s and %s", ins.Op, ins.X.Type(), ins.Y.Type())
 	case *ssa.UnOp:
-		if ins.Op == token.MUL && c.isCapture(ins.X) {
+		if ins.Op == token.MUL && (c.isCapture(ins.X) || c.isRecordAddress(ins.X)) {
 			return nil
 		}
-		if ins.Op == token.SUB && Type(ins.X.Type()).IsInteger() && scalar(ins.X) ||
+		if ins.Op == token.SUB && Type(ins.X.Type()).IsInteger() && supportedValue(ins.X) ||
 			ins.Op == token.NOT && hasType(ins.X, ir.Bool) {
 			return nil
 		}
 		return diagnostic(fn, ins.Pos(), "unsupported unary operation %s on %s", ins.Op, ins.X.Type())
 	case *ssa.Convert:
 		from, to := Type(ins.X.Type()), Type(ins.Type())
-		if from.IsWord() && to.IsWord() && scalar(ins.X) {
+		if from.IsWord() && to.IsWord() && supportedValue(ins.X) {
 			return nil
 		}
 		return diagnostic(fn, ins.Pos(), "unsupported conversion from %s to %s", ins.X.Type(), ins.Type())
@@ -168,8 +179,8 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 			return diagnostic(fn, ins.Pos(), "calls to generic functions are unsupported")
 		}
 		for _, arg := range ins.Call.Args {
-			if !scalar(arg) {
-				return diagnostic(fn, ins.Pos(), "call to %s requires supported scalar arguments", callee)
+			if !supportedValue(arg) {
+				return diagnostic(fn, ins.Pos(), "call to %s requires supported arguments", callee)
 			}
 		}
 		if err := c.function(callee); err != nil {
@@ -177,8 +188,18 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		}
 		return nil
 	case *ssa.Alloc, *ssa.Store, *ssa.MakeClosure:
-		// checkCaptures validates the lifetimes and uses of these instructions.
+		// checkLocalMemory validates the lifetimes and uses of these instructions.
 		return nil
+	case *ssa.FieldAddr:
+		if c.isRecordAddress(ins) {
+			return nil
+		}
+		return diagnostic(fn, ins.Pos(), "field address requires a fresh local record")
+	case *ssa.Field:
+		if Type(ins.X.Type()).IsRecord() && supportedValue(ins.X) {
+			return nil
+		}
+		return diagnostic(fn, ins.Pos(), "field selection requires a supported record value")
 	case *ssa.If:
 		if hasType(ins.Cond, ir.Bool) {
 			return nil
@@ -187,7 +208,7 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 	case *ssa.Phi:
 		typ := Type(ins.Type())
 		if typ == "" {
-			return diagnostic(fn, ins.Pos(), "control-flow joins require a supported scalar type")
+			return diagnostic(fn, ins.Pos(), "control-flow joins require a supported value type")
 		}
 		for _, edge := range ins.Edges {
 			if !hasType(edge, typ) {
@@ -196,10 +217,10 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		}
 		return nil
 	case *ssa.Return:
-		if len(ins.Results) == 1 && scalar(ins.Results[0]) {
+		if len(ins.Results) == 1 && supportedValue(ins.Results[0]) {
 			return nil
 		}
-		return diagnostic(fn, ins.Pos(), "return must have one supported scalar value")
+		return diagnostic(fn, ins.Pos(), "return must have one supported value")
 	case *ssa.Jump:
 		return nil
 	default:
@@ -213,10 +234,10 @@ func IsLength(call *ssa.Call) bool {
 }
 
 func hasType(value ssa.Value, want ir.Type) bool {
-	return Type(value.Type()) == want && scalar(value)
+	return Type(value.Type()) == want && supportedValue(value)
 }
 
-func scalar(value ssa.Value) bool {
+func supportedValue(value ssa.Value) bool {
 	typ := Type(value.Type())
 	if typ == "" {
 		return false
@@ -229,7 +250,7 @@ func scalar(value ssa.Value) bool {
 				typ == ir.Bytes && value.Value.Kind() == constant.String ||
 				(typ == ir.Float32 || typ == ir.Float64) &&
 					(value.Value.Kind() == constant.Float || value.Value.Kind() == constant.Int))
-	case *ssa.Parameter, *ssa.BinOp, *ssa.UnOp, *ssa.Call, *ssa.Phi, *ssa.Convert, *ssa.ChangeType:
+	case *ssa.Parameter, *ssa.BinOp, *ssa.UnOp, *ssa.Call, *ssa.Phi, *ssa.Convert, *ssa.ChangeType, *ssa.Field:
 		return true
 	default:
 		return false
@@ -242,6 +263,11 @@ func Type(t types.Type) ir.Type {
 		return ir.TypeParameter(param.Index())
 	}
 	if named, ok := t.(*types.Named); ok {
+		if fields, ok := named.Underlying().(*types.Struct); ok && supportedFields(fields) {
+			if obj := named.Obj(); obj.Pkg() != nil && obj.Parent() == obj.Pkg().Scope() && named.TypeParams().Len() == 0 {
+				return ir.RecordType(obj.Pkg().Path(), obj.Name())
+			}
+		}
 		if typ := Type(named.Underlying()); typ.IsInteger() {
 			return typ
 		}

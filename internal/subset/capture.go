@@ -33,9 +33,9 @@ func isClosureCall(call *ssa.Call, fn *ssa.Function) bool {
 	return ok && closure.Fn == fn
 }
 
-func (c *checker) checkCaptures(fn *ssa.Function) error {
+func (c *checker) checkLocalMemory(fn *ssa.Function) error {
 	for _, capture := range fn.FreeVars {
-		if CaptureType(capture.Type()) == "" {
+		if typ := CaptureType(capture.Type()); typ == "" || typ.IsRecord() {
 			return diagnostic(fn, capture.Pos(), "closure capture must be a supported immutable value")
 		}
 		for _, use := range *capture.Referrers() {
@@ -47,6 +47,14 @@ func (c *checker) checkCaptures(fn *ssa.Function) error {
 	for _, block := range fn.Blocks {
 		for _, ins := range block.Instrs {
 			if cell, ok := ins.(*ssa.Alloc); ok {
+				if CaptureType(cell.Type()).IsRecord() {
+					record, ok := recordInitializer(cell)
+					if !ok {
+						return diagnostic(fn, cell.Pos(), "local record must be fully initialized before reads and must not escape")
+					}
+					c.records[cell] = record
+					continue
+				}
 				initial := immutableInitializer(cell)
 				if initial == nil {
 					return diagnostic(fn, cell.Pos(), "unsupported local allocation or mutable capture")
@@ -59,6 +67,9 @@ func (c *checker) checkCaptures(fn *ssa.Function) error {
 		for _, ins := range block.Instrs {
 			switch ins := ins.(type) {
 			case *ssa.Store:
+				if c.isRecordAddress(ins.Addr) {
+					continue
+				}
 				cell, ok := ins.Addr.(*ssa.Alloc)
 				if !ok || c.cells[cell] != ins {
 					return diagnostic(fn, ins.Pos(), "unsupported store outside immutable capture initialization")

@@ -27,7 +27,7 @@ func TestExamplesMatchGeneratedOutput(t *testing.T) {
 		"arithmetic", "boolean_implication", "branch_join", "byte_rune", "clamp", "clampimport", "constant_conversions",
 		"division_guarded", "division_precondition", "division_propagation", "float32_rounding", "float64_special",
 		"generic_identity", "immutable_closure", "machine_words", "narrow_signed",
-		"string_bytes", "switch_tagless", "switch_value", "unsigned_wrap",
+		"string_bytes", "struct_fields", "switch_tagless", "switch_value", "unsigned_wrap",
 	} {
 		if !found[example+"_gen.lean"] {
 			t.Errorf("missing generated module for %s", example)

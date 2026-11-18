@@ -1,11 +1,25 @@
 // Package ir represents pure, typed expressions and returning control flow.
 package ir
 
-import "strconv"
+import (
+	"strconv"
+	"strings"
+)
 
 type Program struct {
 	Functions []Function
+	Records   map[Type]Record
 	WordBits  int64
+}
+
+type Record struct {
+	Symbol Symbol
+	Fields []Field
+}
+
+type Field struct {
+	Name string
+	Type Type
 }
 
 type Function struct {
@@ -61,6 +75,10 @@ func (t Type) IsWord() bool { return t == IntWord || t == UIntWord }
 
 func TypeParameter(index int) Type { return Type("α" + strconv.Itoa(index)) }
 
+func RecordType(pkg, name string) Type { return Type("struct:" + pkg + "." + name) }
+
+func (t Type) IsRecord() bool { return strings.HasPrefix(string(t), "struct:") }
+
 // Body introduces immutable bindings and ends in a return or a returning branch.
 type Body struct {
 	Bindings []Binding
@@ -102,6 +120,16 @@ type Negate struct{ Value Expr }
 type Not struct{ Value Expr }
 type ByteLen struct{ Value Expr }
 
+type RecordLiteral struct {
+	Type   Type
+	Values []Expr
+}
+
+type RecordField struct {
+	Value Expr
+	Name  string
+}
+
 type Convert struct {
 	Value Expr
 	To    Type
@@ -127,6 +155,8 @@ func (Ref) expr()            {}
 func (Negate) expr()         {}
 func (Not) expr()            {}
 func (ByteLen) expr()        {}
+func (RecordLiteral) expr()  {}
+func (RecordField) expr()    {}
 func (Convert) expr()        {}
 func (Binary) expr()         {}
 func (Call) expr()           {}

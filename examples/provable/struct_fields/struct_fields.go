@@ -1,5 +1,3 @@
-//go:build golean_planned
-
 package struct_fields
 
 type Point struct {

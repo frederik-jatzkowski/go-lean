@@ -15,12 +15,15 @@ import (
 )
 
 func FromSSA(checked subset.Checked, sourceStem string, wordBits int64) ir.Program {
-	var program ir.Program
+	program := ir.Program{Records: make(map[ir.Type]ir.Record)}
 	file := url.PathEscape(sourceStem)
 	// The checker orders callees before callers, so their effects are already known.
 	effects := make(map[*ssa.Function]bool)
 	for _, fn := range checked.Functions() {
-		l := lowerer{root: checked.Root(), file: file, bindings: make(map[ssa.Value]ir.Binder), effects: effects}
+		l := lowerer{
+			root: checked.Root(), file: file, bindings: make(map[ssa.Value]ir.Binder), effects: effects,
+			checked: checked, records: program.Records,
+		}
 		result := ir.Function{Symbol: l.symbol(fn), Result: l.valueType(fn.Signature.Results().At(0).Type())}
 		for i := 0; i < fn.Signature.TypeParams().Len(); i++ {
 			result.TypeParams = append(result.TypeParams, ir.TypeParameter(i))
@@ -50,6 +53,8 @@ type lowerer struct {
 	canPanic bool
 	next     int
 	usesWord bool
+	checked  subset.Checked
+	records  map[ir.Type]ir.Record
 }
 
 func (l *lowerer) symbol(fn *ssa.Function) ir.Symbol {
@@ -82,17 +87,23 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 			})
 			l.canPanic = l.canPanic || canPanic
 		case *ssa.UnOp:
-			operand := l.value(ins.X)
-			var value ir.Expr = ir.Negate{Value: operand}
+			var value ir.Expr
 			switch ins.Op {
 			case token.NOT:
-				value = ir.Not{Value: operand}
+				value = ir.Not{Value: l.value(ins.X)}
 			case token.MUL:
-				// Validated capture loads read a value already bound by the initializer.
-				value = operand
+				value = l.load(ins.X)
+			default:
+				value = ir.Negate{Value: l.value(ins.X)}
 			}
 			result.Bindings = append(result.Bindings, ir.Binding{
 				Binder: l.bind(ins), Value: value,
+			})
+		case *ssa.Field:
+			record := ins.X.Type().Underlying().(*types.Struct)
+			result.Bindings = append(result.Bindings, ir.Binding{
+				Binder: l.bind(ins),
+				Value:  ir.RecordField{Value: l.value(ins.X), Name: record.Field(ins.Field).Name()},
 			})
 		case *ssa.Call:
 			if subset.IsLength(ins) {
@@ -124,6 +135,12 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 		case *ssa.ChangeType:
 			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: l.value(ins.X)})
 		case *ssa.Store:
+			if _, ok := l.checked.RecordCell(ins.Addr); ok {
+				continue
+			}
+			if _, ok := ins.Addr.(*ssa.FieldAddr); ok {
+				continue
+			}
 			result.Bindings = append(result.Bindings, ir.Binding{
 				Binder: l.bindAs(ins.Addr, l.captureType(ins.Addr)), Value: l.value(ins.Val),
 			})
@@ -181,7 +198,42 @@ func (l *lowerer) binary(expr *ssa.BinOp) ir.Binary {
 func (l *lowerer) valueType(t types.Type) ir.Type {
 	typ := subset.Type(t)
 	l.usesWord = l.usesWord || typ.IsWord()
+	if typ.IsRecord() {
+		if _, exists := l.records[typ]; !exists {
+			named := types.Unalias(t).(*types.Named)
+			obj := named.Obj()
+			symbol := ir.Symbol{Package: l.root.Pkg.Path(), File: l.file, Name: obj.Name()}
+			if obj.Pkg() != l.root.Pkg {
+				symbol.Dependency = obj.Pkg().Path()
+			}
+			var fields []ir.Field
+			for field := range named.Underlying().(*types.Struct).Fields() {
+				fields = append(fields, ir.Field{Name: field.Name(), Type: l.valueType(field.Type())})
+			}
+			l.records[typ] = ir.Record{Symbol: symbol, Fields: fields}
+		}
+	}
 	return typ
+}
+
+func (l *lowerer) load(addr ssa.Value) ir.Expr {
+	if field, ok := addr.(*ssa.FieldAddr); ok {
+		record := field.X.Type().Underlying().(*types.Pointer).Elem().Underlying().(*types.Struct)
+		return ir.RecordField{Value: l.load(field.X), Name: record.Field(field.Field).Name()}
+	}
+	if cell, ok := l.checked.RecordCell(addr); ok {
+		if cell.Whole != nil {
+			return l.value(cell.Whole.Val)
+		}
+		typ := l.valueType(addr.Type().Underlying().(*types.Pointer).Elem())
+		value := ir.RecordLiteral{Type: typ}
+		for _, field := range cell.Fields {
+			value.Values = append(value.Values, l.value(field.Val))
+		}
+		return value
+	}
+	// Validated capture loads read a value already bound by the initializer.
+	return l.value(addr)
 }
 
 func (l *lowerer) captureType(value ssa.Value) ir.Type {

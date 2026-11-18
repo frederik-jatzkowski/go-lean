@@ -95,6 +95,8 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 			result.Bindings = append(result.Bindings, ir.Binding{
 				Binder: binder, Value: ir.Convert{Value: l.value(ins.X), To: binder.Type},
 			})
+		case *ssa.ChangeType:
+			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: l.value(ins.X)})
 		case *ssa.If:
 			result.Result = ir.If{
 				Condition: l.value(ins.Cond),

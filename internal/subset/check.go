@@ -123,6 +123,12 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 			return nil
 		}
 		return diagnostic(fn, ins.Pos(), "unsupported conversion from %s to %s", ins.X.Type(), ins.Type())
+	case *ssa.ChangeType:
+		to := Type(ins.Type())
+		if to.IsInteger() && hasType(ins.X, to) {
+			return nil
+		}
+		return diagnostic(fn, ins.Pos(), "unsupported type change from %s to %s", ins.X.Type(), ins.Type())
 	case *ssa.Call:
 		callee := ins.Call.StaticCallee()
 		if callee == nil {
@@ -178,7 +184,7 @@ func scalar(value ssa.Value) bool {
 		return value.Value != nil &&
 			(typ.IsInteger() && value.Value.Kind() == constant.Int ||
 				typ == ir.Bool && value.Value.Kind() == constant.Bool)
-	case *ssa.Parameter, *ssa.BinOp, *ssa.UnOp, *ssa.Call, *ssa.Phi, *ssa.Convert:
+	case *ssa.Parameter, *ssa.BinOp, *ssa.UnOp, *ssa.Call, *ssa.Phi, *ssa.Convert, *ssa.ChangeType:
 		return true
 	default:
 		return false
@@ -186,7 +192,14 @@ func scalar(value ssa.Value) bool {
 }
 
 func Type(t types.Type) ir.Type {
-	if basic, ok := types.Unalias(t).(*types.Basic); ok {
+	t = types.Unalias(t)
+	if named, ok := t.(*types.Named); ok {
+		if typ := Type(named.Underlying()); typ.IsInteger() {
+			return typ
+		}
+		return ""
+	}
+	if basic, ok := t.(*types.Basic); ok {
 		switch basic.Kind() {
 		case types.Int:
 			return ir.IntWord

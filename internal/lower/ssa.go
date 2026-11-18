@@ -159,6 +159,13 @@ type lowerer struct {
 
 func (l *lowerer) symbol(fn *ssa.Function) ir.Symbol {
 	symbol := ir.Symbol{Package: l.root.Pkg.Path(), File: l.file, Name: fn.Name()}
+	if recv := fn.Signature.Recv(); recv != nil {
+		typ := types.Unalias(recv.Type())
+		if pointer, ok := typ.(*types.Pointer); ok {
+			typ = types.Unalias(pointer.Elem())
+		}
+		symbol.Name = typ.(*types.Named).Obj().Name() + "$" + fn.Name()
+	}
 	pkg := fn.Pkg
 	if name, ok := l.instances[fn]; ok {
 		symbol.Name = name

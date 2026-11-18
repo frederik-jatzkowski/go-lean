@@ -92,6 +92,50 @@ func roundTrip(x int) int { return int(uint(x)) }
 	}
 }
 
+func TestConcreteMethods(t *testing.T) {
+	dir := newModule(t)
+	writeFile(t, filepath.Join(dir, "policy", "policy.go"), `package policy
+type Tier uint8
+func (t Tier) Limit() uint8 { return uint8(t) }
+`)
+	writeFile(t, filepath.Join(dir, "input.go"), `package sample
+import "example.test/sample/policy"
+type First uint8
+type Second struct{}
+//golean:verify
+func (f First) Limit() uint8 { return policy.Tier(f).Limit() }
+//golean:verify
+func (*Second) Limit() uint8 { return 25 }
+//golean:verify
+func Limit() uint8 { return First(1).Limit() + (*Second)(nil).Limit() }
+`)
+	outputs, err := transpile.Generate(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := outputs[0].Source
+	for _, want := range []string{
+		"«First$Limit»", "«Second$Limit»", "«example.test/sample/policy».«Tier$Limit»",
+		"«input».«Limit»", "«Second$Limit» none)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in output:\n%s", want, got)
+		}
+	}
+}
+
+func TestRejectReceiverMutation(t *testing.T) {
+	dir := newModule(t)
+	writeFile(t, filepath.Join(dir, "input.go"), `package sample
+type Record struct{ value int64 }
+//golean:verify
+func (r *Record) Set(x int64) int64 { r.value = x; return x }
+`)
+	if _, err := transpile.Generate(dir); err == nil {
+		t.Fatal("accepted a write through a pointer receiver")
+	}
+}
+
 func TestNestedRecordDefinitionOrder(t *testing.T) {
 	dir := newModule(t)
 	writeFile(t, filepath.Join(dir, "input.go"), `package sample
@@ -336,7 +380,7 @@ func TestRejectUnsupportedSSA(t *testing.T) {
 	}{
 		{"remainder", "func f(x int64) int64 { return x % 2 }", "unsupported runtime operation %"},
 		{"parameter", "func f(x complex64) int64 { return 0 }", "parameter must have a supported scalar or record type"},
-		{"result", "func f(x int64) complex64 { return 1 }", "expected a top-level function with one supported result"},
+		{"result", "func f(x int64) complex64 { return 1 }", "with one supported result"},
 		{"dynamic any", "func f(x any) int64 { return 0 }", "parameter must have a supported scalar or record type"},
 		{"record mutation", "func f(x point) point { x.X = 1; return x }; type point struct { X int64 }", "local record must be fully initialized"},
 		{"nested record mutation", "func f(x outer) outer { x.Inner.X = 1; return x }; type outer struct { Inner point }; type point struct { X int64 }", "local record must be fully initialized"},

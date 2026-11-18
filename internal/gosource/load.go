@@ -104,8 +104,8 @@ func selectRoots(pkg *packages.Package, file *ast.File) ([]*types.Func, error) {
 		if !ok || !marked(fn.Doc) {
 			continue
 		}
-		if fn.Recv != nil || fn.Name.Name == "_" || fn.Name.Name == "init" {
-			return nil, packages.Error{Pos: pkg.Fset.Position(fn.Pos()).String(), Msg: "verification requires a named top-level function"}
+		if fn.Name.Name == "_" || (fn.Recv == nil && fn.Name.Name == "init") {
+			return nil, packages.Error{Pos: pkg.Fset.Position(fn.Pos()).String(), Msg: "verification requires a named function or concrete method"}
 		}
 		roots = append(roots, pkg.TypesInfo.Defs[fn.Name].(*types.Func))
 	}

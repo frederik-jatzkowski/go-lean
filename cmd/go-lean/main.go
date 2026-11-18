@@ -12,7 +12,7 @@ import (
 func newCommand() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "go-lean",
-		Short:         "Translate pure Go int64 functions into Lean 4",
+		Short:         "Translate supported Go functions and methods into Lean 4",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}

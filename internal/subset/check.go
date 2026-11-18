@@ -102,9 +102,13 @@ func (c *checker) function(fn *ssa.Function) error {
 	}
 	sig := fn.Signature
 	instance := len(fn.TypeArgs()) != 0
-	if (!instance && (fn.Pkg == nil || fn.Synthetic != "")) || sig.Recv() != nil ||
+	if sig.RecvTypeParams().Len() != 0 ||
+		(sig.Recv() != nil && fn.Synthetic != "") {
+		return diagnostic(fn, fn.Pos(), "method must be a declared concrete method with a non-generic receiver")
+	}
+	if (!instance && (fn.Pkg == nil || fn.Synthetic != "")) ||
 		sig.Variadic() || sig.Results().Len() != 1 {
-		return diagnostic(fn, fn.Pos(), "expected a top-level function with one supported result and no variadic arguments")
+		return diagnostic(fn, fn.Pos(), "expected a function or concrete method with one supported result and no variadic arguments")
 	}
 	result := sig.Results().At(0).Type()
 	if isInterfaceValue(result) {
@@ -112,7 +116,7 @@ func (c *checker) function(fn *ssa.Function) error {
 			return err
 		}
 	} else if Type(result) == "" {
-		return diagnostic(fn, fn.Pos(), "expected a top-level function with one supported result and no variadic arguments")
+		return diagnostic(fn, fn.Pos(), "expected a function or concrete method with one supported result and no variadic arguments")
 	}
 	if Type(result).Pointee() != "" {
 		return diagnostic(fn, fn.Pos(), "record pointers may not escape as results")

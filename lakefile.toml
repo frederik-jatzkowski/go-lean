@@ -41,5 +41,6 @@ roots = [
   "struct_fields.struct_fields_gen", "struct_fields.struct_fields_proofs",
   "switch_tagless.switch_tagless_gen", "switch_tagless.switch_tagless_proofs",
   "switch_value.switch_value_gen", "switch_value.switch_value_proofs",
+  "territory_methods.territory_methods_gen", "territory_methods.territory_methods_proofs",
   "unsigned_wrap.unsigned_wrap_gen", "unsigned_wrap.unsigned_wrap_proofs",
 ]

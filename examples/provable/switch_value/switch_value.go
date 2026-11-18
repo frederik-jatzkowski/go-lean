@@ -1,5 +1,3 @@
-//go:build golean_planned
-
 package switch_value
 
 //golean:verify

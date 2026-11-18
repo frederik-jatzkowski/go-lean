@@ -63,6 +63,35 @@ func folded() int64 {
 	}
 }
 
+func TestMachineWordTargetWidth(t *testing.T) {
+	dir := newModule(t)
+	writeFile(t, filepath.Join(dir, "input.go"), `package sample
+//golean:verify
+func roundTrip(x int) int { return int(uint(x)) }
+`)
+	t.Setenv("GOOS", "linux")
+	for _, target := range []struct{ arch, width string }{{"386", "32"}, {"amd64", "64"}} {
+		t.Run(target.arch, func(t *testing.T) {
+			t.Setenv("GOARCH", target.arch)
+			outputs, err := transpile.Generate(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := outputs[0].Source
+			for _, want := range []string{
+				".GoTypes.Int := Int" + target.width,
+				".GoTypes.UInt := UInt" + target.width,
+				").toInt" + target.width,
+				").toUInt" + target.width,
+			} {
+				if !strings.Contains(got, want) {
+					t.Errorf("missing %q in output:\n%s", want, got)
+				}
+			}
+		})
+	}
+}
+
 func TestRejectUnsupportedSSA(t *testing.T) {
 	tests := []struct {
 		name, source, want string

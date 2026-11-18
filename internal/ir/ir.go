@@ -3,6 +3,7 @@ package ir
 
 type Program struct {
 	Functions []Function
+	WordBits  int64
 }
 
 type Function struct {
@@ -29,24 +30,28 @@ type Binder struct {
 type Type string
 
 const (
-	Int8   Type = "Int8"
-	Int16  Type = "Int16"
-	Int32  Type = "Int32"
-	Int64  Type = "Int64"
-	UInt8  Type = "UInt8"
-	UInt16 Type = "UInt16"
-	UInt32 Type = "UInt32"
-	UInt64 Type = "UInt64"
-	Bool   Type = "Bool"
+	Int8     Type = "Int8"
+	Int16    Type = "Int16"
+	Int32    Type = "Int32"
+	Int64    Type = "Int64"
+	UInt8    Type = "UInt8"
+	UInt16   Type = "UInt16"
+	UInt32   Type = "UInt32"
+	UInt64   Type = "UInt64"
+	IntWord  Type = "int"
+	UIntWord Type = "uint"
+	Bool     Type = "Bool"
 )
 
 func (t Type) IsInteger() bool {
-	return t == Int8 || t == Int16 || t == Int32 || t == Int64 || t.IsUnsigned()
+	return t == Int8 || t == Int16 || t == Int32 || t == Int64 || t == IntWord || t.IsUnsigned()
 }
 
 func (t Type) IsUnsigned() bool {
-	return t == UInt8 || t == UInt16 || t == UInt32 || t == UInt64
+	return t == UInt8 || t == UInt16 || t == UInt32 || t == UInt64 || t == UIntWord
 }
+
+func (t Type) IsWord() bool { return t == IntWord || t == UIntWord }
 
 // Body introduces immutable bindings and ends in a return or a returning branch.
 type Body struct {
@@ -85,6 +90,11 @@ type Ref Binder
 type Negate struct{ Value Expr }
 type Not struct{ Value Expr }
 
+type Convert struct {
+	Value Expr
+	To    Type
+}
+
 type Call struct {
 	Callee Symbol
 	Args   []Expr
@@ -101,6 +111,7 @@ func (BoolLiteral) expr() {}
 func (Ref) expr()         {}
 func (Negate) expr()      {}
 func (Not) expr()         {}
+func (Convert) expr()     {}
 func (Binary) expr()      {}
 func (Call) expr()        {}
 

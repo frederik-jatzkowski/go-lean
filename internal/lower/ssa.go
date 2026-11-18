@@ -4,6 +4,7 @@ package lower
 import (
 	"go/constant"
 	"go/token"
+	"go/types"
 	"net/url"
 	"slices"
 
@@ -12,18 +13,21 @@ import (
 	"golang.org/x/tools/go/ssa"
 )
 
-func FromSSA(checked subset.Checked, sourceStem string) ir.Program {
+func FromSSA(checked subset.Checked, sourceStem string, wordBits int64) ir.Program {
 	var program ir.Program
 	file := url.PathEscape(sourceStem)
 	// The checker orders callees before callers, so their effects are already known.
 	effects := make(map[*ssa.Function]bool)
 	for _, fn := range checked.Functions() {
 		l := lowerer{root: checked.Root(), file: file, bindings: make(map[ssa.Value]ir.Binder), effects: effects}
-		result := ir.Function{Symbol: l.symbol(fn), Result: subset.Type(fn.Signature.Results().At(0).Type())}
+		result := ir.Function{Symbol: l.symbol(fn), Result: l.valueType(fn.Signature.Results().At(0).Type())}
 		for _, param := range fn.Params {
 			result.Params = append(result.Params, l.bind(param))
 		}
 		result.Body = l.body(fn.Blocks[0], nil)
+		if l.usesWord {
+			program.WordBits = wordBits
+		}
 		result.CanPanic = l.canPanic
 		effects[fn] = result.CanPanic
 		program.Functions = append(program.Functions, result)
@@ -38,6 +42,7 @@ type lowerer struct {
 	effects  map[*ssa.Function]bool
 	canPanic bool
 	next     int
+	usesWord bool
 }
 
 func (l *lowerer) symbol(fn *ssa.Function) ir.Symbol {
@@ -49,7 +54,7 @@ func (l *lowerer) symbol(fn *ssa.Function) ir.Symbol {
 }
 
 func (l *lowerer) bind(value ssa.Value) ir.Binder {
-	binder := ir.Binder{Name: value.Name(), Index: l.next, Type: subset.Type(value.Type())}
+	binder := ir.Binder{Name: value.Name(), Index: l.next, Type: l.valueType(value.Type())}
 	l.next++
 	l.bindings[value] = binder
 	return binder
@@ -85,6 +90,11 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 				Binder: l.bind(ins), Value: call, CanPanic: canPanic,
 			})
 			l.canPanic = l.canPanic || canPanic
+		case *ssa.Convert:
+			binder := l.bind(ins)
+			result.Bindings = append(result.Bindings, ir.Binding{
+				Binder: binder, Value: ir.Convert{Value: l.value(ins.X), To: binder.Type},
+			})
 		case *ssa.If:
 			result.Result = ir.If{
 				Condition: l.value(ins.Cond),
@@ -111,7 +121,7 @@ func (l *lowerer) value(value ssa.Value) ir.Expr {
 		if c.Value.Kind() == constant.Bool {
 			return ir.BoolLiteral(constant.BoolVal(c.Value))
 		}
-		return ir.IntLiteral{Value: c.Value.ExactString(), Type: subset.Type(c.Type())}
+		return ir.IntLiteral{Value: c.Value.ExactString(), Type: l.valueType(c.Type())}
 	}
 	if binder, ok := l.bindings[value]; ok {
 		return ir.Ref(binder)
@@ -121,5 +131,11 @@ func (l *lowerer) value(value ssa.Value) ir.Expr {
 
 func (l *lowerer) binary(expr *ssa.BinOp) ir.Binary {
 	op, _ := subset.Binary(expr.Op)
-	return ir.Binary{Op: op, Left: l.value(expr.X), Right: l.value(expr.Y), OperandType: subset.Type(expr.X.Type())}
+	return ir.Binary{Op: op, Left: l.value(expr.X), Right: l.value(expr.Y), OperandType: l.valueType(expr.X.Type())}
+}
+
+func (l *lowerer) valueType(t types.Type) ir.Type {
+	typ := subset.Type(t)
+	l.usesWord = l.usesWord || typ.IsWord()
+	return typ
 }

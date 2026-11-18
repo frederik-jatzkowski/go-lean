@@ -1,5 +1,3 @@
-//go:build golean_planned
-
 package machine_words
 
 //golean:verify

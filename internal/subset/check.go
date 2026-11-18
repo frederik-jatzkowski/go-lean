@@ -117,6 +117,12 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 			return nil
 		}
 		return diagnostic(fn, ins.Pos(), "unsupported unary operation %s on %s", ins.Op, ins.X.Type())
+	case *ssa.Convert:
+		from, to := Type(ins.X.Type()), Type(ins.Type())
+		if from.IsWord() && to.IsWord() && scalar(ins.X) {
+			return nil
+		}
+		return diagnostic(fn, ins.Pos(), "unsupported conversion from %s to %s", ins.X.Type(), ins.Type())
 	case *ssa.Call:
 		callee := ins.Call.StaticCallee()
 		if callee == nil {
@@ -172,7 +178,7 @@ func scalar(value ssa.Value) bool {
 		return value.Value != nil &&
 			(typ.IsInteger() && value.Value.Kind() == constant.Int ||
 				typ == ir.Bool && value.Value.Kind() == constant.Bool)
-	case *ssa.Parameter, *ssa.BinOp, *ssa.UnOp, *ssa.Call, *ssa.Phi:
+	case *ssa.Parameter, *ssa.BinOp, *ssa.UnOp, *ssa.Call, *ssa.Phi, *ssa.Convert:
 		return true
 	default:
 		return false
@@ -182,6 +188,10 @@ func scalar(value ssa.Value) bool {
 func Type(t types.Type) ir.Type {
 	if basic, ok := types.Unalias(t).(*types.Basic); ok {
 		switch basic.Kind() {
+		case types.Int:
+			return ir.IntWord
+		case types.Uint:
+			return ir.UIntWord
 		case types.Int8:
 			return ir.Int8
 		case types.Int16:

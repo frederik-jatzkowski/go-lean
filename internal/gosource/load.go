@@ -16,9 +16,10 @@ import (
 )
 
 type Program struct {
-	Path    string
-	Package *ssa.Package
-	Roots   []*ssa.Function
+	Path     string
+	Package  *ssa.Package
+	Roots    []*ssa.Function
+	WordBits int64
 }
 
 type selectedFile struct {
@@ -77,7 +78,10 @@ func Load(dir string) ([]Program, error) {
 	prog.Build()
 	programs := make([]Program, 0, len(selected))
 	for _, file := range selected {
-		result := Program{Path: filepath.Clean(file.path), Package: prog.Package(file.pkg.Types)}
+		result := Program{
+			Path: filepath.Clean(file.path), Package: prog.Package(file.pkg.Types),
+			WordBits: 8 * file.pkg.TypesSizes.Sizeof(types.Typ[types.Int]),
+		}
 		for _, root := range file.roots {
 			fn := prog.FuncValue(root)
 			if fn == nil {

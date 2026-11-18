@@ -149,12 +149,13 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		}
 		return diagnostic(fn, ins.Cond.Pos(), "branch condition must be a supported bool value")
 	case *ssa.Phi:
-		if Type(ins.Type()) != ir.Bool {
-			return diagnostic(fn, ins.Pos(), "control-flow joins with non-bool values are unsupported")
+		typ := Type(ins.Type())
+		if typ == "" {
+			return diagnostic(fn, ins.Pos(), "control-flow joins require a supported scalar type")
 		}
 		for _, edge := range ins.Edges {
-			if !hasType(edge, ir.Bool) {
-				return diagnostic(fn, ins.Pos(), "control-flow joins require supported bool values")
+			if !hasType(edge, typ) {
+				return diagnostic(fn, ins.Pos(), "control-flow joins require matching supported values")
 			}
 		}
 		return nil

@@ -38,13 +38,53 @@ Keep goroutine orchestration outside the initial pure subset. A future extension
 
 Add `int64` division with an explicit `Option Int64` result for functions that use it. Use `none` for runtime division by zero and preserve truncation toward zero and the `MinInt64 / -1` wraparound case. Add a guarded-division example with a Lean theorem showing that the guard prevents a division panic, plus regression tests for zero divisors, negative operands, and the signed boundary. This establishes the panic model on the existing scalar types before it is reused for indexing and dereferences.
 
+## Example index
+
+`examples/provable/` contains 32 examples. The default build regenerates and checks `arithmetic`, `clamp`, and `clampimport`. The other 29 have valid Go source behind the `golean_planned` build tag and draft Lean theorem statements with unfinished proofs. Lake builds the three working examples.
+
+| Area | Pending examples |
+| --- | --- |
+| Scalars and constants | `boolean_implication`, `narrow_signed`, `unsigned_wrap`, `machine_words`, `byte_rune`, `string_bytes`, `float32_rounding`, `float64_special`, `constant_conversions` |
+| Division and panic freedom | `division_guarded`, `division_precondition`, `division_propagation` |
+| Aggregates and references | `array_bounds`, `slice_bounds`, `slice_copy`, `map_lookup`, `map_build`, `struct_fields`, `embedded_struct`, `acyclic_list`, `nil_dereference` |
+| Control flow and termination | `branch_join`, `switch_value`, `switch_tagless`, `bounded_counter`, `range_fold` |
+| Generics and functions | `generic_identity`, `generic_map`, `immutable_closure` |
+
+`examples/reject/` contains 16 draft fixtures behind the `golean_reject` build tag. The table records the intended rejection reasons for future tests.
+
+| Fixture | Intended rejection reason |
+| --- | --- |
+| `global_read` | Reads mutable package state |
+| `global_write` | Modifies mutable package state |
+| `slice_mutation` | Writes through a caller-owned slice |
+| `map_mutation` | Writes through a caller-owned map |
+| `escaping_alias` | Returns multiple aliases to caller-owned mutable storage |
+| `interface_dispatch` | Calls an open-ended interface method |
+| `type_assertion` | Inspects the runtime type of an unrestricted interface value |
+| `unsafe_pointer` | Exposes a raw memory address |
+| `reflection` | Uses runtime reflection |
+| `init_function` | Attempts to verify a Go initialization hook |
+| `deferred_effect` | Mutates package state on return through `defer` |
+| `recover_panic` | Intercepts a panic using `recover` |
+| `io_read` | Reads from standard input |
+| `nondeterministic_time` | Reads the system clock |
+| `unbounded_loop` | Can run indefinitely on odd inputs |
+| `goroutine` | Spawns a goroutine and communicates through a channel |
+
+To check that the draft sources compile as Go:
+
+```sh
+go test -tags=golean_planned ./examples/provable/...
+go test -tags=golean_reject ./examples/reject/...
+```
+
 ## Run the examples
 
 Use Go 1.27, Lean 4.36.0, and GNU Make. The [Lean installation guide](https://lean-lang.org/install/manual/) covers Elan, which reads the repository's `lean-toolchain` file. Once Elan is installed, open the repository root in VSCodium with the Lean 4 extension and open an example's `*_proofs.lean` file.
 
 Put theorems in `<example>_proofs.lean` beside the Go source. The proof file imports `<example>_gen.lean`. For example, `clamp_proofs.lean` uses `import clamp.clamp_gen`.
 
-Generated definitions use a namespace based on the Go import path and source filename. Open the relevant namespace in the proof file, such as `GoLean.«github.com/frederik-jatzkowski/go-lean/examples/clamp».clamp`.
+Generated definitions use a namespace based on the Go import path and source filename. Open the relevant namespace in the proof file, such as `GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clamp».clamp`.
 
 From the repository root, run `make generate` after editing the Go examples, then `make check`. The Go tests compare the checked-in definitions with current transpiler output.
 

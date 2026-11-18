@@ -4,7 +4,7 @@ moreLeanArgs = ["-DwarningAsError=true"]
 
 [[lean_lib]]
 name = "ExampleProofs"
-srcDir = "examples"
+srcDir = "examples/provable"
 roots = [
   "arithmetic.arithmetic_gen", "arithmetic.arithmetic_proofs",
   "clamp.clamp_gen", "clamp.clamp_proofs",

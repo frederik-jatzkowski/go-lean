@@ -28,6 +28,7 @@ roots = [
   "nil_dereference.nil_dereference_gen", "nil_dereference.nil_dereference_proofs",
   "range_fold.range_fold_gen", "range_fold.range_fold_proofs",
   "slice_bounds.slice_bounds_gen", "slice_bounds.slice_bounds_proofs",
+  "slice_copy.slice_copy_gen", "slice_copy.slice_copy_proofs",
   "string_bytes.string_bytes_gen", "string_bytes.string_bytes_proofs",
   "struct_fields.struct_fields_gen", "struct_fields.struct_fields_proofs",
   "switch_tagless.switch_tagless_gen", "switch_tagless.switch_tagless_proofs",

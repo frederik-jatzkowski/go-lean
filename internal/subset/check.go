@@ -20,6 +20,7 @@ type Checked struct {
 	arrays    map[*ssa.Alloc]*ssa.Store
 	loops     map[*ssa.Function]*CountedLoop
 	ranges    map[*ssa.Function]*RangeFold
+	builds    map[*ssa.Function]*SliceBuild
 }
 
 func (c Checked) Root() *ssa.Package         { return c.root }
@@ -28,6 +29,8 @@ func (c Checked) Functions() []*ssa.Function { return c.functions }
 func (c Checked) CountedLoop(fn *ssa.Function) *CountedLoop { return c.loops[fn] }
 
 func (c Checked) RangeFold(fn *ssa.Function) *RangeFold { return c.ranges[fn] }
+
+func (c Checked) SliceBuild(fn *ssa.Function) *SliceBuild { return c.builds[fn] }
 
 func (c Checked) ArrayInitializer(value ssa.Value) *ssa.Store {
 	cell, _ := value.(*ssa.Alloc)
@@ -51,6 +54,7 @@ func Check(program gosource.Program) (Checked, error) {
 		arrays:   make(map[*ssa.Alloc]*ssa.Store),
 		loops:    make(map[*ssa.Function]*CountedLoop),
 		ranges:   make(map[*ssa.Function]*RangeFold),
+		builds:   make(map[*ssa.Function]*SliceBuild),
 	}
 	for _, fn := range program.Roots {
 		if err := c.function(fn); err != nil {
@@ -58,7 +62,8 @@ func Check(program gosource.Program) (Checked, error) {
 		}
 	}
 	return Checked{
-		root: program.Package, functions: c.ordered, records: c.records, arrays: c.arrays, loops: c.loops, ranges: c.ranges,
+		root: program.Package, functions: c.ordered, records: c.records, arrays: c.arrays, loops: c.loops,
+		ranges: c.ranges, builds: c.builds,
 	}, nil
 }
 
@@ -71,6 +76,7 @@ type checker struct {
 	arrays   map[*ssa.Alloc]*ssa.Store
 	loops    map[*ssa.Function]*CountedLoop
 	ranges   map[*ssa.Function]*RangeFold
+	builds   map[*ssa.Function]*SliceBuild
 }
 
 func (c *checker) function(fn *ssa.Function) error {
@@ -92,9 +98,6 @@ func (c *checker) function(fn *ssa.Function) error {
 	if Type(sig.Results().At(0).Type()).Pointee() != "" {
 		return diagnostic(fn, fn.Pos(), "record pointers may not escape as results")
 	}
-	if Type(sig.Results().At(0).Type()).SliceElem() != "" {
-		return diagnostic(fn, fn.Pos(), "slice results are unsupported")
-	}
 	if parent := fn.Parent(); parent != nil && parent.TypeParams().Len() != 0 {
 		return diagnostic(fn, fn.Pos(), "closures in generic functions are unsupported")
 	}
@@ -110,17 +113,34 @@ func (c *checker) function(fn *ssa.Function) error {
 		}
 	}
 	c.visiting[fn] = true
-	if loop := checkCountedLoop(fn); loop != nil {
-		c.loops[fn] = loop
-	} else if fold := checkRangeFold(fn); fold != nil {
-		c.ranges[fn] = fold
-	} else if err := c.checkOrdinaryBody(fn); err != nil {
+	if err := c.checkBody(fn); err != nil {
 		return err
 	}
 	delete(c.visiting, fn)
 	c.done[fn] = true
 	c.ordered = append(c.ordered, fn)
 	return nil
+}
+
+func (c *checker) checkBody(fn *ssa.Function) error {
+	if Type(fn.Signature.Results().At(0).Type()).SliceElem() != "" {
+		if blocks, ok := matchLoopBlocks(fn); ok {
+			if build := checkSliceBuild(blocks); build != nil {
+				c.builds[fn] = build
+				return nil
+			}
+		}
+		return diagnostic(fn, fn.Pos(), "slice results require a validated fresh construction")
+	}
+	if loop := checkCountedLoop(fn); loop != nil {
+		c.loops[fn] = loop
+		return nil
+	}
+	if fold := checkRangeFold(fn); fold != nil {
+		c.ranges[fn] = fold
+		return nil
+	}
+	return c.checkOrdinaryBody(fn)
 }
 
 func (c *checker) checkOrdinaryBody(fn *ssa.Function) error {

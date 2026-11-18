@@ -178,6 +178,29 @@ func accumulate(input []int64, seed, scale int64) int64 {
 	}
 }
 
+func TestFreshSliceBuildPreservesElementUpdate(t *testing.T) {
+	dir := newModule(t)
+	writeFile(t, filepath.Join(dir, "input.go"), `package sample
+//golean:verify
+func double(xs []int64) []int64 {
+	result := make([]int64, len(xs))
+	for i, value := range xs {
+		result[i] = 2 * value
+	}
+	return result
+}
+`)
+	outputs, err := transpile.Generate(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"return List.map (fun", "Int64.ofInt (2)", " * "} {
+		if !strings.Contains(outputs[0].Source, want) {
+			t.Errorf("missing %q in output:\n%s", want, outputs[0].Source)
+		}
+	}
+}
+
 func TestRejectUnsupportedSSA(t *testing.T) {
 	tests := []struct {
 		name, source, want string
@@ -195,7 +218,10 @@ func TestRejectUnsupportedSSA(t *testing.T) {
 		{"caller slice mutation", "func f(xs []int64) int64 { xs[0] = 1; return xs[0] }", "element addresses may only be read"},
 		{"array mutation", "func f(xs [4]int64) int64 { xs[0] = 1; return xs[0] }", "element addresses may only be read"},
 		{"array escape", "func f(xs [4]int64) int64 { saved = &xs; return xs[0] }; var saved *[4]int64", "local array must be an initialized copy that does not escape"},
-		{"caller slice escape", "func f(xs []int64) []int64 { return xs }", "slice results are unsupported"},
+		{"caller slice escape", "func f(xs []int64) []int64 { return xs }", "slice results require a validated fresh construction"},
+		{"different slice length", "func f(xs []int64) []int64 { dst := make([]int64, len(xs)+1); for i, v := range xs { dst[i] = v }; return dst }", "slice results require a validated fresh construction"},
+		{"wrong slice write index", "func f(xs []int64) []int64 { dst := make([]int64, len(xs)); for _, v := range xs { dst[0] = v }; return dst }", "slice results require a validated fresh construction"},
+		{"fresh slice escapes before return", "func f(xs []int64) []int64 { dst := make([]int64, len(xs)); save = dst; for i, v := range xs { dst[i] = v }; return dst }; var save []int64", "slice results require a validated fresh construction"},
 		{"constrained generic", "func f[T interface{ M() }](x T) T { return x }", "must use the unrestricted any constraint"},
 		{"generic call", "func f(x int64) int64 { return id(x) }; func id[T any](x T) T { return x }", "calls to generic functions are unsupported"},
 		{"closure writes capture", "func f(x int64) int64 { add := func() int64 { x++; return x }; return add() }", "closure captures may only be read"},

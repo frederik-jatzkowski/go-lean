@@ -151,9 +151,17 @@ type ListFold struct {
 	Next     Expr
 }
 
-func (Return) result()   {}
-func (If) result()       {}
-func (ListFold) result() {}
+type ListBuild struct {
+	Sequence Expr
+	Element  Binder
+	Steps    []Binding
+	Next     Expr
+}
+
+func (Return) result()    {}
+func (If) result()        {}
+func (ListFold) result()  {}
+func (ListBuild) result() {}
 
 type Expr interface{ expr() }
 

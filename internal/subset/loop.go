@@ -29,8 +29,16 @@ type RangeFold struct {
 
 type loopBlocks struct {
 	entry, header, body *ssa.BasicBlock
-	state               *ssa.Phi
+	result              ssa.Value
 	incoming, back      int
+}
+
+type rangeIteration struct {
+	Source  ssa.Value
+	Index   *ssa.BinOp
+	Element *ssa.UnOp
+	Counter *ssa.Phi
+	Length  *ssa.Call
 }
 
 // checkCountedLoop recognizes a zero-based uint8 counter that advances by one
@@ -58,7 +66,7 @@ func checkCountedLoop(fn *ssa.Function) *CountedLoop {
 		!invariant(state.Edges[incoming], ir.Int64) {
 		return nil
 	}
-	if blocks.state != state {
+	if blocks.result != state {
 		return nil
 	}
 	last := len(body.Instrs) - 1
@@ -71,7 +79,7 @@ func checkCountedLoop(fn *ssa.Function) *CountedLoop {
 		Bound: cond.Y, AccumulatorLoop: AccumulatorLoop{Initial: state.Edges[incoming], State: state, Next: state.Edges[back]},
 	}
 	available := map[ssa.Value]bool{state: true}
-	steps, ok := accumulatorSteps(body.Instrs[:last], step, available)
+	steps, ok := pureInt64Steps(body.Instrs[:last], step, available)
 	if !ok || !loopValue(loop.Next, available) {
 		return nil
 	}
@@ -79,61 +87,76 @@ func checkCountedLoop(fn *ssa.Function) *CountedLoop {
 	return loop
 }
 
-// checkRangeFold recognizes the SSA of an index-and-value range over a slice.
-// The counter starts at -1 and is incremented in the header before checking
-// against the length of the same slice. A Go slice length fits in an int, so
-// the counter reaches that length without overflowing.
 func checkRangeFold(fn *ssa.Function) *RangeFold {
 	blocks, ok := matchLoopBlocks(fn)
-	if !ok || len(blocks.entry.Instrs) != 2 || len(blocks.header.Instrs) != 5 || len(blocks.body.Instrs) < 3 {
+	if !ok || len(blocks.entry.Instrs) != 2 {
 		return nil
 	}
-	length, ok := blocks.entry.Instrs[0].(*ssa.Call)
-	if !ok || !IsLength(length) || len(length.Call.Args) != 1 {
+	iter := matchRangeIteration(blocks, 2)
+	if iter == nil || iter.Length != blocks.entry.Instrs[0] || Type(iter.Source.Type()) != ir.SliceType(ir.Int64) {
 		return nil
 	}
-	source := length.Call.Args[0]
-	if !invariant(source, ir.SliceType(ir.Int64)) {
+	state, ok := blocks.result.(*ssa.Phi)
+	if !ok || state == iter.Counter || state.Block() != blocks.header || Type(state.Type()) != ir.Int64 ||
+		!invariant(state.Edges[blocks.incoming], ir.Int64) {
 		return nil
 	}
-	header, body, incoming, back := blocks.header, blocks.body, blocks.incoming, blocks.back
-	first, firstOK := header.Instrs[0].(*ssa.Phi)
-	second, secondOK := header.Instrs[1].(*ssa.Phi)
-	step, stepOK := header.Instrs[2].(*ssa.BinOp)
-	cond, condOK := header.Instrs[3].(*ssa.BinOp)
-	branch, branchOK := header.Instrs[4].(*ssa.If)
-	if !firstOK || !secondOK || !stepOK || !condOK || !branchOK ||
-		step.Op != token.ADD || !intConstant(step.Y, 1) ||
-		cond.Op != token.LSS || cond.X != step || cond.Y != length || branch.Cond != cond {
-		return nil
-	}
-	counter, state := first, second
-	if step.X == second {
-		counter, state = second, first
-	}
-	if step.X != counter || Type(counter.Type()) != ir.IntWord ||
-		!intConstant(counter.Edges[incoming], -1) || counter.Edges[back] != step ||
-		blocks.state != state || Type(state.Type()) != ir.Int64 || !invariant(state.Edges[incoming], ir.Int64) {
-		return nil
-	}
-	addr, addrOK := body.Instrs[0].(*ssa.IndexAddr)
-	elem, elemOK := body.Instrs[1].(*ssa.UnOp)
-	if !addrOK || !elemOK || addr.X != source || addr.Index != step || elem.Op != token.MUL || elem.X != addr {
-		return nil
-	}
-	available := map[ssa.Value]bool{state: true, elem: true}
-	steps, ok := accumulatorSteps(body.Instrs[2:len(body.Instrs)-1], nil, available)
-	next := state.Edges[back]
+	available := map[ssa.Value]bool{state: true, iter.Element: true}
+	body := blocks.body.Instrs
+	steps, ok := pureInt64Steps(body[2:len(body)-1], nil, available)
+	next := state.Edges[blocks.back]
 	if !ok || !loopValue(next, available) {
 		return nil
 	}
 	return &RangeFold{
-		Source: source, Element: elem,
-		AccumulatorLoop: AccumulatorLoop{Initial: state.Edges[incoming], State: state, Steps: steps, Next: next},
+		Source: iter.Source, Element: iter.Element,
+		AccumulatorLoop: AccumulatorLoop{Initial: state.Edges[blocks.incoming], State: state, Steps: steps, Next: next},
 	}
 }
 
-func accumulatorSteps(instructions []ssa.Instruction, skip ssa.Instruction, available map[ssa.Value]bool) ([]ssa.Value, bool) {
+// matchRangeIteration verifies that the counter starts at -1, advances once
+// per iteration, and indexes the same slice whose length bounds the loop.
+// A Go slice's length fits in an int, so the counter cannot wrap.
+func matchRangeIteration(blocks loopBlocks, phiCount int) *rangeIteration {
+	header, body := blocks.header.Instrs, blocks.body.Instrs
+	if len(header) != phiCount+3 || len(body) < 3 {
+		return nil
+	}
+	for _, ins := range header[:phiCount] {
+		if _, ok := ins.(*ssa.Phi); !ok {
+			return nil
+		}
+	}
+	step, stepOK := header[phiCount].(*ssa.BinOp)
+	cond, condOK := header[phiCount+1].(*ssa.BinOp)
+	branch, branchOK := header[phiCount+2].(*ssa.If)
+	if !stepOK || !condOK || !branchOK || step.Op != token.ADD || !intConstant(step.Y, 1) ||
+		cond.Op != token.LSS || cond.X != step || branch.Cond != cond {
+		return nil
+	}
+	length, ok := cond.Y.(*ssa.Call)
+	if !ok || length.Block() != blocks.entry || !IsLength(length) || len(length.Call.Args) != 1 {
+		return nil
+	}
+	source := length.Call.Args[0]
+	typ := Type(source.Type())
+	if typ.SliceElem() == "" || !invariant(source, typ) {
+		return nil
+	}
+	counter, ok := step.X.(*ssa.Phi)
+	if !ok || counter.Block() != blocks.header || Type(counter.Type()) != ir.IntWord ||
+		!intConstant(counter.Edges[blocks.incoming], -1) || counter.Edges[blocks.back] != step {
+		return nil
+	}
+	addr, addrOK := body[0].(*ssa.IndexAddr)
+	elem, elemOK := body[1].(*ssa.UnOp)
+	if !addrOK || !elemOK || addr.X != source || addr.Index != step || elem.Op != token.MUL || elem.X != addr {
+		return nil
+	}
+	return &rangeIteration{Source: source, Index: step, Element: elem, Counter: counter, Length: length}
+}
+
+func pureInt64Steps(instructions []ssa.Instruction, skip ssa.Instruction, available map[ssa.Value]bool) ([]ssa.Value, bool) {
 	var steps []ssa.Value
 	for _, ins := range instructions {
 		if ins == skip {
@@ -161,8 +184,7 @@ func accumulatorSteps(instructions []ssa.Instruction, skip ssa.Instruction, avai
 }
 
 func matchLoopBlocks(fn *ssa.Function) (loopBlocks, bool) {
-	if len(fn.Blocks) != 4 || fn.Parent() != nil || fn.Signature.TypeParams().Len() != 0 ||
-		Type(fn.Signature.Results().At(0).Type()) != ir.Int64 {
+	if len(fn.Blocks) != 4 || fn.Parent() != nil || fn.Signature.TypeParams().Len() != 0 {
 		return loopBlocks{}, false
 	}
 	entry := fn.Blocks[0]
@@ -186,8 +208,7 @@ func matchLoopBlocks(fn *ssa.Function) (loopBlocks, bool) {
 	if !ok || len(ret.Results) != 1 || incoming < 0 || back < 0 {
 		return loopBlocks{}, false
 	}
-	state, ok := ret.Results[0].(*ssa.Phi)
-	return loopBlocks{entry: entry, header: header, body: body, state: state, incoming: incoming, back: back}, ok
+	return loopBlocks{entry: entry, header: header, body: body, result: ret.Results[0], incoming: incoming, back: back}, true
 }
 
 func loopValue(value ssa.Value, available map[ssa.Value]bool) bool {

@@ -1,5 +1,3 @@
-//go:build golean_planned
-
 package slice_copy
 
 //golean:verify

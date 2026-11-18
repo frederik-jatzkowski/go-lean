@@ -140,6 +140,12 @@ func (r renderer) renderBody(out *strings.Builder, body ir.Body, indent string, 
 		r.renderBindings(out, result.Steps, indent+"  ")
 		fmt.Fprintf(out, "%s%s) %s %s\n",
 			indent+"  ", r.renderExpr(result.Next), r.renderExpr(result.Initial), r.renderExpr(result.Sequence))
+	case ir.ListBuild:
+		fmt.Fprintf(out, "%sreturn List.map (fun", indent)
+		r.renderParams(out, []ir.Binder{result.Element})
+		out.WriteString(" =>\n")
+		r.renderBindings(out, result.Steps, indent+"  ")
+		fmt.Fprintf(out, "%s%s) %s\n", indent+"  ", r.renderExpr(result.Next), r.renderExpr(result.Sequence))
 	default:
 		panic("unexpected IR result")
 	}

@@ -38,6 +38,8 @@ func FromSSA(checked subset.Checked, sourceStem string, wordBits int64) ir.Progr
 			l.lowerCountedLoop(&result, loop)
 		} else if fold := checked.RangeFold(fn); fold != nil {
 			result.Body.Result = l.lowerRangeFold(fold)
+		} else if build := checked.SliceBuild(fn); build != nil {
+			result.Body.Result = l.lowerSliceBuild(build)
 		} else {
 			result.Body = l.body(fn.Blocks[0], nil)
 		}
@@ -61,7 +63,7 @@ func (l *lowerer) lowerCountedLoop(fn *ir.Function, loop *subset.CountedLoop) {
 			call.Args = append(call.Args, ir.Ref(param))
 		}
 	}
-	helper.Steps = l.accumulatorSteps(loop.Steps)
+	helper.Steps = l.lowerLoopSteps(loop.Steps)
 	helper.Next = l.value(loop.Next)
 	call.Args = append(call.Args, ir.ToNat{Value: l.value(loop.Bound)}, l.value(loop.Initial))
 	fn.Body.Result = ir.Return{Value: call}
@@ -73,12 +75,20 @@ func (l *lowerer) lowerRangeFold(fold *subset.RangeFold) ir.ListFold {
 		Sequence: l.value(fold.Source), Initial: l.value(fold.Initial),
 		State: l.bind(fold.State), Element: l.bind(fold.Element),
 	}
-	result.Steps = l.accumulatorSteps(fold.Steps)
+	result.Steps = l.lowerLoopSteps(fold.Steps)
 	result.Next = l.value(fold.Next)
 	return result
 }
 
-func (l *lowerer) accumulatorSteps(values []ssa.Value) []ir.Binding {
+func (l *lowerer) lowerSliceBuild(build *subset.SliceBuild) ir.ListBuild {
+	l.canPanic = true // Keep the checked construction in the panic-result model.
+	result := ir.ListBuild{Sequence: l.value(build.Source), Element: l.bind(build.Element)}
+	result.Steps = l.lowerLoopSteps(build.Steps)
+	result.Next = l.value(build.Value)
+	return result
+}
+
+func (l *lowerer) lowerLoopSteps(values []ssa.Value) []ir.Binding {
 	var steps []ir.Binding
 	for _, step := range values {
 		var expr ir.Expr

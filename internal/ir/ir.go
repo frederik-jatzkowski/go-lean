@@ -43,6 +43,7 @@ const (
 	Bool     Type = "Bool"
 	Bytes    Type = "ByteArray"
 	Float32  Type = "Float32"
+	Float64  Type = "Float"
 )
 
 func (t Type) IsInteger() bool {
@@ -90,6 +91,7 @@ type IntLiteral struct {
 type BoolLiteral bool
 type BytesLiteral string
 type Float32Literal uint32
+type Float64Literal uint64
 type Ref Binder
 type Negate struct{ Value Expr }
 type Not struct{ Value Expr }
@@ -115,6 +117,7 @@ func (IntLiteral) expr()     {}
 func (BoolLiteral) expr()    {}
 func (BytesLiteral) expr()   {}
 func (Float32Literal) expr() {}
+func (Float64Literal) expr() {}
 func (Ref) expr()            {}
 func (Negate) expr()         {}
 func (Not) expr()            {}

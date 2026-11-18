@@ -128,9 +128,13 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 func (l *lowerer) value(value ssa.Value) ir.Expr {
 	if c, ok := value.(*ssa.Const); ok {
 		typ := l.valueType(c.Type())
-		if typ == ir.Float32 {
+		switch typ {
+		case ir.Float32:
 			f, _ := constant.Float32Val(c.Value)
 			return ir.Float32Literal(math.Float32bits(f))
+		case ir.Float64:
+			f, _ := constant.Float64Val(c.Value)
+			return ir.Float64Literal(math.Float64bits(f))
 		}
 		switch c.Value.Kind() {
 		case constant.Bool:

@@ -97,6 +97,8 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 		return "(ByteArray.mk #[" + strings.Join(bytes, ", ") + "])"
 	case ir.Float32Literal:
 		return fmt.Sprintf("(Float32.ofBits 0x%08x)", uint32(expr))
+	case ir.Float64Literal:
+		return fmt.Sprintf("(Float.ofBits 0x%016x)", uint64(expr))
 	case ir.ByteLen:
 		return fmt.Sprintf("(%s.ofNat (%s).size)", r.leanType(ir.IntWord), r.renderExpr(expr.Value))
 	case ir.Ref:
@@ -111,6 +113,9 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 		left, right := r.renderExpr(expr.Left), r.renderExpr(expr.Right)
 		if expr.OperandType == ir.Bytes {
 			return fmt.Sprintf("(%s ++ %s)", left, right)
+		}
+		if expr.OperandType == ir.Float64 {
+			return renderFloatComparison(expr.Op, left, right)
 		}
 		if expr.Op == ir.Divide {
 			if expr.OperandType.IsUnsigned() {
@@ -135,6 +140,25 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 		return "(" + strings.Join(args, " ") + ")"
 	default:
 		panic("unexpected IR expression")
+	}
+}
+
+func renderFloatComparison(op ir.Operator, left, right string) string {
+	switch op {
+	case ir.Equal:
+		return fmt.Sprintf("(%s == %s)", left, right)
+	case ir.NotEqual:
+		return fmt.Sprintf("(!(%s == %s))", left, right)
+	case ir.Less:
+		return fmt.Sprintf("(Float.lt %s %s)", left, right)
+	case ir.LessEqual:
+		return fmt.Sprintf("(Float.le %s %s)", left, right)
+	case ir.Greater:
+		return fmt.Sprintf("(Float.lt %s %s)", right, left)
+	case ir.GreaterEqual:
+		return fmt.Sprintf("(Float.le %s %s)", right, left)
+	default:
+		panic("unexpected float64 comparison")
 	}
 }
 

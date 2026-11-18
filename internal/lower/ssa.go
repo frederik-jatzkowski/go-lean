@@ -80,6 +80,12 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 				Binder: l.bind(ins), Value: value,
 			})
 		case *ssa.Call:
+			if subset.IsLength(ins) {
+				result.Bindings = append(result.Bindings, ir.Binding{
+					Binder: l.bind(ins), Value: ir.ByteLen{Value: l.value(ins.Call.Args[0])},
+				})
+				continue
+			}
 			target := ins.Call.StaticCallee()
 			call := ir.Call{Callee: l.symbol(target)}
 			for _, arg := range ins.Call.Args {
@@ -120,8 +126,11 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 
 func (l *lowerer) value(value ssa.Value) ir.Expr {
 	if c, ok := value.(*ssa.Const); ok {
-		if c.Value.Kind() == constant.Bool {
+		switch c.Value.Kind() {
+		case constant.Bool:
 			return ir.BoolLiteral(constant.BoolVal(c.Value))
+		case constant.String:
+			return ir.BytesLiteral(constant.StringVal(c.Value))
 		}
 		return ir.IntLiteral{Value: c.Value.ExactString(), Type: l.valueType(c.Type())}
 	}

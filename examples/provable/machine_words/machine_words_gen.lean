@@ -7,6 +7,7 @@ namespace GoLean
 
 abbrev «github.com/frederik-jatzkowski/go-lean/examples/provable/machine_words».«machine_words».GoTypes.Int := Int64
 abbrev «github.com/frederik-jatzkowski/go-lean/examples/provable/machine_words».«machine_words».GoTypes.UInt := UInt64
+abbrev «github.com/frederik-jatzkowski/go-lean/examples/provable/machine_words».«machine_words».GoTypes.WordBits : Nat := 64
 
 def «github.com/frederik-jatzkowski/go-lean/examples/provable/machine_words».«machine_words».«ToUnsigned» («v0_x» : Int64) : UInt64 :=
   let «v1_t0» : UInt64 := («v0_x»).toUInt64

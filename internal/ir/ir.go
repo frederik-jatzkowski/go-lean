@@ -41,6 +41,7 @@ const (
 	IntWord  Type = "int"
 	UIntWord Type = "uint"
 	Bool     Type = "Bool"
+	Bytes    Type = "ByteArray"
 )
 
 func (t Type) IsInteger() bool {
@@ -86,9 +87,11 @@ type IntLiteral struct {
 }
 
 type BoolLiteral bool
+type BytesLiteral string
 type Ref Binder
 type Negate struct{ Value Expr }
 type Not struct{ Value Expr }
+type ByteLen struct{ Value Expr }
 
 type Convert struct {
 	Value Expr
@@ -106,14 +109,16 @@ type Binary struct {
 	OperandType Type
 }
 
-func (IntLiteral) expr()  {}
-func (BoolLiteral) expr() {}
-func (Ref) expr()         {}
-func (Negate) expr()      {}
-func (Not) expr()         {}
-func (Convert) expr()     {}
-func (Binary) expr()      {}
-func (Call) expr()        {}
+func (IntLiteral) expr()   {}
+func (BoolLiteral) expr()  {}
+func (BytesLiteral) expr() {}
+func (Ref) expr()          {}
+func (Negate) expr()       {}
+func (Not) expr()          {}
+func (ByteLen) expr()      {}
+func (Convert) expr()      {}
+func (Binary) expr()       {}
+func (Call) expr()         {}
 
 type Operator int
 

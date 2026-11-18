@@ -23,6 +23,7 @@ func Render(program ir.Program) string {
 		scope := symbolScope(program.Functions[0].Symbol)
 		fmt.Fprintf(&out, "\nabbrev %s.GoTypes.Int := %s\n", scope, r.leanType(ir.IntWord))
 		fmt.Fprintf(&out, "abbrev %s.GoTypes.UInt := %s\n", scope, r.leanType(ir.UIntWord))
+		fmt.Fprintf(&out, "abbrev %s.GoTypes.WordBits : Nat := %d\n", scope, program.WordBits)
 	}
 	for _, fn := range program.Functions {
 		fmt.Fprintf(&out, "\ndef %s", symbolName(fn.Symbol))
@@ -88,6 +89,14 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 			return "true"
 		}
 		return "false"
+	case ir.BytesLiteral:
+		bytes := make([]string, len(expr))
+		for i := range bytes {
+			bytes[i] = fmt.Sprintf("%d", expr[i])
+		}
+		return "(ByteArray.mk #[" + strings.Join(bytes, ", ") + "])"
+	case ir.ByteLen:
+		return fmt.Sprintf("(%s.ofNat (%s).size)", r.leanType(ir.IntWord), r.renderExpr(expr.Value))
 	case ir.Ref:
 		return binderName(ir.Binder(expr))
 	case ir.Negate:
@@ -98,6 +107,9 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 		return fmt.Sprintf("(%s).to%s", r.renderExpr(expr.Value), r.leanType(expr.To))
 	case ir.Binary:
 		left, right := r.renderExpr(expr.Left), r.renderExpr(expr.Right)
+		if expr.OperandType == ir.Bytes {
+			return fmt.Sprintf("(%s ++ %s)", left, right)
+		}
 		if expr.Op == ir.Divide {
 			if expr.OperandType.IsUnsigned() {
 				return fmt.Sprintf("if %s = 0 then none else some (%s / %s)", right, left, right)

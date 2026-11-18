@@ -97,7 +97,7 @@ func TestRejectUnsupportedSSA(t *testing.T) {
 		name, source, want string
 	}{
 		{"remainder", "func f(x int64) int64 { return x % 2 }", "unsupported runtime operation %"},
-		{"parameter", "func f(x string) int64 { return 0 }", "parameter must have a supported scalar type"},
+		{"parameter", "func f(x float64) int64 { return 0 }", "parameter must have a supported scalar type"},
 		{"result", "func f(x int64) float64 { return 1 }", "expected a top-level function with one supported scalar result"},
 		{"loop", "func f(x int64) int64 { for x > 0 { x = x - 1 }; return x }", "control-flow loops are unsupported"},
 		{"global", "func f() int64 { return n }; var n int64", "unsupported unary operation *"},

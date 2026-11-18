@@ -107,7 +107,9 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		_, supported := Binary(ins.Op)
 		typ := Type(ins.X.Type())
 		if supported && scalar(ins.X) && hasType(ins.Y, typ) &&
-			(typ.IsInteger() || ins.Op == token.EQL || ins.Op == token.NEQ) {
+			(typ.IsInteger() ||
+				typ == ir.Bool && (ins.Op == token.EQL || ins.Op == token.NEQ) ||
+				typ == ir.Bytes && ins.Op == token.ADD) {
 			return nil
 		}
 		return diagnostic(fn, ins.Pos(), "unsupported runtime operation %s on %s and %s", ins.Op, ins.X.Type(), ins.Y.Type())
@@ -130,6 +132,12 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		}
 		return diagnostic(fn, ins.Pos(), "unsupported type change from %s to %s", ins.X.Type(), ins.Type())
 	case *ssa.Call:
+		if IsLength(ins) {
+			if hasType(ins.Call.Args[0], ir.Bytes) {
+				return nil
+			}
+			return diagnostic(fn, ins.Pos(), "len requires a supported Go string")
+		}
 		callee := ins.Call.StaticCallee()
 		if callee == nil {
 			return diagnostic(fn, ins.Pos(), "unsupported call to %s; expected a statically resolved Go function", ins.Call.Value)
@@ -171,6 +179,11 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 	}
 }
 
+func IsLength(call *ssa.Call) bool {
+	builtin, ok := call.Call.Value.(*ssa.Builtin)
+	return ok && builtin.Name() == "len"
+}
+
 func hasType(value ssa.Value, want ir.Type) bool {
 	return Type(value.Type()) == want && scalar(value)
 }
@@ -184,7 +197,8 @@ func scalar(value ssa.Value) bool {
 	case *ssa.Const:
 		return value.Value != nil &&
 			(typ.IsInteger() && value.Value.Kind() == constant.Int ||
-				typ == ir.Bool && value.Value.Kind() == constant.Bool)
+				typ == ir.Bool && value.Value.Kind() == constant.Bool ||
+				typ == ir.Bytes && value.Value.Kind() == constant.String)
 	case *ssa.Parameter, *ssa.BinOp, *ssa.UnOp, *ssa.Call, *ssa.Phi, *ssa.Convert, *ssa.ChangeType:
 		return true
 	default:
@@ -224,6 +238,8 @@ func Type(t types.Type) ir.Type {
 			return ir.UInt64
 		case types.Bool, types.UntypedBool:
 			return ir.Bool
+		case types.String, types.UntypedString:
+			return ir.Bytes
 		}
 	}
 	return ""

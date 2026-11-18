@@ -78,7 +78,23 @@ Run the 15 rejection fixtures individually in the test suite and assert both the
 
 ## Example index
 
-`examples/provable/` contains 35 examples with checked Lean proofs. `make generate` regenerates every module, and `make check` verifies every proof. The examples are `acyclic_list`, `arithmetic`, `array_bounds`, `boolean_implication`, `bounded_counter`, `branch_join`, `byte_rune`, `clamp`, `clampimport`, `constant_conversions`, `division_guarded`, `division_precondition`, `division_propagation`, `embedded_struct`, `float32_rounding`, `float64_special`, `generic_identity`, `generic_map`, `immutable_closure`, `interface_dispatch`, `kv_store_contract_impl`, `kv_store_contract_use`, `machine_words`, `map_build`, `map_lookup`, `narrow_signed`, `nil_dereference`, `range_fold`, `slice_bounds`, `slice_copy`, `string_bytes`, `struct_fields`, `switch_tagless`, `switch_value`, and `unsigned_wrap`.
+`examples/provable/` contains 36 examples with checked Lean proofs. `make generate` regenerates every module, and `make check` verifies every proof. The examples are `acyclic_list`, `arithmetic`, `array_bounds`, `boolean_implication`, `bounded_counter`, `branch_join`, `byte_rune`, `clamp`, `clampimport`, `constant_conversions`, `division_guarded`, `division_precondition`, `division_propagation`, `embedded_struct`, `float32_rounding`, `float64_special`, `generic_identity`, `generic_map`, `grid_game`, `immutable_closure`, `interface_dispatch`, `kv_store_contract_impl`, `kv_store_contract_use`, `machine_words`, `map_build`, `map_lookup`, `narrow_signed`, `nil_dereference`, `range_fold`, `slice_bounds`, `slice_copy`, `string_bytes`, `struct_fields`, `switch_tagless`, `switch_value`, and `unsigned_wrap`.
+
+### Play the grid game
+
+```sh
+go run ./examples/provable/grid_game/cmd/grid-game
+go run ./examples/provable/grid_game/cmd/grid-game -wrap
+```
+
+Move with W, A, S, or D followed by Enter. Press Q then Enter or send EOF to quit.
+The game loop requests each direction through a callback and passes it to the same
+Go `Step` function that go-lean translates. In wraparound mode, seam walls keep
+the goal room closed across the board edges.
+
+Run `lake build grid_game.grid_game_proofs` to check the [no-win proof](examples/provable/grid_game/grid_game_proofs.lean).
+It proves that `Won` returns false after every finite sequence of directions from
+`Start`, in either mode. This covers every finite prefix supplied by the callback.
 
 `examples/reject/` contains 15 draft fixtures behind the `golean_reject` build tag. The table records the intended rejection reasons for future tests.
 

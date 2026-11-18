@@ -229,6 +229,30 @@ func readNil(key uint8) int { return read(nil, key) }
 	}
 }
 
+func TestFreshMapReadsCurrentState(t *testing.T) {
+	dir := newModule(t)
+	writeFile(t, filepath.Join(dir, "input.go"), `package sample
+//golean:verify
+func build(k uint8, value int32) map[uint8]int32 {
+	m := make(map[uint8]int32)
+	m[k] = value
+	prior, _ := m[k]
+	m[k] = prior + 1
+	return m
+}
+`)
+	outputs, err := transpile.Generate(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := outputs[0].Source
+	for _, want := range []string{"Option (List (UInt8 × Int32))", "(List.lookup «v0_k» «v3_t0»)", "(«v3_t0»).filter"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in output:\n%s", want, got)
+		}
+	}
+}
+
 const genericSliceBuilder = `
 func transform[T any](xs []T, apply func(T) T) []T {
 	dst := make([]T, len(xs))
@@ -297,8 +321,11 @@ func TestRejectUnsupportedSSA(t *testing.T) {
 		{"record pointer escape", "func f(p *point) *point { return p }; type point struct { X int64 }", "record pointers may not escape as results"},
 		{"record pointer identity", "func f(p, q *point) bool { return p == q }; type point struct { X int64 }", "unsupported runtime operation =="},
 		{"caller slice mutation", "func f(xs []int64) int64 { xs[0] = 1; return xs[0] }", "element addresses may only be read"},
-		{"caller map mutation", "func f(m map[int64]int64, k int64) int64 { m[k] = 1; return 1 }", "map writes are unsupported"},
-		{"caller map return", "func f(m map[int64]int64) map[int64]int64 { return m }", "map results are unsupported"},
+		{"caller map mutation", "func f(m map[int64]int64, k int64) int64 { m[k] = 1; return 1 }", "map writes require a validated fresh map"},
+		{"caller map return", "func f(m map[int64]int64) map[int64]int64 { return m }", "map results require a fresh local allocation"},
+		{"nil map mutation", "func f(k int64) int64 { var m map[int64]int64; m[k] = 1; return k }", "map writes require a validated fresh map"},
+		{"map escapes through call", "func f(k int64) map[int64]int64 { m := make(map[int64]int64); m[k] = observe(m, k); return m }; func observe(m map[int64]int64, k int64) int64 { v, _ := m[k]; return v }", "map results require a fresh local allocation"},
+		{"map update through branch", "func f(flag bool) map[int64]int64 { m := make(map[int64]int64); if flag { m[0] = 1 }; return m }", "map results require a fresh local allocation"},
 		{"map nil test", "func f(m map[int64]int64) bool { return m == nil }", "unsupported runtime operation =="},
 		{"noninteger map key", "func f(m map[string]int64) int64 { v, _ := m[\"key\"]; return v }", "parameter must have a supported"},
 		{"array mutation", "func f(xs [4]int64) int64 { xs[0] = 1; return xs[0] }", "element addresses may only be read"},

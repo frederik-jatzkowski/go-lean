@@ -234,6 +234,12 @@ type MapLookup struct {
 	Key Expr
 }
 
+type MapUpdate struct {
+	Map   Expr
+	Key   Expr
+	Value Expr
+}
+
 type OptionGetD struct {
 	Value   Expr
 	Default Expr
@@ -288,6 +294,7 @@ func (NilPointer) expr()         {}
 func (EmptySlice) expr()         {}
 func (EmptyMap) expr()           {}
 func (MapLookup) expr()          {}
+func (MapUpdate) expr()          {}
 func (OptionGetD) expr()         {}
 func (OptionIsSome) expr()       {}
 func (CheckedIndex) expr()       {}

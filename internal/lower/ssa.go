@@ -207,6 +207,14 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 			result.Bindings = append(result.Bindings, l.checkedIndex(ins, ins.X, ins.Index))
 		case *ssa.Index:
 			result.Bindings = append(result.Bindings, l.checkedIndex(ins, ins.X, ins.Index))
+		case *ssa.MakeMap:
+			l.canPanic = true // Keep the fresh map result in the panic-result model.
+			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: ir.EmptyMap{}})
+		case *ssa.MapUpdate:
+			// The checker proved exclusive access, so a new binding can replace
+			// the map state without losing observations through other aliases.
+			update := ir.MapUpdate{Map: l.value(ins.Map), Key: l.value(ins.Key), Value: l.value(ins.Value)}
+			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins.Map), Value: update})
 		case *ssa.Lookup:
 			_, elem := l.valueType(ins.X.Type()).MapShape()
 			result.Bindings = append(result.Bindings, ir.Binding{

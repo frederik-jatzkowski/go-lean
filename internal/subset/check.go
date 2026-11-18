@@ -47,14 +47,15 @@ func (c Checked) RecordCell(value ssa.Value) (RecordCell, bool) {
 
 func Check(program gosource.Program) (Checked, error) {
 	c := checker{
-		visiting: make(map[*ssa.Function]bool),
-		done:     make(map[*ssa.Function]bool),
-		cells:    make(map[*ssa.Alloc]*ssa.Store),
-		records:  make(map[*ssa.Alloc]RecordCell),
-		arrays:   make(map[*ssa.Alloc]*ssa.Store),
-		loops:    make(map[*ssa.Function]*CountedLoop),
-		ranges:   make(map[*ssa.Function]*RangeFold),
-		builds:   make(map[*ssa.Function]*SliceBuild),
+		visiting:  make(map[*ssa.Function]bool),
+		done:      make(map[*ssa.Function]bool),
+		cells:     make(map[*ssa.Alloc]*ssa.Store),
+		records:   make(map[*ssa.Alloc]RecordCell),
+		arrays:    make(map[*ssa.Alloc]*ssa.Store),
+		loops:     make(map[*ssa.Function]*CountedLoop),
+		ranges:    make(map[*ssa.Function]*RangeFold),
+		builds:    make(map[*ssa.Function]*SliceBuild),
+		freshMaps: make(map[*ssa.MakeMap]bool),
 	}
 	for _, fn := range program.Roots {
 		if err := c.function(fn); err != nil {
@@ -68,15 +69,16 @@ func Check(program gosource.Program) (Checked, error) {
 }
 
 type checker struct {
-	visiting map[*ssa.Function]bool
-	done     map[*ssa.Function]bool
-	ordered  []*ssa.Function
-	cells    map[*ssa.Alloc]*ssa.Store
-	records  map[*ssa.Alloc]RecordCell
-	arrays   map[*ssa.Alloc]*ssa.Store
-	loops    map[*ssa.Function]*CountedLoop
-	ranges   map[*ssa.Function]*RangeFold
-	builds   map[*ssa.Function]*SliceBuild
+	visiting  map[*ssa.Function]bool
+	done      map[*ssa.Function]bool
+	ordered   []*ssa.Function
+	cells     map[*ssa.Alloc]*ssa.Store
+	records   map[*ssa.Alloc]RecordCell
+	arrays    map[*ssa.Alloc]*ssa.Store
+	loops     map[*ssa.Function]*CountedLoop
+	ranges    map[*ssa.Function]*RangeFold
+	builds    map[*ssa.Function]*SliceBuild
+	freshMaps map[*ssa.MakeMap]bool
 }
 
 func (c *checker) function(fn *ssa.Function) error {
@@ -98,9 +100,6 @@ func (c *checker) function(fn *ssa.Function) error {
 	}
 	if Type(sig.Results().At(0).Type()).Pointee() != "" {
 		return diagnostic(fn, fn.Pos(), "record pointers may not escape as results")
-	}
-	if key, _ := Type(sig.Results().At(0).Type()).MapShape(); key != "" {
-		return diagnostic(fn, fn.Pos(), "map results are unsupported")
 	}
 	if parent := fn.Parent(); parent != nil && parent.TypeParams().Len() != 0 {
 		return diagnostic(fn, fn.Pos(), "closures in generic functions are unsupported")
@@ -146,7 +145,15 @@ func (c *checker) function(fn *ssa.Function) error {
 }
 
 func (c *checker) checkBody(fn *ssa.Function) error {
-	if Type(fn.Signature.Results().At(0).Type()).SliceElem() != "" {
+	result := Type(fn.Signature.Results().At(0).Type())
+	if key, _ := result.MapShape(); key != "" {
+		fresh := freshMapResult(fn)
+		if fresh == nil {
+			return diagnostic(fn, fn.Pos(), "map results require a fresh local allocation with straight-line uses before return")
+		}
+		c.freshMaps[fresh] = true
+	}
+	if result.SliceElem() != "" {
 		for _, block := range fn.Blocks {
 			ret, ok := block.Instrs[len(block.Instrs)-1].(*ssa.Return)
 			if ok {
@@ -326,8 +333,19 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 			}
 		}
 		return diagnostic(fn, ins.Pos(), "only comma-ok map lookup results may be extracted")
+	case *ssa.MakeMap:
+		if c.freshMaps[ins] {
+			return nil
+		}
+		return diagnostic(fn, ins.Pos(), "map allocation requires a validated fresh map result")
 	case *ssa.MapUpdate:
-		return diagnostic(fn, ins.Pos(), "map writes are unsupported")
+		if fresh, ok := ins.Map.(*ssa.MakeMap); ok && c.freshMaps[fresh] {
+			key, value := Type(fresh.Type()).MapShape()
+			if hasType(ins.Key, key) && hasType(ins.Value, value) {
+				return nil
+			}
+		}
+		return diagnostic(fn, ins.Pos(), "map writes require a validated fresh map and supported key and value")
 	case *ssa.Field:
 		if Type(ins.X.Type()).IsRecord() && supportedValue(ins.X) {
 			return nil
@@ -386,7 +404,7 @@ func supportedValue(value ssa.Value) bool {
 			typ == ir.Bytes && value.Value.Kind() == constant.String ||
 			(typ == ir.Float32 || typ == ir.Float64) &&
 				(value.Value.Kind() == constant.Float || value.Value.Kind() == constant.Int)
-	case *ssa.Parameter, *ssa.BinOp, *ssa.UnOp, *ssa.Call, *ssa.Phi, *ssa.Convert, *ssa.ChangeType, *ssa.Field, *ssa.Index, *ssa.Extract:
+	case *ssa.Parameter, *ssa.BinOp, *ssa.UnOp, *ssa.Call, *ssa.Phi, *ssa.Convert, *ssa.ChangeType, *ssa.Field, *ssa.Index, *ssa.Extract, *ssa.MakeMap:
 		return true
 	default:
 		return false

@@ -213,6 +213,10 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 		return "[]"
 	case ir.MapLookup:
 		return fmt.Sprintf("(List.lookup %s %s)", r.renderExpr(expr.Key), r.renderExpr(expr.Map))
+	case ir.MapUpdate:
+		key := r.renderExpr(expr.Key)
+		return fmt.Sprintf("((%s, %s) :: (%s).filter (fun entry => !(%s == entry.1)))",
+			key, r.renderExpr(expr.Value), r.renderExpr(expr.Map), key)
 	case ir.OptionGetD:
 		return fmt.Sprintf("(Option.getD %s %s)", r.renderExpr(expr.Value), r.renderExpr(expr.Default))
 	case ir.OptionIsSome:

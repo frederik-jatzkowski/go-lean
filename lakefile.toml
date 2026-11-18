@@ -25,6 +25,7 @@ roots = [
   "generic_map.generic_map_gen", "generic_map.generic_map_proofs",
   "immutable_closure.immutable_closure_gen", "immutable_closure.immutable_closure_proofs",
   "machine_words.machine_words_gen", "machine_words.machine_words_proofs",
+  "map_build.map_build_gen", "map_build.map_build_proofs",
   "map_lookup.map_lookup_gen", "map_lookup.map_lookup_proofs",
   "narrow_signed.narrow_signed_gen", "narrow_signed.narrow_signed_proofs",
   "nil_dereference.nil_dereference_gen", "nil_dereference.nil_dereference_proofs",

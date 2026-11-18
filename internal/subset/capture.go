@@ -13,7 +13,7 @@ import (
 func CaptureType(t types.Type) ir.Type {
 	if pointer, ok := types.Unalias(t).(*types.Pointer); ok {
 		typ := Type(pointer.Elem())
-		if typ.Pointee() == "" {
+		if typ.Pointee() == "" && typ.SliceElem() == "" {
 			return typ
 		}
 	}
@@ -70,6 +70,9 @@ func (c *checker) checkLocalMemory(fn *ssa.Function) error {
 		for _, ins := range block.Instrs {
 			switch ins := ins.(type) {
 			case *ssa.Store:
+				if index, ok := ins.Addr.(*ssa.IndexAddr); ok && isReadOnlySliceIndex(index) {
+					return diagnostic(fn, ins.Pos(), "slice element addresses may only be read")
+				}
 				if c.isRecordAddress(ins.Addr) {
 					continue
 				}

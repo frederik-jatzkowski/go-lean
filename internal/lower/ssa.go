@@ -123,9 +123,7 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 			case token.NOT:
 				value = ir.Not{Value: l.value(ins.X)}
 			case token.MUL:
-				_, field := ins.X.(*ssa.FieldAddr)
-				_, local := l.checked.RecordCell(ins.X)
-				canPanic = !field && !local && subset.Type(ins.X.Type()).Pointee() != ""
+				canPanic = subset.IsReadOnlyRecordPointer(ins.X)
 				if canPanic {
 					value = l.value(ins.X)
 				} else {
@@ -160,6 +158,16 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 					Binder: binder, Value: value, CanPanic: !nested,
 				})
 			}
+		case *ssa.IndexAddr:
+			elem := ins.X.Type().Underlying().(*types.Slice).Elem()
+			result.Bindings = append(result.Bindings, ir.Binding{
+				Binder: l.bindAs(ins, l.valueType(elem)),
+				Value: ir.CheckedIndex{
+					Sequence: l.value(ins.X), Index: l.value(ins.Index), IndexType: l.valueType(ins.Index.Type()),
+				},
+				CanPanic: true,
+			})
+			l.canPanic = true
 		case *ssa.Call:
 			if subset.IsLength(ins) {
 				result.Bindings = append(result.Bindings, ir.Binding{
@@ -226,6 +234,9 @@ func (l *lowerer) value(value ssa.Value) ir.Expr {
 		if typ.Pointee() != "" {
 			return ir.NilPointer{}
 		}
+		if typ.SliceElem() != "" {
+			return ir.EmptySlice{}
+		}
 		switch typ {
 		case ir.Float32:
 			f, _ := constant.Float32Val(c.Value)
@@ -258,6 +269,9 @@ func (l *lowerer) valueType(t types.Type) ir.Type {
 	l.usesWord = l.usesWord || typ.IsWord()
 	if typ.Pointee() != "" {
 		l.valueType(t.Underlying().(*types.Pointer).Elem())
+	}
+	if typ.SliceElem() != "" {
+		l.valueType(t.Underlying().(*types.Slice).Elem())
 	}
 	if typ.IsRecord() {
 		if _, exists := l.records[typ]; !exists {

@@ -16,7 +16,8 @@ type RecordCell struct {
 func supportedFields(record *types.Struct) bool {
 	for field := range record.Fields() {
 		// Pointer-containing records would need a separate recursive model.
-		if _, pointer := field.Type().Underlying().(*types.Pointer); pointer {
+		switch field.Type().Underlying().(type) {
+		case *types.Pointer, *types.Slice:
 			return false
 		}
 		if field.Name() == "_" || Type(field.Type()) == "" {
@@ -36,10 +37,10 @@ func (c *checker) isRecordAddress(addr ssa.Value) bool {
 }
 
 func IsReadOnlyRecordField(addr *ssa.FieldAddr) bool {
-	return isReadOnlyRecordPointer(recordAddressBase(addr))
+	return IsReadOnlyRecordPointer(recordAddressBase(addr))
 }
 
-func isReadOnlyRecordPointer(value ssa.Value) bool {
+func IsReadOnlyRecordPointer(value ssa.Value) bool {
 	return Type(value.Type()).Pointee() != "" && supportedValue(value)
 }
 

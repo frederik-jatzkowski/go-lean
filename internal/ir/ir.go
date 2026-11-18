@@ -98,6 +98,15 @@ func (t Type) Pointee() Type {
 	return ""
 }
 
+func SliceType(elem Type) Type { return Type("slice:" + string(elem)) }
+
+func (t Type) SliceElem() Type {
+	if elem, ok := strings.CutPrefix(string(t), "slice:"); ok {
+		return Type(elem)
+	}
+	return ""
+}
+
 // Body introduces immutable bindings and ends in a return or a returning branch.
 type Body struct {
 	Bindings []Binding
@@ -157,6 +166,13 @@ type CheckedRecordField struct {
 }
 
 type NilPointer struct{}
+type EmptySlice struct{}
+
+type CheckedIndex struct {
+	Sequence  Expr
+	Index     Expr
+	IndexType Type
+}
 
 type Convert struct {
 	Value Expr
@@ -188,6 +204,8 @@ func (RecordLiteral) expr()      {}
 func (RecordField) expr()        {}
 func (CheckedRecordField) expr() {}
 func (NilPointer) expr()         {}
+func (EmptySlice) expr()         {}
+func (CheckedIndex) expr()       {}
 func (Convert) expr()            {}
 func (Binary) expr()             {}
 func (Call) expr()               {}

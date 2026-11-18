@@ -79,6 +79,15 @@ func RecordType(pkg, name string) Type { return Type("struct:" + pkg + "." + nam
 
 func (t Type) IsRecord() bool { return strings.HasPrefix(string(t), "struct:") }
 
+func RecordPointer(pointee Type) Type { return Type("pointer:" + string(pointee)) }
+
+func (t Type) Pointee() Type {
+	if pointee, ok := strings.CutPrefix(string(t), "pointer:"); ok {
+		return Type(pointee)
+	}
+	return ""
+}
+
 // Body introduces immutable bindings and ends in a return or a returning branch.
 type Body struct {
 	Bindings []Binding
@@ -130,6 +139,14 @@ type RecordField struct {
 	Name  string
 }
 
+type CheckedRecordField struct {
+	Value Expr
+	Type  Type
+	Name  string
+}
+
+type NilPointer struct{}
+
 type Convert struct {
 	Value Expr
 	To    Type
@@ -146,20 +163,22 @@ type Binary struct {
 	OperandType Type
 }
 
-func (IntLiteral) expr()     {}
-func (BoolLiteral) expr()    {}
-func (BytesLiteral) expr()   {}
-func (Float32Literal) expr() {}
-func (Float64Literal) expr() {}
-func (Ref) expr()            {}
-func (Negate) expr()         {}
-func (Not) expr()            {}
-func (ByteLen) expr()        {}
-func (RecordLiteral) expr()  {}
-func (RecordField) expr()    {}
-func (Convert) expr()        {}
-func (Binary) expr()         {}
-func (Call) expr()           {}
+func (IntLiteral) expr()         {}
+func (BoolLiteral) expr()        {}
+func (BytesLiteral) expr()       {}
+func (Float32Literal) expr()     {}
+func (Float64Literal) expr()     {}
+func (Ref) expr()                {}
+func (Negate) expr()             {}
+func (Not) expr()                {}
+func (ByteLen) expr()            {}
+func (RecordLiteral) expr()      {}
+func (RecordField) expr()        {}
+func (CheckedRecordField) expr() {}
+func (NilPointer) expr()         {}
+func (Convert) expr()            {}
+func (Binary) expr()             {}
+func (Call) expr()               {}
 
 type Operator int
 

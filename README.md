@@ -14,6 +14,7 @@
 - Generic definitions can use type parameters with the unrestricted `any` constraint as Lean type variables. Dynamic interface values, method constraints, and calls to generic functions remain outside the supported subset.
 - Direct calls to local closures can use immutable captured values as extra parameters. Captured cells must be initialized once before use, and closure values stay local to direct calls.
 - Named structs with scalar or nested record fields lower to Lean structures. Promoted fields follow the same projection chain as explicit selectors. Field initialization must finish before a local record is read, and the initialization addresses stay local.
+- Read-only, nonrecursive record pointer inputs use `Option` to distinguish nil from a record value. Dereferencing nil propagates a panic outcome.
 - Local bindings, assignments, early returns, branches with boolean conditions, and value and tagless switches. Control-flow joins select the supported scalar value from the branch taken. Short-circuit expressions evaluate their right operand only when needed. The checker rejects loops, recursive or indirect calls, and unsupported effects such as reads of mutable globals.
 - Checked proofs for arithmetic identities, wraparound, clamp bounds and idempotence, and division panic freedom, signed boundaries, and panic propagation. The `clampimport` example proves the clamp properties using `Min` and `Max` translated from an imported Go package.
 
@@ -48,11 +49,11 @@ Apply the panic model to bounds checks and pointer dereferences.
 
 ## Example index
 
-`examples/provable/` contains 32 examples. The default build regenerates and checks `arithmetic`, `boolean_implication`, `branch_join`, `byte_rune`, `clamp`, `clampimport`, `constant_conversions`, `division_guarded`, `division_precondition`, `division_propagation`, `embedded_struct`, `float32_rounding`, `float64_special`, `generic_identity`, `immutable_closure`, `machine_words`, `narrow_signed`, `string_bytes`, `struct_fields`, `switch_tagless`, `switch_value`, and `unsigned_wrap`. The other 10 have valid Go source behind the `golean_planned` build tag and draft Lean theorem statements with unfinished proofs.
+`examples/provable/` contains 32 examples. The default build regenerates and checks `arithmetic`, `boolean_implication`, `branch_join`, `byte_rune`, `clamp`, `clampimport`, `constant_conversions`, `division_guarded`, `division_precondition`, `division_propagation`, `embedded_struct`, `float32_rounding`, `float64_special`, `generic_identity`, `immutable_closure`, `machine_words`, `narrow_signed`, `nil_dereference`, `string_bytes`, `struct_fields`, `switch_tagless`, `switch_value`, and `unsigned_wrap`. The other 9 have valid Go source behind the `golean_planned` build tag and draft Lean theorem statements with unfinished proofs.
 
 | Area | Pending examples |
 | --- | --- |
-| Aggregates and references | `array_bounds`, `slice_bounds`, `slice_copy`, `map_lookup`, `map_build`, `acyclic_list`, `nil_dereference` |
+| Aggregates and references | `array_bounds`, `slice_bounds`, `slice_copy`, `map_lookup`, `map_build`, `acyclic_list` |
 | Control flow and termination | `bounded_counter`, `range_fold` |
 | Generics and functions | `generic_map` |
 

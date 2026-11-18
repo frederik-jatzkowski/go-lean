@@ -73,6 +73,9 @@ func (r renderer) renderRecords(out *strings.Builder) {
 }
 
 func (r renderer) leanType(typ ir.Type) string {
+	if pointee := typ.Pointee(); pointee != "" {
+		return "(Option " + r.leanType(pointee) + ")"
+	}
 	if record, ok := r.records[typ]; ok {
 		return "_root_.GoLean." + symbolName(record.Symbol)
 	}
@@ -143,6 +146,11 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 		return "(" + strings.Join(args, " ") + ")"
 	case ir.RecordField:
 		return fmt.Sprintf("(%s).%s", r.renderExpr(expr.Value), recordFieldName(expr.Name))
+	case ir.CheckedRecordField:
+		return fmt.Sprintf("(Option.map (fun (record : %s) => record.%s) %s)",
+			r.leanType(expr.Type), recordFieldName(expr.Name), r.renderExpr(expr.Value))
+	case ir.NilPointer:
+		return "none"
 	case ir.Ref:
 		return binderName(ir.Binder(expr))
 	case ir.Negate:

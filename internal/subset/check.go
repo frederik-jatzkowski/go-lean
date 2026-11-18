@@ -69,6 +69,9 @@ func (c *checker) function(fn *ssa.Function) error {
 		sig.Results().Len() != 1 || Type(sig.Results().At(0).Type()) == "" {
 		return diagnostic(fn, fn.Pos(), "expected a top-level function with one supported result and no variadic arguments")
 	}
+	if Type(sig.Results().At(0).Type()).Pointee() != "" {
+		return diagnostic(fn, fn.Pos(), "record pointers may not escape as results")
+	}
 	if parent := fn.Parent(); parent != nil && parent.TypeParams().Len() != 0 {
 		return diagnostic(fn, fn.Pos(), "closures in generic functions are unsupported")
 	}
@@ -140,8 +143,13 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		}
 		return diagnostic(fn, ins.Pos(), "unsupported runtime operation %s on %s and %s", ins.Op, ins.X.Type(), ins.Y.Type())
 	case *ssa.UnOp:
-		if ins.Op == token.MUL && (c.isCapture(ins.X) || c.isRecordAddress(ins.X)) {
-			return nil
+		if ins.Op == token.MUL {
+			if c.isCapture(ins.X) || c.isRecordAddress(ins.X) || isReadOnlyRecordPointer(ins.X) {
+				return nil
+			}
+			if addr, ok := ins.X.(*ssa.FieldAddr); ok && IsReadOnlyRecordField(addr) {
+				return nil
+			}
 		}
 		if ins.Op == token.SUB && Type(ins.X.Type()).IsInteger() && supportedValue(ins.X) ||
 			ins.Op == token.NOT && hasType(ins.X, ir.Bool) {
@@ -194,7 +202,13 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		if c.isRecordAddress(ins) {
 			return nil
 		}
-		return diagnostic(fn, ins.Pos(), "field address requires a fresh local record")
+		if IsReadOnlyRecordField(ins) {
+			if _, valid := projectionReads(ins); valid {
+				return nil
+			}
+			return diagnostic(fn, ins.Pos(), "field addresses from record inputs may only be projected or read")
+		}
+		return diagnostic(fn, ins.Pos(), "field address requires a supported record")
 	case *ssa.Field:
 		if Type(ins.X.Type()).IsRecord() && supportedValue(ins.X) {
 			return nil
@@ -244,12 +258,14 @@ func supportedValue(value ssa.Value) bool {
 	}
 	switch value := value.(type) {
 	case *ssa.Const:
-		return value.Value != nil &&
-			(typ.IsInteger() && value.Value.Kind() == constant.Int ||
-				typ == ir.Bool && value.Value.Kind() == constant.Bool ||
-				typ == ir.Bytes && value.Value.Kind() == constant.String ||
-				(typ == ir.Float32 || typ == ir.Float64) &&
-					(value.Value.Kind() == constant.Float || value.Value.Kind() == constant.Int))
+		if value.Value == nil {
+			return typ.Pointee() != ""
+		}
+		return typ.IsInteger() && value.Value.Kind() == constant.Int ||
+			typ == ir.Bool && value.Value.Kind() == constant.Bool ||
+			typ == ir.Bytes && value.Value.Kind() == constant.String ||
+			(typ == ir.Float32 || typ == ir.Float64) &&
+				(value.Value.Kind() == constant.Float || value.Value.Kind() == constant.Int)
 	case *ssa.Parameter, *ssa.BinOp, *ssa.UnOp, *ssa.Call, *ssa.Phi, *ssa.Convert, *ssa.ChangeType, *ssa.Field:
 		return true
 	default:
@@ -259,6 +275,12 @@ func supportedValue(value ssa.Value) bool {
 
 func Type(t types.Type) ir.Type {
 	t = types.Unalias(t)
+	if pointer, ok := t.(*types.Pointer); ok {
+		if pointee := Type(pointer.Elem()); pointee.IsRecord() {
+			return ir.RecordPointer(pointee)
+		}
+		return ""
+	}
 	if param, ok := t.(*types.TypeParam); ok {
 		return ir.TypeParameter(param.Index())
 	}

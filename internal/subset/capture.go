@@ -12,7 +12,10 @@ import (
 // CaptureType represents the immutable value kept in a Go SSA capture cell.
 func CaptureType(t types.Type) ir.Type {
 	if pointer, ok := types.Unalias(t).(*types.Pointer); ok {
-		return Type(pointer.Elem())
+		typ := Type(pointer.Elem())
+		if typ.Pointee() == "" {
+			return typ
+		}
 	}
 	return ""
 }

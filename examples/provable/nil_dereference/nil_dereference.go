@@ -1,5 +1,3 @@
-//go:build golean_planned
-
 package nil_dereference
 
 type Record struct {
@@ -8,3 +6,9 @@ type Record struct {
 
 //golean:verify
 func Read(record *Record) int64 { return record.Value }
+
+//golean:verify
+func Touch(record *Record) int64 {
+	_ = &record.Value
+	return 7
+}

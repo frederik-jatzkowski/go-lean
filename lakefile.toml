@@ -23,6 +23,7 @@ roots = [
   "immutable_closure.immutable_closure_gen", "immutable_closure.immutable_closure_proofs",
   "machine_words.machine_words_gen", "machine_words.machine_words_proofs",
   "narrow_signed.narrow_signed_gen", "narrow_signed.narrow_signed_proofs",
+  "nil_dereference.nil_dereference_gen", "nil_dereference.nil_dereference_proofs",
   "string_bytes.string_bytes_gen", "string_bytes.string_bytes_proofs",
   "struct_fields.struct_fields_gen", "struct_fields.struct_fields_proofs",
   "switch_tagless.switch_tagless_gen", "switch_tagless.switch_tagless_proofs",

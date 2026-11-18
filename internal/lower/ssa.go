@@ -88,23 +88,48 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 			l.canPanic = l.canPanic || canPanic
 		case *ssa.UnOp:
 			var value ir.Expr
+			canPanic := false
 			switch ins.Op {
 			case token.NOT:
 				value = ir.Not{Value: l.value(ins.X)}
 			case token.MUL:
-				value = l.load(ins.X)
+				_, field := ins.X.(*ssa.FieldAddr)
+				_, local := l.checked.RecordCell(ins.X)
+				canPanic = !field && !local && subset.Type(ins.X.Type()).Pointee() != ""
+				if canPanic {
+					value = l.value(ins.X)
+				} else {
+					value = l.load(ins.X)
+				}
 			default:
 				value = ir.Negate{Value: l.value(ins.X)}
 			}
 			result.Bindings = append(result.Bindings, ir.Binding{
-				Binder: l.bind(ins), Value: value,
+				Binder: l.bind(ins), Value: value, CanPanic: canPanic,
 			})
+			l.canPanic = l.canPanic || canPanic
 		case *ssa.Field:
 			record := ins.X.Type().Underlying().(*types.Struct)
 			result.Bindings = append(result.Bindings, ir.Binding{
 				Binder: l.bind(ins),
 				Value:  ir.RecordField{Value: l.value(ins.X), Name: record.Field(ins.Field).Name()},
 			})
+		case *ssa.FieldAddr:
+			if subset.IsReadOnlyRecordField(ins) {
+				recordType := ins.X.Type().Underlying().(*types.Pointer).Elem()
+				field := recordType.Underlying().(*types.Struct).Field(ins.Field)
+				binder := l.bindAs(ins, l.valueType(field.Type()))
+				source := l.value(ins.X)
+				_, nested := ins.X.(*ssa.FieldAddr)
+				var value ir.Expr = ir.RecordField{Value: source, Name: field.Name()}
+				if !nested {
+					value = ir.CheckedRecordField{Value: source, Type: l.valueType(recordType), Name: field.Name()}
+					l.canPanic = true
+				}
+				result.Bindings = append(result.Bindings, ir.Binding{
+					Binder: binder, Value: value, CanPanic: !nested,
+				})
+			}
 		case *ssa.Call:
 			if subset.IsLength(ins) {
 				result.Bindings = append(result.Bindings, ir.Binding{
@@ -168,6 +193,9 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 func (l *lowerer) value(value ssa.Value) ir.Expr {
 	if c, ok := value.(*ssa.Const); ok {
 		typ := l.valueType(c.Type())
+		if typ.Pointee() != "" {
+			return ir.NilPointer{}
+		}
 		switch typ {
 		case ir.Float32:
 			f, _ := constant.Float32Val(c.Value)
@@ -198,6 +226,9 @@ func (l *lowerer) binary(expr *ssa.BinOp) ir.Binary {
 func (l *lowerer) valueType(t types.Type) ir.Type {
 	typ := subset.Type(t)
 	l.usesWord = l.usesWord || typ.IsWord()
+	if typ.Pointee() != "" {
+		l.valueType(t.Underlying().(*types.Pointer).Elem())
+	}
 	if typ.IsRecord() {
 		if _, exists := l.records[typ]; !exists {
 			named := types.Unalias(t).(*types.Named)
@@ -218,6 +249,9 @@ func (l *lowerer) valueType(t types.Type) ir.Type {
 
 func (l *lowerer) load(addr ssa.Value) ir.Expr {
 	if field, ok := addr.(*ssa.FieldAddr); ok {
+		if subset.IsReadOnlyRecordField(field) {
+			return l.value(field)
+		}
 		record := field.X.Type().Underlying().(*types.Pointer).Elem().Underlying().(*types.Struct)
 		return ir.RecordField{Value: l.load(field.X), Name: record.Field(field.Field).Name()}
 	}

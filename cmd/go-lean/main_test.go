@@ -23,7 +23,7 @@ func TestExamplesMatchGeneratedOutput(t *testing.T) {
 			t.Errorf("%s differs from transpiler output. Run make generate.", output.Path)
 		}
 	}
-	for _, example := range []string{"arithmetic", "clamp", "clampimport"} {
+	for _, example := range []string{"arithmetic", "clamp", "clampimport", "division_guarded"} {
 		if !found[example+"_gen.lean"] {
 			t.Errorf("missing generated module for %s", example)
 		}
@@ -46,7 +46,7 @@ func B(x int64) int64 { return A(x) }
 //golean:verify
 func C(x int64) int64 { return x }
 `)
-	write(t, "nested/unmarked.go", "package tree\nfunc Unmarked(x int64) int64 { return x / 2 }\n")
+	write(t, "nested/unmarked.go", "package tree\nfunc Unmarked(x int64) int64 { return x % 2 }\n")
 	write(t, "nested/skipped.go", "//go:build ignore\n\npackage tree\n//golean:verify\nfunc Skipped(x int64) int64 { return x }\n")
 
 	if err := run("transpile", "./..."); err != nil {
@@ -80,8 +80,8 @@ func C(x int64) int64 { return x }
 	if read(t, "a_gen.lean") != original || read(t, "nested/c_gen.lean") != "-- handwritten\n" {
 		t.Fatal("a conflicting output changed a file")
 	}
-	write(t, "nested/c.go", strings.ReplaceAll(read(t, "nested/c.go"), "return x", "return x / 2"))
-	if err := run("transpile", "./..."); err == nil || !strings.Contains(err.Error(), "unsupported runtime operation /") {
+	write(t, "nested/c.go", strings.ReplaceAll(read(t, "nested/c.go"), "return x", "return x % 2"))
+	if err := run("transpile", "./..."); err == nil || !strings.Contains(err.Error(), "unsupported runtime operation %") {
 		t.Fatalf("expected a subset error, got %v", err)
 	}
 	if read(t, "a_gen.lean") != original {

@@ -156,6 +156,7 @@ func diagnostic(fn *ssa.Function, pos token.Pos, format string, args ...any) err
 
 var binary = map[token.Token]ir.Operator{
 	token.ADD: ir.Add, token.SUB: ir.Subtract, token.MUL: ir.Multiply,
+	token.QUO: ir.Divide,
 	token.EQL: ir.Equal, token.NEQ: ir.NotEqual, token.LSS: ir.Less,
 	token.LEQ: ir.LessEqual, token.GTR: ir.Greater, token.GEQ: ir.GreaterEqual,
 }

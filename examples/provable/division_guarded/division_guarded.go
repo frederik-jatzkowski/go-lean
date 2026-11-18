@@ -1,5 +1,3 @@
-//go:build golean_planned
-
 package division_guarded
 
 //golean:verify

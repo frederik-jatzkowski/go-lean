@@ -67,7 +67,7 @@ func TestRejectUnsupportedSSA(t *testing.T) {
 	tests := []struct {
 		name, source, want string
 	}{
-		{"division", "func f(x int64) int64 { return x / 2 }", "unsupported runtime operation /"},
+		{"remainder", "func f(x int64) int64 { return x % 2 }", "unsupported runtime operation %"},
 		{"parameter", "func f(x int32) int64 { return 0 }", "parameter must have type int64"},
 		{"result", "func f(x int64) float64 { return 1 }", "expected a top-level function with an int64 result"},
 		{"loop", "func f(x int64) int64 { for x > 0 { x = x - 1 }; return x }", "control flow that joins or loops"},
@@ -117,9 +117,9 @@ func Add(x int64) int64 { return leaf.Add(x) }
 		t.Fatalf("expected one definition per function in dependency order:\n%s", got)
 	}
 
-	writeFile(t, leaf, "package leaf\nfunc Add(x int64) int64 { return x / 2 }\n")
+	writeFile(t, leaf, "package leaf\nfunc Add(x int64) int64 { return x % 2 }\n")
 	_, err = transpile.Generate(dir)
-	for _, want := range []string{"call to example.test/sample/middle.Add", "call to example.test/sample/leaf.Add", "unsupported runtime operation /"} {
+	for _, want := range []string{"call to example.test/sample/middle.Add", "call to example.test/sample/leaf.Add", "unsupported runtime operation %"} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("got %v, want %q in the call chain", err, want)
 		}

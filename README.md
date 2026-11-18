@@ -5,9 +5,9 @@
 ## Supported
 
 - Ordinary top-level functions with `int64` parameters and one `int64` result. Statically resolved calls can cross package boundaries when the callee's Go body is available and within the supported subset.
-- Folded Go constants and runtime `+`, `-`, and `*`. Lean `Int64` models Go's signed 64-bit wraparound. Branches support integer comparisons against values or constants.
-- Local bindings and assignments that lower to supported SSA values, plus early returns and branching without control-flow joins. The checker rejects runtime division, loops, recursive or indirect calls, and unsupported effects such as reads of mutable globals.
-- Checked proofs for arithmetic identities, wraparound, and clamp bounds and idempotence. The `clampimport` example proves the clamp properties using `Min` and `Max` translated from an imported Go package.
+- Folded Go constants and runtime `+`, `-`, `*`, and `/`. Lean `Int64` models Go's signed 64-bit wraparound. Runtime division truncates toward zero and lifts its function and transitive callers to `Option Int64`, with `none` for a zero divisor. Branches support integer comparisons against values or constants.
+- Local bindings and assignments that lower to supported SSA values, plus early returns and branching without control-flow joins. The checker rejects loops, recursive or indirect calls, and unsupported effects such as reads of mutable globals.
+- Checked proofs for arithmetic identities, wraparound, clamp bounds and idempotence, and guarded division panic freedom. The `clampimport` example proves the clamp properties using `Min` and `Max` translated from an imported Go package.
 
 ## Select functions to verify
 
@@ -36,16 +36,16 @@ Keep goroutine orchestration outside the initial pure subset. A future extension
 
 ## Recommended next step
 
-Add `int64` division with an explicit `Option Int64` result for functions that use it. Use `none` for runtime division by zero and preserve truncation toward zero and the `MinInt64 / -1` wraparound case. Add a guarded-division example with a Lean theorem showing that the guard prevents a division panic, plus regression tests for zero divisors, negative operands, and the signed boundary. This establishes the panic model on the existing scalar types before it is reused for indexing and dereferences.
+Extend the checked division proofs to cover a nonzero precondition, signed boundaries, and propagation of a division panic through a caller.
 
 ## Example index
 
-`examples/provable/` contains 32 examples. The default build regenerates and checks `arithmetic`, `clamp`, and `clampimport`. The other 29 have valid Go source behind the `golean_planned` build tag and draft Lean theorem statements with unfinished proofs. Lake builds the three working examples.
+`examples/provable/` contains 32 examples. The default build regenerates and checks `arithmetic`, `clamp`, `clampimport`, and `division_guarded`. The other 28 have valid Go source behind the `golean_planned` build tag and draft Lean theorem statements with unfinished proofs.
 
 | Area | Pending examples |
 | --- | --- |
 | Scalars and constants | `boolean_implication`, `narrow_signed`, `unsigned_wrap`, `machine_words`, `byte_rune`, `string_bytes`, `float32_rounding`, `float64_special`, `constant_conversions` |
-| Division and panic freedom | `division_guarded`, `division_precondition`, `division_propagation` |
+| Division and panic freedom | `division_precondition`, `division_propagation` |
 | Aggregates and references | `array_bounds`, `slice_bounds`, `slice_copy`, `map_lookup`, `map_build`, `struct_fields`, `embedded_struct`, `acyclic_list`, `nil_dereference` |
 | Control flow and termination | `branch_join`, `switch_value`, `switch_tagless`, `bounded_counter`, `range_fold` |
 | Generics and functions | `generic_identity`, `generic_map`, `immutable_closure` |

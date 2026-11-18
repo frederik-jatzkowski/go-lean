@@ -6,9 +6,10 @@ type Program struct {
 }
 
 type Function struct {
-	Symbol Symbol
-	Params []Binder
-	Body   Body
+	Symbol   Symbol
+	Params   []Binder
+	Body     Body
+	CanPanic bool
 }
 
 type Symbol struct {
@@ -30,8 +31,9 @@ type Body struct {
 }
 
 type Binding struct {
-	Binder Binder
-	Value  Expr
+	Binder   Binder
+	Value    Expr
+	CanPanic bool
 }
 
 type Result interface{ result() }
@@ -77,6 +79,7 @@ const (
 	Add Operator = iota
 	Subtract
 	Multiply
+	Divide
 	Equal
 	NotEqual
 	Less

@@ -3,6 +3,7 @@ package lower
 
 import (
 	"go/constant"
+	"go/token"
 	"net/url"
 
 	"github.com/frederik-jatzkowski/go-lean/internal/ir"
@@ -13,13 +14,17 @@ import (
 func FromSSA(checked subset.Checked, sourceStem string) ir.Program {
 	var program ir.Program
 	file := url.PathEscape(sourceStem)
+	// The checker orders callees before callers, so their effects are already known.
+	effects := make(map[*ssa.Function]bool)
 	for _, fn := range checked.Functions() {
-		l := lowerer{root: checked.Root(), file: file, bindings: make(map[ssa.Value]ir.Binder)}
+		l := lowerer{root: checked.Root(), file: file, bindings: make(map[ssa.Value]ir.Binder), effects: effects}
 		result := ir.Function{Symbol: l.symbol(fn)}
 		for _, param := range fn.Params {
 			result.Params = append(result.Params, l.bind(param))
 		}
 		result.Body = l.body(fn.Blocks[0])
+		result.CanPanic = l.canPanic
+		effects[fn] = result.CanPanic
 		program.Functions = append(program.Functions, result)
 	}
 	return program
@@ -29,6 +34,8 @@ type lowerer struct {
 	root     *ssa.Package
 	file     string
 	bindings map[ssa.Value]ir.Binder
+	effects  map[*ssa.Function]bool
+	canPanic bool
 }
 
 func (l *lowerer) symbol(fn *ssa.Function) ir.Symbol {
@@ -51,18 +58,27 @@ func (l *lowerer) body(block *ssa.BasicBlock) ir.Body {
 		switch ins := ins.(type) {
 		case *ssa.BinOp:
 			if !subset.IsComparison(ins.Op) {
-				result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: l.binary(ins)})
+				canPanic := ins.Op == token.QUO
+				result.Bindings = append(result.Bindings, ir.Binding{
+					Binder: l.bind(ins), Value: l.binary(ins), CanPanic: canPanic,
+				})
+				l.canPanic = l.canPanic || canPanic
 			}
 		case *ssa.UnOp:
 			result.Bindings = append(result.Bindings, ir.Binding{
 				Binder: l.bind(ins), Value: ir.Negate{Value: l.value(ins.X)},
 			})
 		case *ssa.Call:
-			call := ir.Call{Callee: l.symbol(ins.Call.StaticCallee())}
+			target := ins.Call.StaticCallee()
+			call := ir.Call{Callee: l.symbol(target)}
 			for _, arg := range ins.Call.Args {
 				call.Args = append(call.Args, l.value(arg))
 			}
-			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: call})
+			canPanic := l.effects[target]
+			result.Bindings = append(result.Bindings, ir.Binding{
+				Binder: l.bind(ins), Value: call, CanPanic: canPanic,
+			})
+			l.canPanic = l.canPanic || canPanic
 		case *ssa.If:
 			result.Result = ir.If{
 				Condition: l.condition(ins.Cond),

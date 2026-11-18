@@ -21,25 +21,37 @@ func Render(program ir.Program) string {
 		for _, param := range fn.Params {
 			fmt.Fprintf(&out, " (%s : Int64)", binderName(param))
 		}
-		out.WriteString(" : Int64 :=\n")
-		renderBody(&out, fn.Body, "  ")
+		if fn.CanPanic {
+			out.WriteString(" : Option Int64 := do\n")
+		} else {
+			out.WriteString(" : Int64 :=\n")
+		}
+		renderBody(&out, fn.Body, "  ", fn.CanPanic)
 	}
 	out.WriteString("\nend GoLean\n")
 	return out.String()
 }
 
-func renderBody(out *strings.Builder, body ir.Body, indent string) {
+func renderBody(out *strings.Builder, body ir.Body, indent string, canPanic bool) {
 	for _, binding := range body.Bindings {
-		fmt.Fprintf(out, "%slet %s : Int64 := %s\n", indent, binderName(binding.Binder), renderExpr(binding.Value))
+		operator := ":="
+		if binding.CanPanic {
+			operator = "←"
+		}
+		fmt.Fprintf(out, "%slet %s : Int64 %s %s\n", indent, binderName(binding.Binder), operator, renderExpr(binding.Value))
 	}
 	switch result := body.Result.(type) {
 	case ir.Return:
-		fmt.Fprintf(out, "%s%s\n", indent, renderExpr(result.Value))
+		out.WriteString(indent)
+		if canPanic {
+			out.WriteString("return ")
+		}
+		fmt.Fprintln(out, renderExpr(result.Value))
 	case ir.If:
 		fmt.Fprintf(out, "%sif %s then\n", indent, renderExpr(result.Condition))
-		renderBody(out, result.Then, indent+"  ")
+		renderBody(out, result.Then, indent+"  ", canPanic)
 		fmt.Fprintf(out, "%selse\n", indent)
-		renderBody(out, result.Else, indent+"  ")
+		renderBody(out, result.Else, indent+"  ", canPanic)
 	default:
 		panic("unexpected IR result")
 	}
@@ -59,7 +71,11 @@ func renderExpr(expr ir.Expr) string {
 	case ir.Negate:
 		return "(-" + renderExpr(expr.Value) + ")"
 	case ir.Binary:
-		return fmt.Sprintf("(%s %s %s)", renderExpr(expr.Left), operators[expr.Op], renderExpr(expr.Right))
+		left, right := renderExpr(expr.Left), renderExpr(expr.Right)
+		if expr.Op == ir.Divide {
+			return fmt.Sprintf("if %s = 0 then none else some (Int64.ofInt ((%s).toInt.tdiv (%s).toInt))", right, left, right)
+		}
+		return fmt.Sprintf("(%s %s %s)", left, operators[expr.Op], right)
 	case ir.Call:
 		call := "_root_.GoLean." + symbolName(expr.Callee)
 		if len(expr.Args) == 0 {

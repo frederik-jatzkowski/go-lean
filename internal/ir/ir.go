@@ -29,20 +29,23 @@ type Binder struct {
 type Type string
 
 const (
-	Int8  Type = "Int8"
-	Int16 Type = "Int16"
-	Int32 Type = "Int32"
-	Int64 Type = "Int64"
-	Bool  Type = "Bool"
+	Int8   Type = "Int8"
+	Int16  Type = "Int16"
+	Int32  Type = "Int32"
+	Int64  Type = "Int64"
+	UInt8  Type = "UInt8"
+	UInt16 Type = "UInt16"
+	UInt32 Type = "UInt32"
+	UInt64 Type = "UInt64"
+	Bool   Type = "Bool"
 )
 
 func (t Type) IsInteger() bool {
-	switch t {
-	case Int8, Int16, Int32, Int64:
-		return true
-	default:
-		return false
-	}
+	return t == Int8 || t == Int16 || t == Int32 || t == Int64 || t.IsUnsigned()
+}
+
+func (t Type) IsUnsigned() bool {
+	return t == UInt8 || t == UInt16 || t == UInt32 || t == UInt64
 }
 
 // Body introduces immutable bindings and ends in a return or a returning branch.

@@ -190,6 +190,14 @@ func Type(t types.Type) ir.Type {
 			return ir.Int32
 		case types.Int64:
 			return ir.Int64
+		case types.Uint8:
+			return ir.UInt8
+		case types.Uint16:
+			return ir.UInt16
+		case types.Uint32:
+			return ir.UInt32
+		case types.Uint64:
+			return ir.UInt64
 		case types.Bool, types.UntypedBool:
 			return ir.Bool
 		}

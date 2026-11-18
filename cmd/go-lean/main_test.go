@@ -26,6 +26,7 @@ func TestExamplesMatchGeneratedOutput(t *testing.T) {
 	for _, example := range []string{
 		"arithmetic", "boolean_implication", "clamp", "clampimport",
 		"division_guarded", "division_precondition", "division_propagation", "narrow_signed",
+		"unsigned_wrap",
 	} {
 		if !found[example+"_gen.lean"] {
 			t.Errorf("missing generated module for %s", example)

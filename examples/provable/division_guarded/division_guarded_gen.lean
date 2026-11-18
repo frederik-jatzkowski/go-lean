@@ -6,10 +6,11 @@ set_option linter.unusedVariables false
 namespace GoLean
 
 def «github.com/frederik-jatzkowski/go-lean/examples/provable/division_guarded».«division_guarded».«DivideOr» («v0_x» : Int64) («v1_divisor» : Int64) («v2_fallback» : Int64) : Option Int64 := do
-  if («v1_divisor» = (Int64.ofInt (0))) then
+  let «v3_t0» : Bool := (decide («v1_divisor» = (Int64.ofInt (0))))
+  if «v3_t0» then
     return «v2_fallback»
   else
-    let «v3_t1» : Int64 ← if «v1_divisor» = 0 then none else some (Int64.ofInt ((«v0_x»).toInt.tdiv («v1_divisor»).toInt))
-    return «v3_t1»
+    let «v4_t1» : Int64 ← if «v1_divisor» = 0 then none else some (Int64.ofInt ((«v0_x»).toInt.tdiv («v1_divisor»).toInt))
+    return «v4_t1»
 
 end GoLean

@@ -19,12 +19,12 @@ func Render(program ir.Program) string {
 	for _, fn := range program.Functions {
 		fmt.Fprintf(&out, "\ndef %s", symbolName(fn.Symbol))
 		for _, param := range fn.Params {
-			fmt.Fprintf(&out, " (%s : Int64)", binderName(param))
+			fmt.Fprintf(&out, " (%s : %s)", binderName(param), param.Type)
 		}
 		if fn.CanPanic {
-			out.WriteString(" : Option Int64 := do\n")
+			fmt.Fprintf(&out, " : Option %s := do\n", fn.Result)
 		} else {
-			out.WriteString(" : Int64 :=\n")
+			fmt.Fprintf(&out, " : %s :=\n", fn.Result)
 		}
 		renderBody(&out, fn.Body, "  ", fn.CanPanic)
 	}
@@ -38,7 +38,7 @@ func renderBody(out *strings.Builder, body ir.Body, indent string, canPanic bool
 		if binding.CanPanic {
 			operator = "←"
 		}
-		fmt.Fprintf(out, "%slet %s : Int64 %s %s\n", indent, binderName(binding.Binder), operator, renderExpr(binding.Value))
+		fmt.Fprintf(out, "%slet %s : %s %s %s\n", indent, binderName(binding.Binder), binding.Binder.Type, operator, renderExpr(binding.Value))
 	}
 	switch result := body.Result.(type) {
 	case ir.Return:
@@ -63,19 +63,25 @@ func renderExpr(expr ir.Expr) string {
 		return fmt.Sprintf("(Int64.ofInt (%s))", expr)
 	case ir.BoolLiteral:
 		if expr {
-			return "True"
+			return "true"
 		}
-		return "False"
+		return "false"
 	case ir.Ref:
 		return binderName(ir.Binder(expr))
 	case ir.Negate:
 		return "(-" + renderExpr(expr.Value) + ")"
+	case ir.Not:
+		return "(!" + renderExpr(expr.Value) + ")"
 	case ir.Binary:
 		left, right := renderExpr(expr.Left), renderExpr(expr.Right)
 		if expr.Op == ir.Divide {
 			return fmt.Sprintf("if %s = 0 then none else some (Int64.ofInt ((%s).toInt.tdiv (%s).toInt))", right, left, right)
 		}
-		return fmt.Sprintf("(%s %s %s)", left, operators[expr.Op], right)
+		value := fmt.Sprintf("(%s %s %s)", left, operators[expr.Op], right)
+		if expr.Op >= ir.Equal {
+			return "(decide " + value + ")"
+		}
+		return value
 	case ir.Call:
 		call := "_root_.GoLean." + symbolName(expr.Callee)
 		if len(expr.Args) == 0 {

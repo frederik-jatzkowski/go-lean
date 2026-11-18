@@ -6,10 +6,12 @@ set_option linter.unusedVariables false
 namespace GoLean
 
 def «github.com/frederik-jatzkowski/go-lean/examples/provable/clamp».«clamp».«Clamp» («v0_value» : Int64) («v1_low» : Int64) («v2_high» : Int64) : Int64 :=
-  if («v0_value» < «v1_low») then
+  let «v3_t0» : Bool := (decide («v0_value» < «v1_low»))
+  if «v3_t0» then
     «v1_low»
   else
-    if («v0_value» > «v2_high») then
+    let «v4_t1» : Bool := (decide («v0_value» > «v2_high»))
+    if «v4_t1» then
       «v2_high»
     else
       «v0_value»

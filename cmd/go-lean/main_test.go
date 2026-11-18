@@ -23,7 +23,7 @@ func TestExamplesMatchGeneratedOutput(t *testing.T) {
 			t.Errorf("%s differs from transpiler output. Run make generate.", output.Path)
 		}
 	}
-	for _, example := range []string{"arithmetic", "clamp", "clampimport", "division_guarded", "division_precondition", "division_propagation"} {
+	for _, example := range []string{"arithmetic", "boolean_implication", "clamp", "clampimport", "division_guarded", "division_precondition", "division_propagation"} {
 		if !found[example+"_gen.lean"] {
 			t.Errorf("missing generated module for %s", example)
 		}

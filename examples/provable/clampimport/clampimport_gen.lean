@@ -6,13 +6,15 @@ set_option linter.unusedVariables false
 namespace GoLean
 
 def «github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport».«clampimport».Dependencies.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport/limits».«Max» («v0_x» : Int64) («v1_y» : Int64) : Int64 :=
-  if («v0_x» > «v1_y») then
+  let «v2_t0» : Bool := (decide («v0_x» > «v1_y»))
+  if «v2_t0» then
     «v0_x»
   else
     «v1_y»
 
 def «github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport».«clampimport».Dependencies.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport/limits».«Min» («v0_x» : Int64) («v1_y» : Int64) : Int64 :=
-  if («v0_x» < «v1_y») then
+  let «v2_t0» : Bool := (decide («v0_x» < «v1_y»))
+  if «v2_t0» then
     «v0_x»
   else
     «v1_y»

@@ -8,6 +8,7 @@ type Program struct {
 type Function struct {
 	Symbol   Symbol
 	Params   []Binder
+	Result   Type
 	Body     Body
 	CanPanic bool
 }
@@ -22,7 +23,15 @@ type Symbol struct {
 type Binder struct {
 	Name  string
 	Index int
+	Type  Type
 }
+
+type Type string
+
+const (
+	Int64 Type = "Int64"
+	Bool  Type = "Bool"
+)
 
 // Body introduces immutable bindings and ends in a return or a returning branch.
 type Body struct {
@@ -55,6 +64,7 @@ type IntLiteral string
 type BoolLiteral bool
 type Ref Binder
 type Negate struct{ Value Expr }
+type Not struct{ Value Expr }
 
 type Call struct {
 	Callee Symbol
@@ -70,6 +80,7 @@ func (IntLiteral) expr()  {}
 func (BoolLiteral) expr() {}
 func (Ref) expr()         {}
 func (Negate) expr()      {}
+func (Not) expr()         {}
 func (Binary) expr()      {}
 func (Call) expr()        {}
 

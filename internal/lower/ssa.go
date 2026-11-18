@@ -5,6 +5,7 @@ import (
 	"go/constant"
 	"go/token"
 	"net/url"
+	"slices"
 
 	"github.com/frederik-jatzkowski/go-lean/internal/ir"
 	"github.com/frederik-jatzkowski/go-lean/internal/subset"
@@ -18,11 +19,11 @@ func FromSSA(checked subset.Checked, sourceStem string) ir.Program {
 	effects := make(map[*ssa.Function]bool)
 	for _, fn := range checked.Functions() {
 		l := lowerer{root: checked.Root(), file: file, bindings: make(map[ssa.Value]ir.Binder), effects: effects}
-		result := ir.Function{Symbol: l.symbol(fn)}
+		result := ir.Function{Symbol: l.symbol(fn), Result: subset.Type(fn.Signature.Results().At(0).Type())}
 		for _, param := range fn.Params {
 			result.Params = append(result.Params, l.bind(param))
 		}
-		result.Body = l.body(fn.Blocks[0])
+		result.Body = l.body(fn.Blocks[0], nil)
 		result.CanPanic = l.canPanic
 		effects[fn] = result.CanPanic
 		program.Functions = append(program.Functions, result)
@@ -36,6 +37,7 @@ type lowerer struct {
 	bindings map[ssa.Value]ir.Binder
 	effects  map[*ssa.Function]bool
 	canPanic bool
+	next     int
 }
 
 func (l *lowerer) symbol(fn *ssa.Function) ir.Symbol {
@@ -47,26 +49,30 @@ func (l *lowerer) symbol(fn *ssa.Function) ir.Symbol {
 }
 
 func (l *lowerer) bind(value ssa.Value) ir.Binder {
-	binder := ir.Binder{Name: value.Name(), Index: len(l.bindings)}
+	binder := ir.Binder{Name: value.Name(), Index: l.next, Type: subset.Type(value.Type())}
+	l.next++
 	l.bindings[value] = binder
 	return binder
 }
 
-func (l *lowerer) body(block *ssa.BasicBlock) ir.Body {
+func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 	var result ir.Body
 	for _, ins := range block.Instrs {
 		switch ins := ins.(type) {
 		case *ssa.BinOp:
-			if !subset.IsComparison(ins.Op) {
-				canPanic := ins.Op == token.QUO
-				result.Bindings = append(result.Bindings, ir.Binding{
-					Binder: l.bind(ins), Value: l.binary(ins), CanPanic: canPanic,
-				})
-				l.canPanic = l.canPanic || canPanic
-			}
-		case *ssa.UnOp:
+			canPanic := ins.Op == token.QUO
 			result.Bindings = append(result.Bindings, ir.Binding{
-				Binder: l.bind(ins), Value: ir.Negate{Value: l.value(ins.X)},
+				Binder: l.bind(ins), Value: l.binary(ins), CanPanic: canPanic,
+			})
+			l.canPanic = l.canPanic || canPanic
+		case *ssa.UnOp:
+			operand := l.value(ins.X)
+			var value ir.Expr = ir.Negate{Value: operand}
+			if ins.Op == token.NOT {
+				value = ir.Not{Value: operand}
+			}
+			result.Bindings = append(result.Bindings, ir.Binding{
+				Binder: l.bind(ins), Value: value,
 			})
 		case *ssa.Call:
 			target := ins.Call.StaticCallee()
@@ -81,14 +87,18 @@ func (l *lowerer) body(block *ssa.BasicBlock) ir.Body {
 			l.canPanic = l.canPanic || canPanic
 		case *ssa.If:
 			result.Result = ir.If{
-				Condition: l.condition(ins.Cond),
-				Then:      l.body(block.Succs[0]),
-				Else:      l.body(block.Succs[1]),
+				Condition: l.value(ins.Cond),
+				Then:      l.body(block.Succs[0], block),
+				Else:      l.body(block.Succs[1], block),
 			}
+		case *ssa.Phi:
+			// Each branch contains only the computations along its own path.
+			edge := ins.Edges[slices.Index(block.Preds, predecessor)]
+			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: l.value(edge)})
 		case *ssa.Return:
 			result.Result = ir.Return{Value: l.value(ins.Results[0])}
 		case *ssa.Jump:
-			next := l.body(block.Succs[0])
+			next := l.body(block.Succs[0], block)
 			result.Bindings = append(result.Bindings, next.Bindings...)
 			result.Result = next.Result
 		}
@@ -98,19 +108,15 @@ func (l *lowerer) body(block *ssa.BasicBlock) ir.Body {
 
 func (l *lowerer) value(value ssa.Value) ir.Expr {
 	if c, ok := value.(*ssa.Const); ok {
+		if c.Value.Kind() == constant.Bool {
+			return ir.BoolLiteral(constant.BoolVal(c.Value))
+		}
 		return ir.IntLiteral(c.Value.ExactString())
 	}
 	if binder, ok := l.bindings[value]; ok {
 		return ir.Ref(binder)
 	}
 	panic("missing binding for checked SSA value: " + value.String())
-}
-
-func (l *lowerer) condition(value ssa.Value) ir.Expr {
-	if c, ok := value.(*ssa.Const); ok {
-		return ir.BoolLiteral(constant.BoolVal(c.Value))
-	}
-	return l.binary(value.(*ssa.BinOp))
 }
 
 func (l *lowerer) binary(expr *ssa.BinOp) ir.Binary {

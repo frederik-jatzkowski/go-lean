@@ -7,6 +7,7 @@ name = "ExampleProofs"
 srcDir = "examples/provable"
 roots = [
   "arithmetic.arithmetic_gen", "arithmetic.arithmetic_proofs",
+  "boolean_implication.boolean_implication_gen", "boolean_implication.boolean_implication_proofs",
   "clamp.clamp_gen", "clamp.clamp_proofs",
   "clampimport.clampimport_gen", "clampimport.clampimport_proofs",
   "division_guarded.division_guarded_gen", "division_guarded.division_guarded_proofs",

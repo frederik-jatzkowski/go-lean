@@ -53,19 +53,17 @@ func (c *checker) function(fn *ssa.Function) error {
 	sig := fn.Signature
 	if fn.Pkg == nil || fn.Parent() != nil || fn.Synthetic != "" || sig.Recv() != nil ||
 		sig.TypeParams().Len() != 0 || sig.Variadic() ||
-		sig.Results().Len() != 1 || !isInt64(sig.Results().At(0).Type()) {
-		return diagnostic(fn, fn.Pos(), "expected a top-level function with an int64 result and no type parameters or variadic arguments")
+		sig.Results().Len() != 1 || Type(sig.Results().At(0).Type()) == "" {
+		return diagnostic(fn, fn.Pos(), "expected a top-level function with an int64 or bool result and no type parameters or variadic arguments")
 	}
 	for _, param := range fn.Params {
-		if !isInt64(param.Type()) {
-			return diagnostic(fn, param.Pos(), "parameter must have type int64")
+		if Type(param.Type()) == "" {
+			return diagnostic(fn, param.Pos(), "parameter must have type int64 or bool")
 		}
 	}
 	c.visiting[fn] = true
-	for i, block := range fn.Blocks {
-		if (i == 0 && len(block.Preds) != 0) || (i != 0 && len(block.Preds) != 1) {
-			return diagnostic(fn, block.Instrs[0].Pos(), "control flow that joins or loops is unsupported")
-		}
+	if err := checkAcyclic(fn); err != nil {
+		return err
 	}
 	for _, block := range fn.Blocks {
 		for _, ins := range block.Instrs {
@@ -80,16 +78,40 @@ func (c *checker) function(fn *ssa.Function) error {
 	return nil
 }
 
+func checkAcyclic(fn *ssa.Function) error {
+	const visiting, done = 1, 2
+	states := make([]int, len(fn.Blocks))
+	var visit func(*ssa.BasicBlock) error
+	visit = func(block *ssa.BasicBlock) error {
+		switch states[block.Index] {
+		case visiting:
+			return diagnostic(fn, block.Instrs[0].Pos(), "control-flow loops are unsupported")
+		case done:
+			return nil
+		}
+		states[block.Index] = visiting
+		for _, successor := range block.Succs {
+			if err := visit(successor); err != nil {
+				return err
+			}
+		}
+		states[block.Index] = done
+		return nil
+	}
+	return visit(fn.Blocks[0])
+}
+
 func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 	switch ins := ins.(type) {
 	case *ssa.BinOp:
 		_, supported := Binary(ins.Op)
-		if supported && integer(ins.X) && integer(ins.Y) {
+		if supported && (hasType(ins.X, ir.Int64) && hasType(ins.Y, ir.Int64) ||
+			(ins.Op == token.EQL || ins.Op == token.NEQ) && hasType(ins.X, ir.Bool) && hasType(ins.Y, ir.Bool)) {
 			return nil
 		}
 		return diagnostic(fn, ins.Pos(), "unsupported runtime operation %s on %s and %s", ins.Op, ins.X.Type(), ins.Y.Type())
 	case *ssa.UnOp:
-		if ins.Op == token.SUB && integer(ins.X) {
+		if ins.Op == token.SUB && hasType(ins.X, ir.Int64) || ins.Op == token.NOT && hasType(ins.X, ir.Bool) {
 			return nil
 		}
 		return diagnostic(fn, ins.Pos(), "unsupported unary operation %s on %s", ins.Op, ins.X.Type())
@@ -99,8 +121,8 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 			return diagnostic(fn, ins.Pos(), "unsupported call to %s; expected a statically resolved Go function", ins.Call.Value)
 		}
 		for _, arg := range ins.Call.Args {
-			if !integer(arg) {
-				return diagnostic(fn, ins.Pos(), "call to %s must have int64 arguments", callee)
+			if !scalar(arg) {
+				return diagnostic(fn, ins.Pos(), "call to %s must have int64 or bool arguments", callee)
 			}
 		}
 		if err := c.function(callee); err != nil {
@@ -108,22 +130,25 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		}
 		return nil
 	case *ssa.If:
-		switch cond := ins.Cond.(type) {
-		case *ssa.Const:
-			if cond.Value != nil && cond.Value.Kind() == constant.Bool {
-				return nil
-			}
-		case *ssa.BinOp:
-			if IsComparison(cond.Op) && integer(cond.X) && integer(cond.Y) {
-				return nil
-			}
-		}
-		return diagnostic(fn, ins.Cond.Pos(), "branch must compare integers")
-	case *ssa.Return:
-		if len(ins.Results) == 1 && integer(ins.Results[0]) {
+		if hasType(ins.Cond, ir.Bool) {
 			return nil
 		}
-		return diagnostic(fn, ins.Pos(), "return must have one int64 value")
+		return diagnostic(fn, ins.Cond.Pos(), "branch condition must be a supported bool value")
+	case *ssa.Phi:
+		if Type(ins.Type()) != ir.Bool {
+			return diagnostic(fn, ins.Pos(), "control-flow joins with non-bool values are unsupported")
+		}
+		for _, edge := range ins.Edges {
+			if !hasType(edge, ir.Bool) {
+				return diagnostic(fn, ins.Pos(), "control-flow joins require supported bool values")
+			}
+		}
+		return nil
+	case *ssa.Return:
+		if len(ins.Results) == 1 && scalar(ins.Results[0]) {
+			return nil
+		}
+		return diagnostic(fn, ins.Pos(), "return must have one int64 or bool value")
 	case *ssa.Jump:
 		return nil
 	default:
@@ -131,21 +156,38 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 	}
 }
 
-func integer(value ssa.Value) bool {
-	if !isInt64(value.Type()) {
+func hasType(value ssa.Value, want ir.Type) bool {
+	return Type(value.Type()) == want && scalar(value)
+}
+
+func scalar(value ssa.Value) bool {
+	typ := Type(value.Type())
+	if typ == "" {
 		return false
 	}
 	switch value := value.(type) {
 	case *ssa.Const:
-		return value.Value != nil && value.Value.Kind() == constant.Int
-	case *ssa.Parameter, *ssa.BinOp, *ssa.UnOp, *ssa.Call:
+		return value.Value != nil &&
+			(typ == ir.Int64 && value.Value.Kind() == constant.Int ||
+				typ == ir.Bool && value.Value.Kind() == constant.Bool)
+	case *ssa.Parameter, *ssa.BinOp, *ssa.UnOp, *ssa.Call, *ssa.Phi:
 		return true
 	default:
 		return false
 	}
 }
 
-func isInt64(t types.Type) bool { return types.Identical(t, types.Typ[types.Int64]) }
+func Type(t types.Type) ir.Type {
+	if basic, ok := types.Unalias(t).(*types.Basic); ok {
+		switch basic.Kind() {
+		case types.Int64:
+			return ir.Int64
+		case types.Bool, types.UntypedBool:
+			return ir.Bool
+		}
+	}
+	return ""
+}
 
 func diagnostic(fn *ssa.Function, pos token.Pos, format string, args ...any) error {
 	if !pos.IsValid() {
@@ -164,9 +206,4 @@ var binary = map[token.Token]ir.Operator{
 func Binary(op token.Token) (ir.Operator, bool) {
 	result, ok := binary[op]
 	return result, ok
-}
-
-func IsComparison(op token.Token) bool {
-	mapped, ok := Binary(op)
-	return ok && mapped >= ir.Equal
 }

@@ -69,9 +69,9 @@ func TestRejectUnsupportedSSA(t *testing.T) {
 	}{
 		{"remainder", "func f(x int64) int64 { return x % 2 }", "unsupported runtime operation %"},
 		{"parameter", "func f(x int32) int64 { return 0 }", "parameter must have type int64"},
-		{"result", "func f(x int64) float64 { return 1 }", "expected a top-level function with an int64 result"},
-		{"loop", "func f(x int64) int64 { for x > 0 { x = x - 1 }; return x }", "control flow that joins or loops"},
-		{"join", "func f(x int64) int64 { if x < 0 { x = 0 }; return x }", "control flow that joins or loops"},
+		{"result", "func f(x int64) float64 { return 1 }", "expected a top-level function with an int64 or bool result"},
+		{"loop", "func f(x int64) int64 { for x > 0 { x = x - 1 }; return x }", "control-flow loops are unsupported"},
+		{"join", "func f(x int64) int64 { if x < 0 { x = 0 }; return x }", "control-flow joins with non-bool values are unsupported"},
 		{"global", "func f() int64 { return n }; var n int64", "unsupported unary operation *"},
 		{"recursion", "func f(x int64) int64 { return f(x) }", "recursive calls are unsupported"},
 		{"panic", "func f(x int64) int64 { panic(x) }", "unsupported SSA instruction"},

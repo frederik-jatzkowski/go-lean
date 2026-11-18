@@ -36,6 +36,8 @@ func FromSSA(checked subset.Checked, sourceStem string, wordBits int64) ir.Progr
 		}
 		if loop := checked.CountedLoop(fn); loop != nil {
 			l.lowerCountedLoop(&result, loop)
+		} else if fold := checked.RangeFold(fn); fold != nil {
+			result.Body.Result = l.lowerRangeFold(fold)
 		} else {
 			result.Body = l.body(fn.Blocks[0], nil)
 		}
@@ -59,7 +61,26 @@ func (l *lowerer) lowerCountedLoop(fn *ir.Function, loop *subset.CountedLoop) {
 			call.Args = append(call.Args, ir.Ref(param))
 		}
 	}
-	for _, step := range loop.Steps {
+	helper.Steps = l.accumulatorSteps(loop.Steps)
+	helper.Next = l.value(loop.Next)
+	call.Args = append(call.Args, ir.ToNat{Value: l.value(loop.Bound)}, l.value(loop.Initial))
+	fn.Body.Result = ir.Return{Value: call}
+	fn.Loop = &helper
+}
+
+func (l *lowerer) lowerRangeFold(fold *subset.RangeFold) ir.ListFold {
+	result := ir.ListFold{
+		Sequence: l.value(fold.Source), Initial: l.value(fold.Initial),
+		State: l.bind(fold.State), Element: l.bind(fold.Element),
+	}
+	result.Steps = l.accumulatorSteps(fold.Steps)
+	result.Next = l.value(fold.Next)
+	return result
+}
+
+func (l *lowerer) accumulatorSteps(values []ssa.Value) []ir.Binding {
+	var steps []ir.Binding
+	for _, step := range values {
 		var expr ir.Expr
 		switch step := step.(type) {
 		case *ssa.BinOp:
@@ -67,12 +88,9 @@ func (l *lowerer) lowerCountedLoop(fn *ir.Function, loop *subset.CountedLoop) {
 		case *ssa.UnOp:
 			expr = ir.Negate{Value: l.value(step.X)}
 		}
-		helper.Steps = append(helper.Steps, ir.Binding{Binder: l.bind(step), Value: expr})
+		steps = append(steps, ir.Binding{Binder: l.bind(step), Value: expr})
 	}
-	helper.Next = l.value(loop.Next)
-	call.Args = append(call.Args, ir.ToNat{Value: l.value(loop.Bound)}, l.value(loop.Initial))
-	fn.Body.Result = ir.Return{Value: call}
-	fn.Loop = &helper
+	return steps
 }
 
 type lowerer struct {

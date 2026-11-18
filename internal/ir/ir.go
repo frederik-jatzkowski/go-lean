@@ -142,8 +142,18 @@ type If struct {
 	Else      Body
 }
 
-func (Return) result() {}
-func (If) result()     {}
+type ListFold struct {
+	Sequence Expr
+	Initial  Expr
+	State    Binder
+	Element  Binder
+	Steps    []Binding
+	Next     Expr
+}
+
+func (Return) result()   {}
+func (If) result()       {}
+func (ListFold) result() {}
 
 type Expr interface{ expr() }
 

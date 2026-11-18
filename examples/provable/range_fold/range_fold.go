@@ -1,5 +1,3 @@
-//go:build golean_planned
-
 package range_fold
 
 //golean:verify

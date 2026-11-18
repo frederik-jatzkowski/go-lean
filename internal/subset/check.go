@@ -19,12 +19,15 @@ type Checked struct {
 	records   map[*ssa.Alloc]RecordCell
 	arrays    map[*ssa.Alloc]*ssa.Store
 	loops     map[*ssa.Function]*CountedLoop
+	ranges    map[*ssa.Function]*RangeFold
 }
 
 func (c Checked) Root() *ssa.Package         { return c.root }
 func (c Checked) Functions() []*ssa.Function { return c.functions }
 
 func (c Checked) CountedLoop(fn *ssa.Function) *CountedLoop { return c.loops[fn] }
+
+func (c Checked) RangeFold(fn *ssa.Function) *RangeFold { return c.ranges[fn] }
 
 func (c Checked) ArrayInitializer(value ssa.Value) *ssa.Store {
 	cell, _ := value.(*ssa.Alloc)
@@ -47,13 +50,16 @@ func Check(program gosource.Program) (Checked, error) {
 		records:  make(map[*ssa.Alloc]RecordCell),
 		arrays:   make(map[*ssa.Alloc]*ssa.Store),
 		loops:    make(map[*ssa.Function]*CountedLoop),
+		ranges:   make(map[*ssa.Function]*RangeFold),
 	}
 	for _, fn := range program.Roots {
 		if err := c.function(fn); err != nil {
 			return Checked{}, err
 		}
 	}
-	return Checked{root: program.Package, functions: c.ordered, records: c.records, arrays: c.arrays, loops: c.loops}, nil
+	return Checked{
+		root: program.Package, functions: c.ordered, records: c.records, arrays: c.arrays, loops: c.loops, ranges: c.ranges,
+	}, nil
 }
 
 type checker struct {
@@ -64,6 +70,7 @@ type checker struct {
 	records  map[*ssa.Alloc]RecordCell
 	arrays   map[*ssa.Alloc]*ssa.Store
 	loops    map[*ssa.Function]*CountedLoop
+	ranges   map[*ssa.Function]*RangeFold
 }
 
 func (c *checker) function(fn *ssa.Function) error {
@@ -105,6 +112,8 @@ func (c *checker) function(fn *ssa.Function) error {
 	c.visiting[fn] = true
 	if loop := checkCountedLoop(fn); loop != nil {
 		c.loops[fn] = loop
+	} else if fold := checkRangeFold(fn); fold != nil {
+		c.ranges[fn] = fold
 	} else if err := c.checkOrdinaryBody(fn); err != nil {
 		return err
 	}

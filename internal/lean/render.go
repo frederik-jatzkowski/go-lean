@@ -133,6 +133,13 @@ func (r renderer) renderBody(out *strings.Builder, body ir.Body, indent string, 
 		r.renderBody(out, result.Then, indent+"  ", canPanic)
 		fmt.Fprintf(out, "%selse\n", indent)
 		r.renderBody(out, result.Else, indent+"  ", canPanic)
+	case ir.ListFold:
+		fmt.Fprintf(out, "%sList.foldl (fun", indent)
+		r.renderParams(out, []ir.Binder{result.State, result.Element})
+		out.WriteString(" =>\n")
+		r.renderBindings(out, result.Steps, indent+"  ")
+		fmt.Fprintf(out, "%s%s) %s %s\n",
+			indent+"  ", r.renderExpr(result.Next), r.renderExpr(result.Initial), r.renderExpr(result.Sequence))
 	default:
 		panic("unexpected IR result")
 	}

@@ -155,6 +155,29 @@ func power(seed, factor int64, count uint8) int64 {
 	}
 }
 
+func TestRangeFoldPreservesSeedAndUpdate(t *testing.T) {
+	dir := newModule(t)
+	writeFile(t, filepath.Join(dir, "input.go"), `package sample
+//golean:verify
+func accumulate(input []int64, seed, scale int64) int64 {
+	total := seed
+	for _, item := range input {
+		total -= item * scale
+	}
+	return total
+}
+`)
+	outputs, err := transpile.Generate(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"List.foldl (fun", " * «v2_scale»", " - ", ") «v1_seed» «v0_input»"} {
+		if !strings.Contains(outputs[0].Source, want) {
+			t.Errorf("missing %q in output:\n%s", want, outputs[0].Source)
+		}
+	}
+}
+
 func TestRejectUnsupportedSSA(t *testing.T) {
 	tests := []struct {
 		name, source, want string
@@ -184,6 +207,8 @@ func TestRejectUnsupportedSSA(t *testing.T) {
 		{"loop", "func f(x int64) int64 { for x > 0 { x = x - 1 }; return x }", "control-flow loops are unsupported"},
 		{"counted loop with nonunit step", "func f(x int64, count uint8) int64 { var acc int64; for i := uint8(0); i < count; i += 2 { acc += x }; return acc }", "control-flow loops are unsupported"},
 		{"counted loop with changing bound", "func f(x int64, count uint8) int64 { var acc int64; for i := uint8(0); i < count; i++ { acc += x; count-- }; return acc }", "control-flow loops are unsupported"},
+		{"range reads different index", "func f(xs []int64) int64 { var acc int64; for i := range xs { acc += xs[i+1] }; return acc }", "control-flow loops are unsupported"},
+		{"range mutates slice", "func f(xs []int64) int64 { var acc int64; for i, v := range xs { xs[i] = 0; acc += v }; return acc }", "control-flow loops are unsupported"},
 		{"global", "func f() int64 { return n }; var n int64", "unsupported unary operation *"},
 		{"recursion", "func f(x int64) int64 { return f(x) }", "recursive calls are unsupported"},
 		{"panic", "func f(x int64) int64 { panic(x) }", "unsupported SSA instruction"},

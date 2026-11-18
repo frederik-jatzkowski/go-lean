@@ -98,7 +98,10 @@ func TestRejectUnsupportedSSA(t *testing.T) {
 	}{
 		{"remainder", "func f(x int64) int64 { return x % 2 }", "unsupported runtime operation %"},
 		{"parameter", "func f(x complex64) int64 { return 0 }", "parameter must have a supported scalar type"},
-		{"result", "func f(x int64) complex64 { return 1 }", "expected a top-level function with one supported scalar result"},
+		{"result", "func f(x int64) complex64 { return 1 }", "expected a top-level function with one supported result"},
+		{"dynamic any", "func f(x any) int64 { return 0 }", "parameter must have a supported scalar type"},
+		{"constrained generic", "func f[T interface{ M() }](x T) T { return x }", "must use the unrestricted any constraint"},
+		{"generic call", "func f(x int64) int64 { return id(x) }; func id[T any](x T) T { return x }", "calls to generic functions are unsupported"},
 		{"float32 multiply", "func f(x float32) float32 { return x * 2 }", "unsupported runtime operation *"},
 		{"float64 addition", "func f(x float64) float64 { return x + 2 }", "unsupported runtime operation +"},
 		{"loop", "func f(x int64) int64 { for x > 0 { x = x - 1 }; return x }", "control-flow loops are unsupported"},

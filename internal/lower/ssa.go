@@ -22,6 +22,9 @@ func FromSSA(checked subset.Checked, sourceStem string, wordBits int64) ir.Progr
 	for _, fn := range checked.Functions() {
 		l := lowerer{root: checked.Root(), file: file, bindings: make(map[ssa.Value]ir.Binder), effects: effects}
 		result := ir.Function{Symbol: l.symbol(fn), Result: l.valueType(fn.Signature.Results().At(0).Type())}
+		for i := 0; i < fn.Signature.TypeParams().Len(); i++ {
+			result.TypeParams = append(result.TypeParams, ir.TypeParameter(i))
+		}
 		for _, param := range fn.Params {
 			result.Params = append(result.Params, l.bind(param))
 		}

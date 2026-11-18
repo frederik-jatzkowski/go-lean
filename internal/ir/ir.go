@@ -1,17 +1,20 @@
 // Package ir represents pure, typed expressions and returning control flow.
 package ir
 
+import "strconv"
+
 type Program struct {
 	Functions []Function
 	WordBits  int64
 }
 
 type Function struct {
-	Symbol   Symbol
-	Params   []Binder
-	Result   Type
-	Body     Body
-	CanPanic bool
+	Symbol     Symbol
+	TypeParams []Type
+	Params     []Binder
+	Result     Type
+	Body       Body
+	CanPanic   bool
 }
 
 type Symbol struct {
@@ -55,6 +58,8 @@ func (t Type) IsUnsigned() bool {
 }
 
 func (t Type) IsWord() bool { return t == IntWord || t == UIntWord }
+
+func TypeParameter(index int) Type { return Type("α" + strconv.Itoa(index)) }
 
 // Body introduces immutable bindings and ends in a return or a returning branch.
 type Body struct {

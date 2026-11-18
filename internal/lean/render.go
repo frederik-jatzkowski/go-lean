@@ -27,6 +27,9 @@ func Render(program ir.Program) string {
 	}
 	for _, fn := range program.Functions {
 		fmt.Fprintf(&out, "\ndef %s", symbolName(fn.Symbol))
+		for _, param := range fn.TypeParams {
+			fmt.Fprintf(&out, " {%s : Type}", param)
+		}
 		for _, param := range fn.Params {
 			fmt.Fprintf(&out, " (%s : %s)", binderName(param), r.leanType(param.Type))
 		}

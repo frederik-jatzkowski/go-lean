@@ -52,9 +52,15 @@ func (c *checker) function(fn *ssa.Function) error {
 	}
 	sig := fn.Signature
 	if fn.Pkg == nil || fn.Parent() != nil || fn.Synthetic != "" || sig.Recv() != nil ||
-		sig.TypeParams().Len() != 0 || sig.Variadic() ||
+		sig.Variadic() ||
 		sig.Results().Len() != 1 || Type(sig.Results().At(0).Type()) == "" {
-		return diagnostic(fn, fn.Pos(), "expected a top-level function with one supported scalar result and no type parameters or variadic arguments")
+		return diagnostic(fn, fn.Pos(), "expected a top-level function with one supported result and no variadic arguments")
+	}
+	for i := 0; i < sig.TypeParams().Len(); i++ {
+		param := sig.TypeParams().At(i)
+		if !unrestricted(param) {
+			return diagnostic(fn, param.Obj().Pos(), "type parameter %s must use the unrestricted any constraint", param.Obj().Name())
+		}
 	}
 	for _, param := range fn.Params {
 		if Type(param.Type()) == "" {
@@ -143,6 +149,9 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		if callee == nil {
 			return diagnostic(fn, ins.Pos(), "unsupported call to %s; expected a statically resolved Go function", ins.Call.Value)
 		}
+		if len(callee.TypeArgs()) != 0 || callee.Signature.TypeParams().Len() != 0 {
+			return diagnostic(fn, ins.Pos(), "calls to generic functions are unsupported")
+		}
 		for _, arg := range ins.Call.Args {
 			if !scalar(arg) {
 				return diagnostic(fn, ins.Pos(), "call to %s requires supported scalar arguments", callee)
@@ -211,6 +220,9 @@ func scalar(value ssa.Value) bool {
 
 func Type(t types.Type) ir.Type {
 	t = types.Unalias(t)
+	if param, ok := t.(*types.TypeParam); ok {
+		return ir.TypeParameter(param.Index())
+	}
 	if named, ok := t.(*types.Named); ok {
 		if typ := Type(named.Underlying()); typ.IsInteger() {
 			return typ
@@ -250,6 +262,10 @@ func Type(t types.Type) ir.Type {
 		}
 	}
 	return ""
+}
+
+func unrestricted(param *types.TypeParam) bool {
+	return types.Identical(param.Constraint(), types.Universe.Lookup("any").Type())
 }
 
 func diagnostic(fn *ssa.Function, pos token.Pos, format string, args ...any) error {

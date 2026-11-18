@@ -1,5 +1,3 @@
-//go:build golean_planned
-
 package generic_identity
 
 //golean:verify

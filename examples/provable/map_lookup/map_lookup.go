@@ -1,5 +1,3 @@
-//go:build golean_planned
-
 package map_lookup
 
 //golean:verify

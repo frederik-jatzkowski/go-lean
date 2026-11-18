@@ -201,6 +201,34 @@ func double(xs []int64) []int64 {
 	}
 }
 
+func TestCommaOKMapLookup(t *testing.T) {
+	dir := newModule(t)
+	t.Setenv("GOARCH", "386")
+	writeFile(t, filepath.Join(dir, "input.go"), `package sample
+//golean:verify
+func read(m map[uint8]int, key uint8) int {
+	value, ok := m[key]
+	if ok { return value }
+	return value + 1
+}
+//golean:verify
+func readNil(key uint8) int { return read(nil, key) }
+`)
+	outputs, err := transpile.Generate(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := outputs[0].Source
+	for _, want := range []string{"List (UInt8 × Int32)", "(Option Int32)", "Option.getD", "Int32.ofInt (0)", "Option.isSome", "«read» []"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in output:\n%s", want, got)
+		}
+	}
+	if strings.Count(got, "List.lookup") != 1 {
+		t.Errorf("expected one lookup shared by the value and presence results:\n%s", got)
+	}
+}
+
 const genericSliceBuilder = `
 func transform[T any](xs []T, apply func(T) T) []T {
 	dst := make([]T, len(xs))
@@ -269,6 +297,10 @@ func TestRejectUnsupportedSSA(t *testing.T) {
 		{"record pointer escape", "func f(p *point) *point { return p }; type point struct { X int64 }", "record pointers may not escape as results"},
 		{"record pointer identity", "func f(p, q *point) bool { return p == q }; type point struct { X int64 }", "unsupported runtime operation =="},
 		{"caller slice mutation", "func f(xs []int64) int64 { xs[0] = 1; return xs[0] }", "element addresses may only be read"},
+		{"caller map mutation", "func f(m map[int64]int64, k int64) int64 { m[k] = 1; return 1 }", "map writes are unsupported"},
+		{"caller map return", "func f(m map[int64]int64) map[int64]int64 { return m }", "map results are unsupported"},
+		{"map nil test", "func f(m map[int64]int64) bool { return m == nil }", "unsupported runtime operation =="},
+		{"noninteger map key", "func f(m map[string]int64) int64 { v, _ := m[\"key\"]; return v }", "parameter must have a supported"},
 		{"array mutation", "func f(xs [4]int64) int64 { xs[0] = 1; return xs[0] }", "element addresses may only be read"},
 		{"array escape", "func f(xs [4]int64) int64 { saved = &xs; return xs[0] }; var saved *[4]int64", "local array must be an initialized copy that does not escape"},
 		{"caller slice escape", "func f(xs []int64) []int64 { return xs }", "slice results require a validated fresh construction"},

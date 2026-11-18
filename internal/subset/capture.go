@@ -13,7 +13,8 @@ import (
 func CaptureType(t types.Type) ir.Type {
 	if pointer, ok := types.Unalias(t).(*types.Pointer); ok {
 		typ := Type(pointer.Elem())
-		if elem, _ := typ.ArrayShape(); elem == "" && typ.Pointee() == "" && typ.SliceElem() == "" {
+		key, _ := typ.MapShape()
+		if elem, _ := typ.ArrayShape(); elem == "" && typ.Pointee() == "" && typ.SliceElem() == "" && key == "" {
 			return typ
 		}
 	}

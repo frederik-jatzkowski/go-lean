@@ -207,6 +207,20 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 			result.Bindings = append(result.Bindings, l.checkedIndex(ins, ins.X, ins.Index))
 		case *ssa.Index:
 			result.Bindings = append(result.Bindings, l.checkedIndex(ins, ins.X, ins.Index))
+		case *ssa.Lookup:
+			_, elem := l.valueType(ins.X.Type()).MapShape()
+			result.Bindings = append(result.Bindings, ir.Binding{
+				Binder: l.bindAs(ins, ir.OptionType(elem)),
+				Value:  ir.MapLookup{Map: l.value(ins.X), Key: l.value(ins.Index)},
+			})
+		case *ssa.Extract:
+			binder := l.bind(ins)
+			lookup := l.value(ins.Tuple)
+			var value ir.Expr = ir.OptionIsSome{Value: lookup}
+			if ins.Index == 0 {
+				value = ir.OptionGetD{Value: lookup, Default: ir.IntLiteral{Value: "0", Type: binder.Type}}
+			}
+			result.Bindings = append(result.Bindings, ir.Binding{Binder: binder, Value: value})
 		case *ssa.Call:
 			if subset.IsLength(ins) {
 				result.Bindings = append(result.Bindings, ir.Binding{
@@ -301,6 +315,9 @@ func (l *lowerer) value(value ssa.Value) ir.Expr {
 		if typ.SliceElem() != "" {
 			return ir.EmptySlice{}
 		}
+		if key, _ := typ.MapShape(); key != "" {
+			return ir.EmptyMap{}
+		}
 		switch typ {
 		case ir.Float32:
 			f, _ := constant.Float32Val(c.Value)
@@ -339,6 +356,9 @@ func (l *lowerer) valueType(t types.Type) ir.Type {
 	}
 	if elem, _ := typ.ArrayShape(); elem != "" {
 		l.valueType(t.Underlying().(*types.Array).Elem())
+	}
+	if key, value := typ.MapShape(); key != "" {
+		l.usesWord = l.usesWord || key.IsWord() || value.IsWord()
 	}
 	if typ.IsRecord() {
 		if _, exists := l.records[typ]; !exists {

@@ -106,6 +106,12 @@ func (r renderer) leanType(typ ir.Type) string {
 	if elem, length := typ.ArrayShape(); elem != "" {
 		return "(Vector " + r.leanType(elem) + " " + length + ")"
 	}
+	if key, value := typ.MapShape(); key != "" {
+		return "(List (" + r.leanType(key) + " × " + r.leanType(value) + "))"
+	}
+	if elem := typ.OptionElem(); elem != "" {
+		return "(Option " + r.leanType(elem) + ")"
+	}
 	if pointee := typ.Pointee(); pointee != "" {
 		return "(Option " + r.leanType(pointee) + ")"
 	}
@@ -203,8 +209,14 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 			r.leanType(expr.Type), recordFieldName(expr.Name), r.renderExpr(expr.Value))
 	case ir.NilPointer:
 		return "none"
-	case ir.EmptySlice:
+	case ir.EmptySlice, ir.EmptyMap:
 		return "[]"
+	case ir.MapLookup:
+		return fmt.Sprintf("(List.lookup %s %s)", r.renderExpr(expr.Key), r.renderExpr(expr.Map))
+	case ir.OptionGetD:
+		return fmt.Sprintf("(Option.getD %s %s)", r.renderExpr(expr.Value), r.renderExpr(expr.Default))
+	case ir.OptionIsSome:
+		return fmt.Sprintf("(Option.isSome %s)", r.renderExpr(expr.Value))
 	case ir.CheckedIndex:
 		sequence, index := r.renderExpr(expr.Sequence), r.renderExpr(expr.Index)
 		if elem, _ := expr.SequenceType.ArrayShape(); elem != "" {

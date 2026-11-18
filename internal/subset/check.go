@@ -99,6 +99,9 @@ func (c *checker) function(fn *ssa.Function) error {
 	if Type(sig.Results().At(0).Type()).Pointee() != "" {
 		return diagnostic(fn, fn.Pos(), "record pointers may not escape as results")
 	}
+	if key, _ := Type(sig.Results().At(0).Type()).MapShape(); key != "" {
+		return diagnostic(fn, fn.Pos(), "map results are unsupported")
+	}
 	if parent := fn.Parent(); parent != nil && parent.TypeParams().Len() != 0 {
 		return diagnostic(fn, fn.Pos(), "closures in generic functions are unsupported")
 	}
@@ -311,6 +314,20 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 			return nil
 		}
 		return diagnostic(fn, ins.Pos(), "index requires a supported array value and integer index")
+	case *ssa.Lookup:
+		if ins.CommaOk && supportedMapLookup(ins) {
+			return nil
+		}
+		return diagnostic(fn, ins.Pos(), "map lookup requires comma-ok on a supported integer map")
+	case *ssa.Extract:
+		if lookup, ok := ins.Tuple.(*ssa.Lookup); ok && lookup.CommaOk {
+			if ins.Index == 0 || ins.Index == 1 {
+				return nil
+			}
+		}
+		return diagnostic(fn, ins.Pos(), "only comma-ok map lookup results may be extracted")
+	case *ssa.MapUpdate:
+		return diagnostic(fn, ins.Pos(), "map writes are unsupported")
 	case *ssa.Field:
 		if Type(ins.X.Type()).IsRecord() && supportedValue(ins.X) {
 			return nil
@@ -361,14 +378,15 @@ func supportedValue(value ssa.Value) bool {
 	switch value := value.(type) {
 	case *ssa.Const:
 		if value.Value == nil {
-			return typ.Pointee() != "" || typ.SliceElem() != ""
+			key, _ := typ.MapShape()
+			return typ.Pointee() != "" || typ.SliceElem() != "" || key != ""
 		}
 		return typ.IsInteger() && value.Value.Kind() == constant.Int ||
 			typ == ir.Bool && value.Value.Kind() == constant.Bool ||
 			typ == ir.Bytes && value.Value.Kind() == constant.String ||
 			(typ == ir.Float32 || typ == ir.Float64) &&
 				(value.Value.Kind() == constant.Float || value.Value.Kind() == constant.Int)
-	case *ssa.Parameter, *ssa.BinOp, *ssa.UnOp, *ssa.Call, *ssa.Phi, *ssa.Convert, *ssa.ChangeType, *ssa.Field, *ssa.Index:
+	case *ssa.Parameter, *ssa.BinOp, *ssa.UnOp, *ssa.Call, *ssa.Phi, *ssa.Convert, *ssa.ChangeType, *ssa.Field, *ssa.Index, *ssa.Extract:
 		return true
 	default:
 		return false
@@ -377,6 +395,9 @@ func supportedValue(value ssa.Value) bool {
 
 func Type(t types.Type) ir.Type {
 	t = types.Unalias(t)
+	if m, ok := t.(*types.Map); ok {
+		return mapType(m)
+	}
 	if slice, ok := t.(*types.Slice); ok {
 		if elem := sequenceElement(slice.Elem()); elem != "" {
 			return ir.SliceType(elem)
@@ -448,7 +469,8 @@ func Type(t types.Type) ir.Type {
 
 func sequenceElement(t types.Type) ir.Type {
 	elem := Type(t)
-	if nested, _ := elem.ArrayShape(); nested != "" || elem.SliceElem() != "" || elem.Pointee() != "" {
+	key, _ := elem.MapShape()
+	if nested, _ := elem.ArrayShape(); nested != "" || elem.SliceElem() != "" || elem.Pointee() != "" || key != "" {
 		return ""
 	}
 	return elem

@@ -17,7 +17,7 @@ func supportedFields(record *types.Struct) bool {
 	for field := range record.Fields() {
 		// Pointer-containing records would need a separate recursive model.
 		switch field.Type().Underlying().(type) {
-		case *types.Pointer, *types.Slice, *types.Array:
+		case *types.Pointer, *types.Slice, *types.Array, *types.Map:
 			return false
 		}
 		if field.Name() == "_" || Type(field.Type()) == "" {

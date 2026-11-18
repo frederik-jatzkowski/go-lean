@@ -117,6 +117,25 @@ func (t Type) SliceElem() Type {
 	return ""
 }
 
+func MapType(key, value Type) Type { return Type("map:" + key + ":" + value) }
+
+func (t Type) MapShape() (key, value Type) {
+	if entries, ok := strings.CutPrefix(string(t), "map:"); ok {
+		key, value, _ := strings.Cut(entries, ":")
+		return Type(key), Type(value)
+	}
+	return "", ""
+}
+
+func OptionType(elem Type) Type { return Type("option:" + elem) }
+
+func (t Type) OptionElem() Type {
+	if elem, ok := strings.CutPrefix(string(t), "option:"); ok {
+		return Type(elem)
+	}
+	return ""
+}
+
 func ArrayType(elem Type, length int64) Type {
 	return Type("array:" + strconv.FormatInt(length, 10) + ":" + string(elem))
 }
@@ -208,6 +227,19 @@ type CheckedRecordField struct {
 
 type NilPointer struct{}
 type EmptySlice struct{}
+type EmptyMap struct{}
+
+type MapLookup struct {
+	Map Expr
+	Key Expr
+}
+
+type OptionGetD struct {
+	Value   Expr
+	Default Expr
+}
+
+type OptionIsSome struct{ Value Expr }
 
 type CheckedIndex struct {
 	Sequence     Expr
@@ -254,6 +286,10 @@ func (RecordField) expr()        {}
 func (CheckedRecordField) expr() {}
 func (NilPointer) expr()         {}
 func (EmptySlice) expr()         {}
+func (EmptyMap) expr()           {}
+func (MapLookup) expr()          {}
+func (OptionGetD) expr()         {}
+func (OptionIsSome) expr()       {}
 func (CheckedIndex) expr()       {}
 func (Convert) expr()            {}
 func (Binary) expr()             {}

@@ -1,5 +1,3 @@
-//go:build golean_planned
-
 package byte_rune
 
 //golean:verify

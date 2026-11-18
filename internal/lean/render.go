@@ -312,6 +312,9 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 			}
 			return fmt.Sprintf("if %s = 0 then none else some (%s.ofInt ((%s).toInt.tdiv (%s).toInt))", right, r.leanType(expr.OperandType), left, right)
 		}
+		if expr.Op == ir.Remainder {
+			return fmt.Sprintf("if %s = 0 then none else some (%s %% %s)", right, left, right)
+		}
 		value := fmt.Sprintf("(%s %s %s)", left, operators[expr.Op], right)
 		if expr.Op >= ir.Equal {
 			return "(decide " + value + ")"

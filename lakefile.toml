@@ -26,6 +26,7 @@ roots = [
   "generic_map.generic_map_gen", "generic_map.generic_map_proofs",
   "grid_game.grid_game_gen", "grid_game.grid_game_proofs",
   "immutable_closure.immutable_closure_gen", "immutable_closure.immutable_closure_proofs",
+  "integer_remainder.integer_remainder_gen", "integer_remainder.integer_remainder_proofs",
   "interface_dispatch.interface_dispatch_gen", "interface_dispatch.interface_dispatch_proofs",
   "kv_store_contract_impl.kv_store_contract_impl_gen", "kv_store_contract_impl.kv_store_contract_impl_proofs",
   "kv_store_contract_use.kv_store_contract_use_gen", "kv_store_contract_use.kv_store_contract_use_proofs",

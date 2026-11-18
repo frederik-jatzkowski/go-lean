@@ -350,6 +350,7 @@ const (
 	Subtract
 	Multiply
 	Divide
+	Remainder
 	Equal
 	NotEqual
 	Less
@@ -357,3 +358,8 @@ const (
 	Greater
 	GreaterEqual
 )
+
+// PanicsOnZeroDivisor reports whether a zero right operand causes a Go panic.
+func (op Operator) PanicsOnZeroDivisor() bool {
+	return op == Divide || op == Remainder
+}

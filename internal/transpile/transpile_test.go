@@ -68,6 +68,10 @@ func TestMachineWordTargetWidth(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "input.go"), `package sample
 //golean:verify
 func roundTrip(x int) int { return int(uint(x)) }
+//golean:verify
+func signedRemainder(x, y int) int { return x % y }
+//golean:verify
+func unsignedRemainder(x, y uint) uint { return x % y }
 `)
 	t.Setenv("GOOS", "linux")
 	for _, target := range []struct{ arch, width string }{{"386", "32"}, {"amd64", "64"}} {
@@ -83,6 +87,9 @@ func roundTrip(x int) int { return int(uint(x)) }
 				".GoTypes.UInt := UInt" + target.width,
 				").toInt" + target.width,
 				").toUInt" + target.width,
+				" : Option Int" + target.width + " := do",
+				" : Option UInt" + target.width + " := do",
+				"then none else some («v0_x» % «v1_y»)",
 			} {
 				if !strings.Contains(got, want) {
 					t.Errorf("missing %q in output:\n%s", want, got)
@@ -339,6 +346,7 @@ func TestRejectGenericSliceCallbacks(t *testing.T) {
 		{"nil callback", "func f(xs []int64) []int64 { return transform(xs, nil) }", "statically known function"},
 		{"captured callback", "func f(xs []int64, y int64) []int64 { return transform(xs, func(x int64) int64 { return x+y }) }", "closures may only be used in direct calls"},
 		{"transitive panic", "func f(xs []int64) []int64 { return transform(xs, func(x int64) int64 { return divide(x) }) }; func divide(x int64) int64 { return 1/x }", "must use only total operations"},
+		{"remainder panic", "func f(xs []int64) []int64 { return transform(xs, func(x int64) int64 { return 7%x }) }", "must use only total operations"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			dir := newModule(t)
@@ -378,7 +386,7 @@ func TestRejectUnsupportedSSA(t *testing.T) {
 	tests := []struct {
 		name, source, want string
 	}{
-		{"remainder", "func f(x int64) int64 { return x % 2 }", "unsupported runtime operation %"},
+		{"bitwise or", "func f(x int64) int64 { return x | 2 }", "unsupported runtime operation |"},
 		{"parameter", "func f(x complex64) int64 { return 0 }", "parameter must have a supported scalar or record type"},
 		{"result", "func f(x int64) complex64 { return 1 }", "with one supported result"},
 		{"dynamic any", "func f(x any) int64 { return 0 }", "parameter must have a supported scalar or record type"},
@@ -464,9 +472,9 @@ func Add(x int64) int64 { return leaf.Add(x) }
 		t.Fatalf("expected one definition per function in dependency order:\n%s", got)
 	}
 
-	writeFile(t, leaf, "package leaf\nfunc Add(x int64) int64 { return x % 2 }\n")
+	writeFile(t, leaf, "package leaf\nfunc Add(x int64) int64 { return x | 2 }\n")
 	_, err = transpile.Generate(dir)
-	for _, want := range []string{"call to example.test/sample/middle.Add", "call to example.test/sample/leaf.Add", "unsupported runtime operation %"} {
+	for _, want := range []string{"call to example.test/sample/middle.Add", "call to example.test/sample/leaf.Add", "unsupported runtime operation |"} {
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("got %v, want %q in the call chain", err, want)
 		}

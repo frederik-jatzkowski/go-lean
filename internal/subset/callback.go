@@ -30,7 +30,7 @@ func totalCallback(fn *ssa.Function, checked map[*ssa.Function]bool) bool {
 		for _, ins := range block.Instrs {
 			switch ins := ins.(type) {
 			case *ssa.BinOp:
-				if ins.Op == token.QUO {
+				if op, _ := Binary(ins.Op); op.PanicsOnZeroDivisor() {
 					return false
 				}
 			case *ssa.UnOp:

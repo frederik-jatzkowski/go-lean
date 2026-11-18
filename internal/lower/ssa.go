@@ -193,9 +193,10 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 	for _, ins := range block.Instrs {
 		switch ins := ins.(type) {
 		case *ssa.BinOp:
-			canPanic := ins.Op == token.QUO
+			value := l.binary(ins)
+			canPanic := value.Op.PanicsOnZeroDivisor()
 			result.Bindings = append(result.Bindings, ir.Binding{
-				Binder: l.bind(ins), Value: l.binary(ins), CanPanic: canPanic,
+				Binder: l.bind(ins), Value: value, CanPanic: canPanic,
 			})
 			l.canPanic = l.canPanic || canPanic
 		case *ssa.UnOp:

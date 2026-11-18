@@ -26,7 +26,7 @@ func TestExamplesMatchGeneratedOutput(t *testing.T) {
 	for _, example := range []string{
 		"acyclic_list", "arithmetic", "array_bounds", "boolean_implication", "bounded_counter", "branch_join", "byte_rune", "clamp", "clampimport", "constant_conversions",
 		"division_guarded", "division_precondition", "division_propagation", "embedded_struct", "float32_rounding", "float64_special",
-		"generic_identity", "generic_map", "immutable_closure", "machine_words", "map_build", "map_lookup", "narrow_signed", "nil_dereference", "range_fold",
+		"generic_identity", "generic_map", "immutable_closure", "integer_remainder", "machine_words", "map_build", "map_lookup", "narrow_signed", "nil_dereference", "range_fold",
 		"slice_bounds", "slice_copy", "string_bytes", "struct_fields", "switch_tagless", "switch_value", "territory_methods", "unsigned_wrap",
 	} {
 		if !found[example+"_gen.lean"] {
@@ -85,8 +85,8 @@ func C(x int64) int64 { return x }
 	if read(t, "a_gen.lean") != original || read(t, "nested/c_gen.lean") != "-- handwritten\n" {
 		t.Fatal("a conflicting output changed a file")
 	}
-	write(t, "nested/c.go", strings.ReplaceAll(read(t, "nested/c.go"), "return x", "return x % 2"))
-	if err := run("transpile", "./..."); err == nil || !strings.Contains(err.Error(), "unsupported runtime operation %") {
+	write(t, "nested/c.go", strings.ReplaceAll(read(t, "nested/c.go"), "return x", "return x | 2"))
+	if err := run("transpile", "./..."); err == nil || !strings.Contains(err.Error(), "unsupported runtime operation |") {
 		t.Fatalf("expected a subset error, got %v", err)
 	}
 	if read(t, "a_gen.lean") != original {

@@ -8,6 +8,7 @@ srcDir = "examples/provable"
 roots = [
   "arithmetic.arithmetic_gen", "arithmetic.arithmetic_proofs",
   "boolean_implication.boolean_implication_gen", "boolean_implication.boolean_implication_proofs",
+  "bounded_counter.bounded_counter_gen", "bounded_counter.bounded_counter_proofs",
   "branch_join.branch_join_gen", "branch_join.branch_join_proofs",
   "byte_rune.byte_rune_gen", "byte_rune.byte_rune_proofs",
   "clamp.clamp_gen", "clamp.clamp_proofs",

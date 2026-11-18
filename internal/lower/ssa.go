@@ -34,7 +34,11 @@ func FromSSA(checked subset.Checked, sourceStem string, wordBits int64) ir.Progr
 		for _, param := range fn.Params {
 			result.Params = append(result.Params, l.bind(param))
 		}
-		result.Body = l.body(fn.Blocks[0], nil)
+		if loop := checked.CountedLoop(fn); loop != nil {
+			l.lowerCountedLoop(&result, loop)
+		} else {
+			result.Body = l.body(fn.Blocks[0], nil)
+		}
 		if l.usesWord {
 			program.WordBits = wordBits
 		}
@@ -43,6 +47,32 @@ func FromSSA(checked subset.Checked, sourceStem string, wordBits int64) ir.Progr
 		program.Functions = append(program.Functions, result)
 	}
 	return program
+}
+
+func (l *lowerer) lowerCountedLoop(fn *ir.Function, loop *subset.CountedLoop) {
+	helper := ir.CountedLoop{Symbol: fn.Symbol, State: l.bind(loop.State)}
+	helper.Symbol.Name += "$loop"
+	call := ir.Call{Callee: helper.Symbol}
+	for _, param := range fn.Params {
+		if param.Type == ir.Int64 {
+			helper.Params = append(helper.Params, param)
+			call.Args = append(call.Args, ir.Ref(param))
+		}
+	}
+	for _, step := range loop.Steps {
+		var expr ir.Expr
+		switch step := step.(type) {
+		case *ssa.BinOp:
+			expr = l.binary(step)
+		case *ssa.UnOp:
+			expr = ir.Negate{Value: l.value(step.X)}
+		}
+		helper.Steps = append(helper.Steps, ir.Binding{Binder: l.bind(step), Value: expr})
+	}
+	helper.Next = l.value(loop.Next)
+	call.Args = append(call.Args, ir.ToNat{Value: l.value(loop.Bound)}, l.value(loop.Initial))
+	fn.Body.Result = ir.Return{Value: call}
+	fn.Loop = &helper
 }
 
 type lowerer struct {

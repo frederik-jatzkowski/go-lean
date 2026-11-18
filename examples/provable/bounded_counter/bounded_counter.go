@@ -1,5 +1,3 @@
-//go:build golean_planned
-
 package bounded_counter
 
 //golean:verify

@@ -32,13 +32,14 @@ func Render(program ir.Program) string {
 	}
 	r.renderRecords(&out)
 	for _, fn := range program.Functions {
+		if fn.Loop != nil {
+			r.renderCountedLoop(&out, *fn.Loop)
+		}
 		fmt.Fprintf(&out, "\ndef %s", symbolName(fn.Symbol))
 		for _, param := range fn.TypeParams {
 			fmt.Fprintf(&out, " {%s : Type}", param)
 		}
-		for _, param := range fn.Params {
-			fmt.Fprintf(&out, " (%s : %s)", binderName(param), r.leanType(param.Type))
-		}
+		r.renderParams(&out, fn.Params)
 		if fn.CanPanic {
 			fmt.Fprintf(&out, " : Option %s := do\n", r.leanType(fn.Result))
 		} else {
@@ -48,6 +49,29 @@ func Render(program ir.Program) string {
 	}
 	out.WriteString("\nend GoLean\n")
 	return out.String()
+}
+
+func (r renderer) renderParams(out *strings.Builder, params []ir.Binder) {
+	for _, param := range params {
+		fmt.Fprintf(out, " (%s : %s)", binderName(param), r.leanType(param.Type))
+	}
+}
+
+func (r renderer) renderCountedLoop(out *strings.Builder, loop ir.CountedLoop) {
+	ns, name := symbolNamespace(loop.Symbol), quoted(loop.Symbol.Name)
+	state, typ := binderName(loop.State), r.leanType(loop.State.Type)
+	fmt.Fprintf(out, "\nnamespace %s\n\ndef %s", ns, name)
+	r.renderParams(out, loop.Params)
+	fmt.Fprintf(out, " : Nat → %s → %s\n", typ, typ)
+	fmt.Fprintf(out, "  | 0, %s => %s\n", state, state)
+	fmt.Fprintf(out, "  | fuel + 1, %s =>\n", state)
+	r.renderBindings(out, loop.Steps, "    ")
+	fmt.Fprintf(out, "    %s", name)
+	for _, param := range loop.Params {
+		fmt.Fprintf(out, " %s", binderName(param))
+	}
+	fmt.Fprintf(out, " fuel %s\n", r.renderExpr(loop.Next))
+	fmt.Fprintf(out, "\nend %s\n", ns)
 }
 
 func (r renderer) renderRecords(out *strings.Builder) {
@@ -90,13 +114,7 @@ func (r renderer) leanType(typ ir.Type) string {
 }
 
 func (r renderer) renderBody(out *strings.Builder, body ir.Body, indent string, canPanic bool) {
-	for _, binding := range body.Bindings {
-		operator := ":="
-		if binding.CanPanic {
-			operator = "←"
-		}
-		fmt.Fprintf(out, "%slet %s : %s %s %s\n", indent, binderName(binding.Binder), r.leanType(binding.Binder.Type), operator, r.renderExpr(binding.Value))
-	}
+	r.renderBindings(out, body.Bindings, indent)
 	switch result := body.Result.(type) {
 	case ir.Return:
 		out.WriteString(indent)
@@ -111,6 +129,16 @@ func (r renderer) renderBody(out *strings.Builder, body ir.Body, indent string, 
 		r.renderBody(out, result.Else, indent+"  ", canPanic)
 	default:
 		panic("unexpected IR result")
+	}
+}
+
+func (r renderer) renderBindings(out *strings.Builder, bindings []ir.Binding, indent string) {
+	for _, binding := range bindings {
+		operator := ":="
+		if binding.CanPanic {
+			operator = "←"
+		}
+		fmt.Fprintf(out, "%slet %s : %s %s %s\n", indent, binderName(binding.Binder), r.leanType(binding.Binder.Type), operator, r.renderExpr(binding.Value))
 	}
 }
 
@@ -138,6 +166,8 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 		return fmt.Sprintf("(Float.ofBits 0x%016x)", uint64(expr))
 	case ir.ByteLen:
 		return fmt.Sprintf("(%s.ofNat (%s).size)", r.leanType(ir.IntWord), r.renderExpr(expr.Value))
+	case ir.ToNat:
+		return fmt.Sprintf("(%s).toNat", r.renderExpr(expr.Value))
 	case ir.RecordLiteral:
 		args := []string{r.leanType(expr.Type) + ".mk"}
 		for _, field := range expr.Values {
@@ -232,12 +262,16 @@ func symbolScope(symbol ir.Symbol) string {
 	return quoted(symbol.Package) + "." + quoted(symbol.File)
 }
 
-func symbolName(symbol ir.Symbol) string {
+func symbolNamespace(symbol ir.Symbol) string {
 	name := symbolScope(symbol)
 	if symbol.Dependency != "" {
 		name += ".Dependencies." + quoted(symbol.Dependency)
 	}
-	return name + "." + quoted(symbol.Name)
+	return name
+}
+
+func symbolName(symbol ir.Symbol) string {
+	return symbolNamespace(symbol) + "." + quoted(symbol.Name)
 }
 
 func binderName(binder ir.Binder) string {

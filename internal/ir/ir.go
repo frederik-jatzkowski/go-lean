@@ -29,6 +29,16 @@ type Function struct {
 	Result     Type
 	Body       Body
 	CanPanic   bool
+	Loop       *CountedLoop
+}
+
+// CountedLoop repeats the SSA update once per unit of natural-number fuel.
+type CountedLoop struct {
+	Symbol Symbol
+	Params []Binder
+	State  Binder
+	Steps  []Binding
+	Next   Expr
 }
 
 type Symbol struct {
@@ -128,6 +138,7 @@ type Ref Binder
 type Negate struct{ Value Expr }
 type Not struct{ Value Expr }
 type ByteLen struct{ Value Expr }
+type ToNat struct{ Value Expr }
 
 type RecordLiteral struct {
 	Type   Type
@@ -172,6 +183,7 @@ func (Ref) expr()                {}
 func (Negate) expr()             {}
 func (Not) expr()                {}
 func (ByteLen) expr()            {}
+func (ToNat) expr()              {}
 func (RecordLiteral) expr()      {}
 func (RecordField) expr()        {}
 func (CheckedRecordField) expr() {}

@@ -112,6 +112,31 @@ func selectX(s AOuter) int64 { return s.X }
 	}
 }
 
+func TestCountedLoopPreservesItsUpdate(t *testing.T) {
+	dir := newModule(t)
+	writeFile(t, filepath.Join(dir, "input.go"), `package sample
+//golean:verify
+func power(seed, factor int64, count uint8) int64 {
+	result := seed
+	for i := uint8(0); i < count; i++ {
+		result *= factor
+	}
+	return result
+}
+`)
+	outputs, err := transpile.Generate(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"«power$loop»", "Nat → Int64 → Int64", " * «v1_factor»", "«v2_count»).toNat «v0_seed»",
+	} {
+		if !strings.Contains(outputs[0].Source, want) {
+			t.Errorf("missing %q in output:\n%s", want, outputs[0].Source)
+		}
+	}
+}
+
 func TestRejectUnsupportedSSA(t *testing.T) {
 	tests := []struct {
 		name, source, want string
@@ -135,6 +160,8 @@ func TestRejectUnsupportedSSA(t *testing.T) {
 		{"float32 multiply", "func f(x float32) float32 { return x * 2 }", "unsupported runtime operation *"},
 		{"float64 addition", "func f(x float64) float64 { return x + 2 }", "unsupported runtime operation +"},
 		{"loop", "func f(x int64) int64 { for x > 0 { x = x - 1 }; return x }", "control-flow loops are unsupported"},
+		{"counted loop with nonunit step", "func f(x int64, count uint8) int64 { var acc int64; for i := uint8(0); i < count; i += 2 { acc += x }; return acc }", "control-flow loops are unsupported"},
+		{"counted loop with changing bound", "func f(x int64, count uint8) int64 { var acc int64; for i := uint8(0); i < count; i++ { acc += x; count-- }; return acc }", "control-flow loops are unsupported"},
 		{"global", "func f() int64 { return n }; var n int64", "unsupported unary operation *"},
 		{"recursion", "func f(x int64) int64 { return f(x) }", "recursive calls are unsupported"},
 		{"panic", "func f(x int64) int64 { panic(x) }", "unsupported SSA instruction"},

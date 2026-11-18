@@ -17,10 +17,13 @@ type Checked struct {
 	root      *ssa.Package
 	functions []*ssa.Function
 	records   map[*ssa.Alloc]RecordCell
+	loops     map[*ssa.Function]*CountedLoop
 }
 
 func (c Checked) Root() *ssa.Package         { return c.root }
 func (c Checked) Functions() []*ssa.Function { return c.functions }
+
+func (c Checked) CountedLoop(fn *ssa.Function) *CountedLoop { return c.loops[fn] }
 
 func (c Checked) RecordCell(value ssa.Value) (RecordCell, bool) {
 	if cell, ok := value.(*ssa.Alloc); ok {
@@ -36,13 +39,14 @@ func Check(program gosource.Program) (Checked, error) {
 		done:     make(map[*ssa.Function]bool),
 		cells:    make(map[*ssa.Alloc]*ssa.Store),
 		records:  make(map[*ssa.Alloc]RecordCell),
+		loops:    make(map[*ssa.Function]*CountedLoop),
 	}
 	for _, fn := range program.Roots {
 		if err := c.function(fn); err != nil {
 			return Checked{}, err
 		}
 	}
-	return Checked{root: program.Package, functions: c.ordered, records: c.records}, nil
+	return Checked{root: program.Package, functions: c.ordered, records: c.records, loops: c.loops}, nil
 }
 
 type checker struct {
@@ -51,6 +55,7 @@ type checker struct {
 	ordered  []*ssa.Function
 	cells    map[*ssa.Alloc]*ssa.Store
 	records  map[*ssa.Alloc]RecordCell
+	loops    map[*ssa.Function]*CountedLoop
 }
 
 func (c *checker) function(fn *ssa.Function) error {
@@ -87,6 +92,18 @@ func (c *checker) function(fn *ssa.Function) error {
 		}
 	}
 	c.visiting[fn] = true
+	if loop := checkCountedLoop(fn); loop != nil {
+		c.loops[fn] = loop
+	} else if err := c.checkOrdinaryBody(fn); err != nil {
+		return err
+	}
+	delete(c.visiting, fn)
+	c.done[fn] = true
+	c.ordered = append(c.ordered, fn)
+	return nil
+}
+
+func (c *checker) checkOrdinaryBody(fn *ssa.Function) error {
 	if err := checkAcyclic(fn); err != nil {
 		return err
 	}
@@ -100,9 +117,6 @@ func (c *checker) function(fn *ssa.Function) error {
 			}
 		}
 	}
-	delete(c.visiting, fn)
-	c.done[fn] = true
-	c.ordered = append(c.ordered, fn)
 	return nil
 }
 

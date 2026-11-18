@@ -25,6 +25,9 @@ func FromSSA(checked subset.Checked, sourceStem string, wordBits int64) ir.Progr
 		for i := 0; i < fn.Signature.TypeParams().Len(); i++ {
 			result.TypeParams = append(result.TypeParams, ir.TypeParameter(i))
 		}
+		for _, capture := range fn.FreeVars {
+			result.Params = append(result.Params, l.bindAs(capture, l.captureType(capture)))
+		}
 		for _, param := range fn.Params {
 			result.Params = append(result.Params, l.bind(param))
 		}
@@ -58,7 +61,11 @@ func (l *lowerer) symbol(fn *ssa.Function) ir.Symbol {
 }
 
 func (l *lowerer) bind(value ssa.Value) ir.Binder {
-	binder := ir.Binder{Name: value.Name(), Index: l.next, Type: l.valueType(value.Type())}
+	return l.bindAs(value, l.valueType(value.Type()))
+}
+
+func (l *lowerer) bindAs(value ssa.Value, typ ir.Type) ir.Binder {
+	binder := ir.Binder{Name: value.Name(), Index: l.next, Type: typ}
 	l.next++
 	l.bindings[value] = binder
 	return binder
@@ -77,8 +84,12 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 		case *ssa.UnOp:
 			operand := l.value(ins.X)
 			var value ir.Expr = ir.Negate{Value: operand}
-			if ins.Op == token.NOT {
+			switch ins.Op {
+			case token.NOT:
 				value = ir.Not{Value: operand}
+			case token.MUL:
+				// Validated capture loads read a value already bound by the initializer.
+				value = operand
 			}
 			result.Bindings = append(result.Bindings, ir.Binding{
 				Binder: l.bind(ins), Value: value,
@@ -92,6 +103,11 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 			}
 			target := ins.Call.StaticCallee()
 			call := ir.Call{Callee: l.symbol(target)}
+			if closure, ok := ins.Call.Value.(*ssa.MakeClosure); ok {
+				for _, capture := range closure.Bindings {
+					call.Args = append(call.Args, l.value(capture))
+				}
+			}
 			for _, arg := range ins.Call.Args {
 				call.Args = append(call.Args, l.value(arg))
 			}
@@ -107,6 +123,10 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 			})
 		case *ssa.ChangeType:
 			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: l.value(ins.X)})
+		case *ssa.Store:
+			result.Bindings = append(result.Bindings, ir.Binding{
+				Binder: l.bindAs(ins.Addr, l.captureType(ins.Addr)), Value: l.value(ins.Val),
+			})
 		case *ssa.If:
 			result.Result = ir.If{
 				Condition: l.value(ins.Cond),
@@ -160,6 +180,12 @@ func (l *lowerer) binary(expr *ssa.BinOp) ir.Binary {
 
 func (l *lowerer) valueType(t types.Type) ir.Type {
 	typ := subset.Type(t)
+	l.usesWord = l.usesWord || typ.IsWord()
+	return typ
+}
+
+func (l *lowerer) captureType(value ssa.Value) ir.Type {
+	typ := subset.CaptureType(value.Type())
 	l.usesWord = l.usesWord || typ.IsWord()
 	return typ
 }

@@ -25,6 +25,7 @@ func Check(program gosource.Program) (Checked, error) {
 	c := checker{
 		visiting: make(map[*ssa.Function]bool),
 		done:     make(map[*ssa.Function]bool),
+		cells:    make(map[*ssa.Alloc]*ssa.Store),
 	}
 	for _, fn := range program.Roots {
 		if err := c.function(fn); err != nil {
@@ -38,6 +39,7 @@ type checker struct {
 	visiting map[*ssa.Function]bool
 	done     map[*ssa.Function]bool
 	ordered  []*ssa.Function
+	cells    map[*ssa.Alloc]*ssa.Store
 }
 
 func (c *checker) function(fn *ssa.Function) error {
@@ -51,10 +53,13 @@ func (c *checker) function(fn *ssa.Function) error {
 		return diagnostic(fn, fn.Pos(), "Go body unavailable for %s", fn)
 	}
 	sig := fn.Signature
-	if fn.Pkg == nil || fn.Parent() != nil || fn.Synthetic != "" || sig.Recv() != nil ||
+	if fn.Pkg == nil || fn.Synthetic != "" || sig.Recv() != nil ||
 		sig.Variadic() ||
 		sig.Results().Len() != 1 || Type(sig.Results().At(0).Type()) == "" {
 		return diagnostic(fn, fn.Pos(), "expected a top-level function with one supported result and no variadic arguments")
+	}
+	if parent := fn.Parent(); parent != nil && parent.TypeParams().Len() != 0 {
+		return diagnostic(fn, fn.Pos(), "closures in generic functions are unsupported")
 	}
 	for i := 0; i < sig.TypeParams().Len(); i++ {
 		param := sig.TypeParams().At(i)
@@ -69,6 +74,9 @@ func (c *checker) function(fn *ssa.Function) error {
 	}
 	c.visiting[fn] = true
 	if err := checkAcyclic(fn); err != nil {
+		return err
+	}
+	if err := c.checkCaptures(fn); err != nil {
 		return err
 	}
 	for _, block := range fn.Blocks {
@@ -121,6 +129,9 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		}
 		return diagnostic(fn, ins.Pos(), "unsupported runtime operation %s on %s and %s", ins.Op, ins.X.Type(), ins.Y.Type())
 	case *ssa.UnOp:
+		if ins.Op == token.MUL && c.isCapture(ins.X) {
+			return nil
+		}
 		if ins.Op == token.SUB && Type(ins.X.Type()).IsInteger() && scalar(ins.X) ||
 			ins.Op == token.NOT && hasType(ins.X, ir.Bool) {
 			return nil
@@ -149,6 +160,10 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		if callee == nil {
 			return diagnostic(fn, ins.Pos(), "unsupported call to %s; expected a statically resolved Go function", ins.Call.Value)
 		}
+		if parent := callee.Parent(); parent != nil &&
+			(parent != fn || len(callee.FreeVars) != 0 && !isClosureCall(ins, callee)) {
+			return diagnostic(fn, ins.Pos(), "closure call must use its original local closure")
+		}
 		if len(callee.TypeArgs()) != 0 || callee.Signature.TypeParams().Len() != 0 {
 			return diagnostic(fn, ins.Pos(), "calls to generic functions are unsupported")
 		}
@@ -160,6 +175,9 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		if err := c.function(callee); err != nil {
 			return diagnostic(fn, ins.Pos(), "call to %s: %w", callee, err)
 		}
+		return nil
+	case *ssa.Alloc, *ssa.Store, *ssa.MakeClosure:
+		// checkCaptures validates the lifetimes and uses of these instructions.
 		return nil
 	case *ssa.If:
 		if hasType(ins.Cond, ir.Bool) {

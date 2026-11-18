@@ -1,5 +1,3 @@
-//go:build golean_planned
-
 package immutable_closure
 
 //golean:verify

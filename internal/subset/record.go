@@ -15,10 +15,7 @@ type RecordCell struct {
 
 func supportedFields(record *types.Struct) bool {
 	for field := range record.Fields() {
-		if field.Embedded() || field.Name() == "_" {
-			return false
-		}
-		if _, basic := field.Type().Underlying().(*types.Basic); !basic || Type(field.Type()) == "" {
+		if field.Name() == "_" || Type(field.Type()) == "" {
 			return false
 		}
 	}
@@ -26,7 +23,7 @@ func supportedFields(record *types.Struct) bool {
 }
 
 func (c *checker) isRecordAddress(addr ssa.Value) bool {
-	if field, ok := addr.(*ssa.FieldAddr); ok {
+	for field, ok := addr.(*ssa.FieldAddr); ok; field, ok = addr.(*ssa.FieldAddr) {
 		addr = field.X
 	}
 	cell, ok := addr.(*ssa.Alloc)
@@ -59,6 +56,12 @@ func recordInitializer(cell *ssa.Alloc) (RecordCell, bool) {
 					result.Fields[use.Field] = store
 				} else if readsCell(access, use) {
 					reads = append(reads, access)
+				} else if nested, ok := access.(*ssa.FieldAddr); ok && nested.X == use {
+					nestedReads, valid := projectionReads(nested)
+					if !valid {
+						return RecordCell{}, false
+					}
+					reads = append(reads, nestedReads...)
 				} else {
 					return RecordCell{}, false
 				}
@@ -87,4 +90,26 @@ func recordInitializer(cell *ssa.Alloc) (RecordCell, bool) {
 		}
 	}
 	return result, true
+}
+
+// projectionReads admits a nested field address only for further projections or
+// reads. Stores are restricted to whole values and top-level field initialization.
+func projectionReads(addr *ssa.FieldAddr) ([]ssa.Instruction, bool) {
+	var reads []ssa.Instruction
+	for _, use := range *addr.Referrers() {
+		if readsCell(use, addr) {
+			reads = append(reads, use)
+			continue
+		}
+		nested, ok := use.(*ssa.FieldAddr)
+		if !ok || nested.X != addr {
+			return nil, false
+		}
+		more, ok := projectionReads(nested)
+		if !ok {
+			return nil, false
+		}
+		reads = append(reads, more...)
+	}
+	return reads, true
 }

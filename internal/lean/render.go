@@ -30,13 +30,7 @@ func Render(program ir.Program) string {
 		fmt.Fprintf(&out, "abbrev %s.GoTypes.UInt := %s\n", scope, r.leanType(ir.UIntWord))
 		fmt.Fprintf(&out, "abbrev %s.GoTypes.WordBits : Nat := %d\n", scope, program.WordBits)
 	}
-	for _, typ := range slices.Sorted(maps.Keys(program.Records)) {
-		record := program.Records[typ]
-		fmt.Fprintf(&out, "\nstructure %s where\n", symbolName(record.Symbol))
-		for _, field := range record.Fields {
-			fmt.Fprintf(&out, "  %s : %s\n", recordFieldName(field.Name), r.leanType(field.Type))
-		}
-	}
+	r.renderRecords(&out)
 	for _, fn := range program.Functions {
 		fmt.Fprintf(&out, "\ndef %s", symbolName(fn.Symbol))
 		for _, param := range fn.TypeParams {
@@ -54,6 +48,28 @@ func Render(program ir.Program) string {
 	}
 	out.WriteString("\nend GoLean\n")
 	return out.String()
+}
+
+func (r renderer) renderRecords(out *strings.Builder) {
+	emitted := make(map[ir.Type]bool)
+	var emit func(ir.Type)
+	emit = func(typ ir.Type) {
+		record, exists := r.records[typ]
+		if !exists || emitted[typ] {
+			return
+		}
+		emitted[typ] = true
+		for _, field := range record.Fields {
+			emit(field.Type)
+		}
+		fmt.Fprintf(out, "\nstructure %s where\n", symbolName(record.Symbol))
+		for _, field := range record.Fields {
+			fmt.Fprintf(out, "  %s : %s\n", recordFieldName(field.Name), r.leanType(field.Type))
+		}
+	}
+	for _, typ := range slices.Sorted(maps.Keys(r.records)) {
+		emit(typ)
+	}
 }
 
 func (r renderer) leanType(typ ir.Type) string {

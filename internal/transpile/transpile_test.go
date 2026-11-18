@@ -92,6 +92,26 @@ func roundTrip(x int) int { return int(uint(x)) }
 	}
 }
 
+func TestNestedRecordDefinitionOrder(t *testing.T) {
+	dir := newModule(t)
+	writeFile(t, filepath.Join(dir, "input.go"), `package sample
+type AOuter struct { ZInner }
+type ZInner struct { X int64 }
+//golean:verify
+func selectX(s AOuter) int64 { return s.X }
+`)
+	outputs, err := transpile.Generate(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := outputs[0].Source
+	inner := strings.Index(got, "structure «example.test/sample».«input».«ZInner»")
+	outer := strings.Index(got, "structure «example.test/sample».«input».«AOuter»")
+	if inner < 0 || outer < 0 || inner >= outer {
+		t.Fatalf("expected the embedded structure before its parent:\n%s", got)
+	}
+}
+
 func TestRejectUnsupportedSSA(t *testing.T) {
 	tests := []struct {
 		name, source, want string
@@ -101,6 +121,7 @@ func TestRejectUnsupportedSSA(t *testing.T) {
 		{"result", "func f(x int64) complex64 { return 1 }", "expected a top-level function with one supported result"},
 		{"dynamic any", "func f(x any) int64 { return 0 }", "parameter must have a supported scalar or record type"},
 		{"record mutation", "func f(x point) point { x.X = 1; return x }; type point struct { X int64 }", "local record must be fully initialized"},
+		{"nested record mutation", "func f(x outer) outer { x.Inner.X = 1; return x }; type outer struct { Inner point }; type point struct { X int64 }", "local record must be fully initialized"},
 		{"record escape", "func f(x int64) int64 { p := point{X: x}; saved = &p; return p.X }; type point struct { X int64 }; var saved *point", "local record must be fully initialized"},
 		{"constrained generic", "func f[T interface{ M() }](x T) T { return x }", "must use the unrestricted any constraint"},
 		{"generic call", "func f(x int64) int64 { return id(x) }; func id[T any](x T) T { return x }", "calls to generic functions are unsupported"},

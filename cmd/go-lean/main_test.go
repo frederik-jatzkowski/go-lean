@@ -25,7 +25,7 @@ func TestExamplesMatchGeneratedOutput(t *testing.T) {
 	}
 	for _, example := range []string{
 		"arithmetic", "boolean_implication", "branch_join", "byte_rune", "clamp", "clampimport", "constant_conversions",
-		"division_guarded", "division_precondition", "division_propagation", "float32_rounding", "float64_special",
+		"division_guarded", "division_precondition", "division_propagation", "embedded_struct", "float32_rounding", "float64_special",
 		"generic_identity", "immutable_closure", "machine_words", "narrow_signed",
 		"string_bytes", "struct_fields", "switch_tagless", "switch_value", "unsigned_wrap",
 	} {

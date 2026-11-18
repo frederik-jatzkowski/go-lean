@@ -1,0 +1,12 @@
+name = "goLean"
+defaultTargets = ["ExampleProofs"]
+moreLeanArgs = ["-DwarningAsError=true"]
+
+[[lean_lib]]
+name = "ExampleProofs"
+srcDir = "examples"
+roots = [
+  "arithmetic.arithmetic_gen", "arithmetic.arithmetic_proofs",
+  "clamp.clamp_gen", "clamp.clamp_proofs",
+  "clampimport.clampimport_gen", "clampimport.clampimport_proofs",
+]

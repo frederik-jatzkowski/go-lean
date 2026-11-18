@@ -100,6 +100,9 @@ func (r renderer) leanType(typ ir.Type) string {
 	if elem := typ.SliceElem(); elem != "" {
 		return "(List " + r.leanType(elem) + ")"
 	}
+	if elem, length := typ.ArrayShape(); elem != "" {
+		return "(Vector " + r.leanType(elem) + " " + length + ")"
+	}
 	if pointee := typ.Pointee(); pointee != "" {
 		return "(Option " + r.leanType(pointee) + ")"
 	}
@@ -188,6 +191,9 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 		return "[]"
 	case ir.CheckedIndex:
 		sequence, index := r.renderExpr(expr.Sequence), r.renderExpr(expr.Index)
+		if elem, _ := expr.SequenceType.ArrayShape(); elem != "" {
+			sequence = "(" + sequence + ").toArray"
+		}
 		if expr.IndexType.IsUnsigned() {
 			return fmt.Sprintf("(%s)[(%s).toNat]?", sequence, index)
 		}

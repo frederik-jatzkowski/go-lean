@@ -17,6 +17,7 @@ type Checked struct {
 	root      *ssa.Package
 	functions []*ssa.Function
 	records   map[*ssa.Alloc]RecordCell
+	arrays    map[*ssa.Alloc]*ssa.Store
 	loops     map[*ssa.Function]*CountedLoop
 }
 
@@ -24,6 +25,11 @@ func (c Checked) Root() *ssa.Package         { return c.root }
 func (c Checked) Functions() []*ssa.Function { return c.functions }
 
 func (c Checked) CountedLoop(fn *ssa.Function) *CountedLoop { return c.loops[fn] }
+
+func (c Checked) ArrayInitializer(value ssa.Value) *ssa.Store {
+	cell, _ := value.(*ssa.Alloc)
+	return c.arrays[cell]
+}
 
 func (c Checked) RecordCell(value ssa.Value) (RecordCell, bool) {
 	if cell, ok := value.(*ssa.Alloc); ok {
@@ -39,6 +45,7 @@ func Check(program gosource.Program) (Checked, error) {
 		done:     make(map[*ssa.Function]bool),
 		cells:    make(map[*ssa.Alloc]*ssa.Store),
 		records:  make(map[*ssa.Alloc]RecordCell),
+		arrays:   make(map[*ssa.Alloc]*ssa.Store),
 		loops:    make(map[*ssa.Function]*CountedLoop),
 	}
 	for _, fn := range program.Roots {
@@ -46,7 +53,7 @@ func Check(program gosource.Program) (Checked, error) {
 			return Checked{}, err
 		}
 	}
-	return Checked{root: program.Package, functions: c.ordered, records: c.records, loops: c.loops}, nil
+	return Checked{root: program.Package, functions: c.ordered, records: c.records, arrays: c.arrays, loops: c.loops}, nil
 }
 
 type checker struct {
@@ -55,6 +62,7 @@ type checker struct {
 	ordered  []*ssa.Function
 	cells    map[*ssa.Alloc]*ssa.Store
 	records  map[*ssa.Alloc]RecordCell
+	arrays   map[*ssa.Alloc]*ssa.Store
 	loops    map[*ssa.Function]*CountedLoop
 }
 
@@ -161,13 +169,14 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		return diagnostic(fn, ins.Pos(), "unsupported runtime operation %s on %s and %s", ins.Op, ins.X.Type(), ins.Y.Type())
 	case *ssa.UnOp:
 		if ins.Op == token.MUL {
-			if c.isCapture(ins.X) || c.isRecordAddress(ins.X) || IsReadOnlyRecordPointer(ins.X) {
+			cell, _ := ins.X.(*ssa.Alloc)
+			if c.isCapture(ins.X) || c.isRecordAddress(ins.X) || c.arrays[cell] != nil || IsReadOnlyRecordPointer(ins.X) {
 				return nil
 			}
 			if addr, ok := ins.X.(*ssa.FieldAddr); ok && IsReadOnlyRecordField(addr) {
 				return nil
 			}
-			if addr, ok := ins.X.(*ssa.IndexAddr); ok && isReadOnlySliceIndex(addr) {
+			if addr, ok := ins.X.(*ssa.IndexAddr); ok && c.isReadOnlyIndexAddr(addr) {
 				return nil
 			}
 		}
@@ -230,15 +239,20 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		}
 		return diagnostic(fn, ins.Pos(), "field address requires a supported record")
 	case *ssa.IndexAddr:
-		if !isReadOnlySliceIndex(ins) {
-			return diagnostic(fn, ins.Pos(), "index address requires a supported slice and integer index")
+		if !c.isReadOnlyIndexAddr(ins) {
+			return diagnostic(fn, ins.Pos(), "index address requires a supported sequence and integer index")
 		}
 		for _, use := range *ins.Referrers() {
 			if !readsCell(use, ins) {
-				return diagnostic(fn, use.Pos(), "slice element addresses may only be read")
+				return diagnostic(fn, use.Pos(), "element addresses may only be read")
 			}
 		}
 		return nil
+	case *ssa.Index:
+		if elem, _ := Type(ins.X.Type()).ArrayShape(); elem != "" && supportedValue(ins.X) && supportedIndex(ins.Index) {
+			return nil
+		}
+		return diagnostic(fn, ins.Pos(), "index requires a supported array value and integer index")
 	case *ssa.Field:
 		if Type(ins.X.Type()).IsRecord() && supportedValue(ins.X) {
 			return nil
@@ -296,7 +310,7 @@ func supportedValue(value ssa.Value) bool {
 			typ == ir.Bytes && value.Value.Kind() == constant.String ||
 			(typ == ir.Float32 || typ == ir.Float64) &&
 				(value.Value.Kind() == constant.Float || value.Value.Kind() == constant.Int)
-	case *ssa.Parameter, *ssa.BinOp, *ssa.UnOp, *ssa.Call, *ssa.Phi, *ssa.Convert, *ssa.ChangeType, *ssa.Field:
+	case *ssa.Parameter, *ssa.BinOp, *ssa.UnOp, *ssa.Call, *ssa.Phi, *ssa.Convert, *ssa.ChangeType, *ssa.Field, *ssa.Index:
 		return true
 	default:
 		return false
@@ -306,8 +320,14 @@ func supportedValue(value ssa.Value) bool {
 func Type(t types.Type) ir.Type {
 	t = types.Unalias(t)
 	if slice, ok := t.(*types.Slice); ok {
-		if elem := Type(slice.Elem()); elem != "" && elem.Pointee() == "" && elem.SliceElem() == "" {
+		if elem := sequenceElement(slice.Elem()); elem != "" {
 			return ir.SliceType(elem)
+		}
+		return ""
+	}
+	if array, ok := t.(*types.Array); ok {
+		if elem := sequenceElement(array.Elem()); elem != "" {
+			return ir.ArrayType(elem, array.Len())
 		}
 		return ""
 	}
@@ -368,9 +388,22 @@ func Type(t types.Type) ir.Type {
 	return ""
 }
 
-func isReadOnlySliceIndex(addr *ssa.IndexAddr) bool {
-	return Type(addr.X.Type()).SliceElem() != "" && supportedValue(addr.X) &&
-		Type(addr.Index.Type()).IsInteger() && supportedValue(addr.Index)
+func sequenceElement(t types.Type) ir.Type {
+	elem := Type(t)
+	if nested, _ := elem.ArrayShape(); nested != "" || elem.SliceElem() != "" || elem.Pointee() != "" {
+		return ""
+	}
+	return elem
+}
+
+func (c *checker) isReadOnlyIndexAddr(addr *ssa.IndexAddr) bool {
+	cell, _ := addr.X.(*ssa.Alloc)
+	return supportedIndex(addr.Index) &&
+		(c.arrays[cell] != nil || Type(addr.X.Type()).SliceElem() != "" && supportedValue(addr.X))
+}
+
+func supportedIndex(index ssa.Value) bool {
+	return Type(index.Type()).IsInteger() && supportedValue(index)
 }
 
 func unrestricted(param *types.TypeParam) bool {

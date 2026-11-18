@@ -107,6 +107,19 @@ func (t Type) SliceElem() Type {
 	return ""
 }
 
+func ArrayType(elem Type, length int64) Type {
+	return Type("array:" + strconv.FormatInt(length, 10) + ":" + string(elem))
+}
+
+func (t Type) ArrayShape() (elem Type, length string) {
+	shape, ok := strings.CutPrefix(string(t), "array:")
+	if !ok {
+		return "", ""
+	}
+	length, element, _ := strings.Cut(shape, ":")
+	return Type(element), length
+}
+
 // Body introduces immutable bindings and ends in a return or a returning branch.
 type Body struct {
 	Bindings []Binding
@@ -169,9 +182,10 @@ type NilPointer struct{}
 type EmptySlice struct{}
 
 type CheckedIndex struct {
-	Sequence  Expr
-	Index     Expr
-	IndexType Type
+	Sequence     Expr
+	SequenceType Type
+	Index        Expr
+	IndexType    Type
 }
 
 type Convert struct {

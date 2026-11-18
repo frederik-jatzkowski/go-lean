@@ -1,5 +1,3 @@
-//go:build golean_planned
-
 package array_bounds
 
 //golean:verify

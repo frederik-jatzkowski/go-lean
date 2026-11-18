@@ -159,15 +159,9 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 				})
 			}
 		case *ssa.IndexAddr:
-			elem := ins.X.Type().Underlying().(*types.Slice).Elem()
-			result.Bindings = append(result.Bindings, ir.Binding{
-				Binder: l.bindAs(ins, l.valueType(elem)),
-				Value: ir.CheckedIndex{
-					Sequence: l.value(ins.X), Index: l.value(ins.Index), IndexType: l.valueType(ins.Index.Type()),
-				},
-				CanPanic: true,
-			})
-			l.canPanic = true
+			result.Bindings = append(result.Bindings, l.checkedIndex(ins, ins.X, ins.Index))
+		case *ssa.Index:
+			result.Bindings = append(result.Bindings, l.checkedIndex(ins, ins.X, ins.Index))
 		case *ssa.Call:
 			if subset.IsLength(ins) {
 				result.Bindings = append(result.Bindings, ir.Binding{
@@ -201,6 +195,9 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 			if _, ok := l.checked.RecordCell(ins.Addr); ok {
 				continue
 			}
+			if l.checked.ArrayInitializer(ins.Addr) != nil {
+				continue
+			}
 			if _, ok := ins.Addr.(*ssa.FieldAddr); ok {
 				continue
 			}
@@ -226,6 +223,25 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 		}
 	}
 	return result
+}
+
+func (l *lowerer) checkedIndex(value, sequence, index ssa.Value) ir.Binding {
+	if init := l.checked.ArrayInitializer(sequence); init != nil {
+		sequence = init.Val
+	}
+	typ := l.valueType(sequence.Type())
+	elem := typ.SliceElem()
+	if elem == "" {
+		elem, _ = typ.ArrayShape()
+	}
+	l.canPanic = true
+	return ir.Binding{
+		Binder: l.bindAs(value, elem),
+		Value: ir.CheckedIndex{
+			Sequence: l.value(sequence), SequenceType: typ, Index: l.value(index), IndexType: l.valueType(index.Type()),
+		},
+		CanPanic: true,
+	}
 }
 
 func (l *lowerer) value(value ssa.Value) ir.Expr {
@@ -273,6 +289,9 @@ func (l *lowerer) valueType(t types.Type) ir.Type {
 	if typ.SliceElem() != "" {
 		l.valueType(t.Underlying().(*types.Slice).Elem())
 	}
+	if elem, _ := typ.ArrayShape(); elem != "" {
+		l.valueType(t.Underlying().(*types.Array).Elem())
+	}
 	if typ.IsRecord() {
 		if _, exists := l.records[typ]; !exists {
 			named := types.Unalias(t).(*types.Named)
@@ -292,6 +311,9 @@ func (l *lowerer) valueType(t types.Type) ir.Type {
 }
 
 func (l *lowerer) load(addr ssa.Value) ir.Expr {
+	if init := l.checked.ArrayInitializer(addr); init != nil {
+		return l.value(init.Val)
+	}
 	if field, ok := addr.(*ssa.FieldAddr); ok {
 		if subset.IsReadOnlyRecordField(field) {
 			return l.value(field)

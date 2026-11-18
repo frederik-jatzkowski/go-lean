@@ -112,6 +112,24 @@ func selectX(s AOuter) int64 { return s.X }
 	}
 }
 
+func TestIndexesTemporaryArrayValue(t *testing.T) {
+	dir := newModule(t)
+	writeFile(t, filepath.Join(dir, "input.go"), `package sample
+func copyValue(xs [4]int64) [4]int64 { return xs }
+
+//golean:verify
+func at(xs [4]int64, index int) int64 { return copyValue(xs)[index] }
+`)
+	outputs, err := transpile.Generate(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := outputs[0].Source
+	if !strings.Contains(got, "Vector Int64 4") || !strings.Contains(got, ".toArray)[") {
+		t.Fatalf("missing checked indexing of the array value:\n%s", got)
+	}
+}
+
 func TestCountedLoopPreservesItsUpdate(t *testing.T) {
 	dir := newModule(t)
 	writeFile(t, filepath.Join(dir, "input.go"), `package sample
@@ -151,7 +169,9 @@ func TestRejectUnsupportedSSA(t *testing.T) {
 		{"record pointer mutation", "func f(p *point) int64 { p.X = 1; return p.X }; type point struct { X int64 }", "unsupported store"},
 		{"record pointer escape", "func f(p *point) *point { return p }; type point struct { X int64 }", "record pointers may not escape as results"},
 		{"record pointer identity", "func f(p, q *point) bool { return p == q }; type point struct { X int64 }", "unsupported runtime operation =="},
-		{"caller slice mutation", "func f(xs []int64) int64 { xs[0] = 1; return xs[0] }", "slice element addresses may only be read"},
+		{"caller slice mutation", "func f(xs []int64) int64 { xs[0] = 1; return xs[0] }", "element addresses may only be read"},
+		{"array mutation", "func f(xs [4]int64) int64 { xs[0] = 1; return xs[0] }", "element addresses may only be read"},
+		{"array escape", "func f(xs [4]int64) int64 { saved = &xs; return xs[0] }; var saved *[4]int64", "local array must be an initialized copy that does not escape"},
 		{"caller slice escape", "func f(xs []int64) []int64 { return xs }", "slice results are unsupported"},
 		{"constrained generic", "func f[T interface{ M() }](x T) T { return x }", "must use the unrestricted any constraint"},
 		{"generic call", "func f(x int64) int64 { return id(x) }; func id[T any](x T) T { return x }", "calls to generic functions are unsupported"},

@@ -13,7 +13,7 @@ import (
 func CaptureType(t types.Type) ir.Type {
 	if pointer, ok := types.Unalias(t).(*types.Pointer); ok {
 		typ := Type(pointer.Elem())
-		if typ.Pointee() == "" && typ.SliceElem() == "" {
+		if elem, _ := typ.ArrayShape(); elem == "" && typ.Pointee() == "" && typ.SliceElem() == "" {
 			return typ
 		}
 	}
@@ -50,6 +50,14 @@ func (c *checker) checkLocalMemory(fn *ssa.Function) error {
 	for _, block := range fn.Blocks {
 		for _, ins := range block.Instrs {
 			if cell, ok := ins.(*ssa.Alloc); ok {
+				if typ := arrayValueType(cell); typ != "" {
+					initial := arrayInitializer(cell, typ)
+					if initial == nil {
+						return diagnostic(fn, cell.Pos(), "local array must be an initialized copy that does not escape")
+					}
+					c.arrays[cell] = initial
+					continue
+				}
 				if CaptureType(cell.Type()).IsRecord() {
 					record, ok := recordInitializer(cell)
 					if !ok {
@@ -70,13 +78,16 @@ func (c *checker) checkLocalMemory(fn *ssa.Function) error {
 		for _, ins := range block.Instrs {
 			switch ins := ins.(type) {
 			case *ssa.Store:
-				if index, ok := ins.Addr.(*ssa.IndexAddr); ok && isReadOnlySliceIndex(index) {
-					return diagnostic(fn, ins.Pos(), "slice element addresses may only be read")
+				if index, ok := ins.Addr.(*ssa.IndexAddr); ok && c.isReadOnlyIndexAddr(index) {
+					return diagnostic(fn, ins.Pos(), "element addresses may only be read")
 				}
 				if c.isRecordAddress(ins.Addr) {
 					continue
 				}
 				cell, ok := ins.Addr.(*ssa.Alloc)
+				if ok && c.arrays[cell] == ins {
+					continue
+				}
 				if !ok || c.cells[cell] != ins {
 					return diagnostic(fn, ins.Pos(), "unsupported store outside immutable capture initialization")
 				}

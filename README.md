@@ -16,6 +16,7 @@
 - Named structs with scalar or nested record fields lower to Lean structures. Promoted fields follow the same projection chain as explicit selectors. Field initialization must finish before a local record is read, and the initialization addresses stay local.
 - Read-only, nonrecursive record pointer inputs use `Option` to distinguish nil from a record value. Dereferencing nil propagates a panic outcome.
 - Read-only slices of supported value elements use Lean lists for indexing by supported Go integer types. Both negative and out-of-range indices propagate a panic at element address formation. Nil and empty slices have the same indexing behavior. Writes through slice addresses and slice results are outside this subset.
+- Unnamed Go arrays passed by value use fixed-length Lean vectors, with the same checked indexing as slices. Any local SSA array cell must hold an initialized, read-only copy whose address stays local.
 - Local bindings, assignments, early returns, branches with boolean conditions, and value and tagless switches. Control-flow joins select the supported scalar value from the branch taken. Short-circuit expressions evaluate their right operand only when needed. The checker rejects unsupported loops, recursive or indirect calls, and effects such as reads of mutable globals.
 - A canonical counted loop starts its `uint8` counter at zero, increments it by one while it is below an invariant `uint8` parameter or constant, and returns its sole `int64` accumulator. The accumulator starts from a parameter or constant and updates using pure `int64` arithmetic in a straight-line body. Lean recursion uses the iteration count as decreasing natural-number fuel.
 - Checked proofs for arithmetic identities, wraparound, clamp bounds and idempotence, and division panic freedom, signed boundaries, and panic propagation. The `clampimport` example proves the clamp properties using `Min` and `Max` translated from an imported Go package.
@@ -51,11 +52,11 @@ Apply the panic model to bounds checks and pointer dereferences.
 
 ## Example index
 
-`examples/provable/` contains 32 examples. The default build regenerates and checks `arithmetic`, `boolean_implication`, `bounded_counter`, `branch_join`, `byte_rune`, `clamp`, `clampimport`, `constant_conversions`, `division_guarded`, `division_precondition`, `division_propagation`, `embedded_struct`, `float32_rounding`, `float64_special`, `generic_identity`, `immutable_closure`, `machine_words`, `narrow_signed`, `nil_dereference`, `slice_bounds`, `string_bytes`, `struct_fields`, `switch_tagless`, `switch_value`, and `unsigned_wrap`. The other 7 have valid Go source behind the `golean_planned` build tag and draft Lean theorem statements with unfinished proofs.
+`examples/provable/` contains 32 examples. The default build regenerates and checks `arithmetic`, `array_bounds`, `boolean_implication`, `bounded_counter`, `branch_join`, `byte_rune`, `clamp`, `clampimport`, `constant_conversions`, `division_guarded`, `division_precondition`, `division_propagation`, `embedded_struct`, `float32_rounding`, `float64_special`, `generic_identity`, `immutable_closure`, `machine_words`, `narrow_signed`, `nil_dereference`, `slice_bounds`, `string_bytes`, `struct_fields`, `switch_tagless`, `switch_value`, and `unsigned_wrap`. The other 6 have valid Go source behind the `golean_planned` build tag and draft Lean theorem statements with unfinished proofs.
 
 | Area | Pending examples |
 | --- | --- |
-| Aggregates and references | `array_bounds`, `slice_copy`, `map_lookup`, `map_build`, `acyclic_list` |
+| Aggregates and references | `slice_copy`, `map_lookup`, `map_build`, `acyclic_list` |
 | Control flow and termination | `range_fold` |
 | Generics and functions | `generic_map` |
 

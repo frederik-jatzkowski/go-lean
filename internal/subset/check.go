@@ -90,7 +90,8 @@ func (c *checker) function(fn *ssa.Function) error {
 		return diagnostic(fn, fn.Pos(), "Go body unavailable for %s", fn)
 	}
 	sig := fn.Signature
-	if fn.Pkg == nil || fn.Synthetic != "" || sig.Recv() != nil ||
+	instance := len(fn.TypeArgs()) != 0
+	if (!instance && (fn.Pkg == nil || fn.Synthetic != "")) || sig.Recv() != nil ||
 		sig.Variadic() ||
 		sig.Results().Len() != 1 || Type(sig.Results().At(0).Type()) == "" {
 		return diagnostic(fn, fn.Pos(), "expected a top-level function with one supported result and no variadic arguments")
@@ -101,19 +102,38 @@ func (c *checker) function(fn *ssa.Function) error {
 	if parent := fn.Parent(); parent != nil && parent.TypeParams().Len() != 0 {
 		return diagnostic(fn, fn.Pos(), "closures in generic functions are unsupported")
 	}
-	for i := 0; i < sig.TypeParams().Len(); i++ {
-		param := sig.TypeParams().At(i)
+	params := sig.TypeParams()
+	var build *SliceBuild
+	if instance {
+		origin := fn.Origin()
+		if origin == nil || origin.Pkg == nil || origin.Synthetic != "" {
+			return diagnostic(fn, fn.Pos(), "generic instance requires a named Go definition")
+		}
+		params = origin.Signature.TypeParams()
+	}
+	for i := 0; i < params.Len(); i++ {
+		param := params.At(i)
 		if !unrestricted(param) {
 			return diagnostic(fn, param.Obj().Pos(), "type parameter %s must use the unrestricted any constraint", param.Obj().Name())
 		}
 	}
+	if Type(sig.Results().At(0).Type()).SliceElem() != "" {
+		if blocks, ok := matchLoopBlocks(fn); ok {
+			build = checkSliceBuild(blocks)
+		}
+	}
+	if instance && (build == nil || build.Callback == nil) {
+		return diagnostic(fn, fn.Pos(), "calls to generic functions are unsupported outside validated callback slice construction")
+	}
 	for _, param := range fn.Params {
-		if Type(param.Type()) == "" {
+		if Type(param.Type()) == "" && !(instance && param == build.Callback) {
 			return diagnostic(fn, param.Pos(), "parameter must have a supported scalar or record type")
 		}
 	}
 	c.visiting[fn] = true
-	if err := c.checkBody(fn); err != nil {
+	if build != nil {
+		c.builds[fn] = build
+	} else if err := c.checkBody(fn); err != nil {
 		return err
 	}
 	delete(c.visiting, fn)
@@ -124,13 +144,15 @@ func (c *checker) function(fn *ssa.Function) error {
 
 func (c *checker) checkBody(fn *ssa.Function) error {
 	if Type(fn.Signature.Results().At(0).Type()).SliceElem() != "" {
-		if blocks, ok := matchLoopBlocks(fn); ok {
-			if build := checkSliceBuild(blocks); build != nil {
-				c.builds[fn] = build
-				return nil
+		for _, block := range fn.Blocks {
+			ret, ok := block.Instrs[len(block.Instrs)-1].(*ssa.Return)
+			if ok {
+				// Calls are validated transitively and subject to this same rule.
+				if call, ok := ret.Results[0].(*ssa.Call); !ok || call.Call.StaticCallee() == nil {
+					return diagnostic(fn, fn.Pos(), "slice results require a validated fresh construction")
+				}
 			}
 		}
-		return diagnostic(fn, fn.Pos(), "slice results require a validated fresh construction")
 	}
 	if loop := checkCountedLoop(fn); loop != nil {
 		c.loops[fn] = loop
@@ -241,16 +263,23 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 			(parent != fn || len(callee.FreeVars) != 0 && !isClosureCall(ins, callee)) {
 			return diagnostic(fn, ins.Pos(), "closure call must use its original local closure")
 		}
-		if len(callee.TypeArgs()) != 0 || callee.Signature.TypeParams().Len() != 0 {
+		if callee.Signature.TypeParams().Len() != 0 {
 			return diagnostic(fn, ins.Pos(), "calls to generic functions are unsupported")
-		}
-		for _, arg := range ins.Call.Args {
-			if !supportedValue(arg) {
-				return diagnostic(fn, ins.Pos(), "call to %s requires supported arguments", callee)
-			}
 		}
 		if err := c.function(callee); err != nil {
 			return diagnostic(fn, ins.Pos(), "call to %s: %w", callee, err)
+		}
+		build := c.builds[callee]
+		for i, arg := range ins.Call.Args {
+			if build != nil && callee.Params[i] == build.Callback {
+				if err := c.checkCallback(fn, ins, arg); err != nil {
+					return err
+				}
+				continue
+			}
+			if !supportedValue(arg) {
+				return diagnostic(fn, ins.Pos(), "call to %s requires supported arguments", callee)
+			}
 		}
 		return nil
 	case *ssa.Alloc, *ssa.Store, *ssa.MakeClosure:

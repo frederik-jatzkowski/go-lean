@@ -22,6 +22,7 @@ roots = [
   "float32_rounding.float32_rounding_gen", "float32_rounding.float32_rounding_proofs",
   "float64_special.float64_special_gen", "float64_special.float64_special_proofs",
   "generic_identity.generic_identity_gen", "generic_identity.generic_identity_proofs",
+  "generic_map.generic_map_gen", "generic_map.generic_map_proofs",
   "immutable_closure.immutable_closure_gen", "immutable_closure.immutable_closure_proofs",
   "machine_words.machine_words_gen", "machine_words.machine_words_proofs",
   "narrow_signed.narrow_signed_gen", "narrow_signed.narrow_signed_proofs",

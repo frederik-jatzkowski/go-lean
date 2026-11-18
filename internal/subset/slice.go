@@ -1,13 +1,19 @@
 package subset
 
-import "golang.org/x/tools/go/ssa"
+import (
+	"go/types"
+
+	"github.com/frederik-jatzkowski/go-lean/internal/ir"
+	"golang.org/x/tools/go/ssa"
+)
 
 // SliceBuild captures a checked fresh slice returned after a full iteration.
 type SliceBuild struct {
-	Source  ssa.Value
-	Element *ssa.UnOp
-	Steps   []ssa.Value
-	Value   ssa.Value
+	Source   ssa.Value
+	Element  *ssa.UnOp
+	Steps    []ssa.Value
+	Value    ssa.Value
+	Callback *ssa.Parameter
 }
 
 func checkSliceBuild(blocks loopBlocks) *SliceBuild {
@@ -42,12 +48,35 @@ func checkSliceBuild(blocks loopBlocks) *SliceBuild {
 		return nil
 	}
 	// No other operation can use the result or its element address before return.
+	if end == 3 {
+		if call, ok := body[2].(*ssa.Call); ok && call == store.Val && !call.Call.IsInvoke() &&
+			len(call.Call.Args) == 1 && call.Call.Args[0] == iter.Element {
+			if callback, ok := call.Call.Value.(*ssa.Parameter); ok &&
+				callbackType(callback.Type(), dstElem) != "" {
+				return &SliceBuild{Source: iter.Source, Element: iter.Element, Steps: []ssa.Value{call}, Value: call, Callback: callback}
+			}
+		}
+	}
 	available := map[ssa.Value]bool{iter.Element: true}
 	steps, ok := pureInt64Steps(body[2:end], nil, available)
 	if !ok || !loopValue(store.Val, available) {
 		return nil
 	}
 	return &SliceBuild{Source: iter.Source, Element: iter.Element, Steps: steps, Value: store.Val}
+}
+
+// CallbackType represents the function parameter validated by the slice build.
+func (b SliceBuild) CallbackType() ir.Type {
+	return callbackType(b.Callback.Type(), Type(b.Element.Type()))
+}
+
+func callbackType(typ types.Type, elem ir.Type) ir.Type {
+	sig, ok := types.Unalias(typ).(*types.Signature)
+	if ok && !sig.Variadic() && sig.Params().Len() == 1 && sig.Results().Len() == 1 &&
+		Type(sig.Params().At(0).Type()) == elem && Type(sig.Results().At(0).Type()) == elem {
+		return ir.UnaryFunctionType(elem, elem)
+	}
+	return ""
 }
 
 func lengthOf(value, sequence ssa.Value) bool {

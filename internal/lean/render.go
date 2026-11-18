@@ -97,6 +97,9 @@ func (r renderer) renderRecords(out *strings.Builder) {
 }
 
 func (r renderer) leanType(typ ir.Type) string {
+	if input, output := typ.UnaryFunctionShape(); input != "" {
+		return "(" + r.leanType(input) + " → " + r.leanType(output) + ")"
+	}
 	if elem := typ.SliceElem(); elem != "" {
 		return "(List " + r.leanType(elem) + ")"
 	}
@@ -248,6 +251,10 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 			args = append(args, r.renderExpr(arg))
 		}
 		return "(" + strings.Join(args, " ") + ")"
+	case ir.FunctionRef:
+		return "_root_.GoLean." + symbolName(ir.Symbol(expr))
+	case ir.Apply:
+		return "(" + r.renderExpr(expr.Function) + " " + r.renderExpr(expr.Argument) + ")"
 	default:
 		panic("unexpected IR expression")
 	}

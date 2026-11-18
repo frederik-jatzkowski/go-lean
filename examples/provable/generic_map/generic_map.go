@@ -1,5 +1,3 @@
-//go:build golean_planned
-
 package generic_map
 
 func mapValues[T, U any](values []T, transform func(T) U) []U {

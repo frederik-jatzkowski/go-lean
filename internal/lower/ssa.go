@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/url"
 	"slices"
+	"strconv"
 
 	"github.com/frederik-jatzkowski/go-lean/internal/ir"
 	"github.com/frederik-jatzkowski/go-lean/internal/subset"
@@ -19,10 +20,14 @@ func FromSSA(checked subset.Checked, sourceStem string, wordBits int64) ir.Progr
 	file := url.PathEscape(sourceStem)
 	// The checker orders callees before callers, so their effects are already known.
 	effects := make(map[*ssa.Function]bool)
+	instances := make(map[*ssa.Function]string)
 	for _, fn := range checked.Functions() {
+		if len(fn.TypeArgs()) != 0 {
+			instances[fn] = fn.Origin().Name() + "$instance" + strconv.Itoa(len(instances))
+		}
 		l := lowerer{
 			root: checked.Root(), file: file, bindings: make(map[ssa.Value]ir.Binder), effects: effects,
-			checked: checked, records: program.Records,
+			checked: checked, records: program.Records, instances: instances,
 		}
 		result := ir.Function{Symbol: l.symbol(fn), Result: l.valueType(fn.Signature.Results().At(0).Type())}
 		for i := 0; i < fn.Signature.TypeParams().Len(); i++ {
@@ -32,7 +37,11 @@ func FromSSA(checked subset.Checked, sourceStem string, wordBits int64) ir.Progr
 			result.Params = append(result.Params, l.bindAs(capture, l.captureType(capture)))
 		}
 		for _, param := range fn.Params {
-			result.Params = append(result.Params, l.bind(param))
+			if build := checked.SliceBuild(fn); build != nil && param == build.Callback {
+				result.Params = append(result.Params, l.bindAs(param, build.CallbackType()))
+			} else {
+				result.Params = append(result.Params, l.bind(param))
+			}
 		}
 		if loop := checked.CountedLoop(fn); loop != nil {
 			l.lowerCountedLoop(&result, loop)
@@ -97,6 +106,8 @@ func (l *lowerer) lowerLoopSteps(values []ssa.Value) []ir.Binding {
 			expr = l.binary(step)
 		case *ssa.UnOp:
 			expr = ir.Negate{Value: l.value(step.X)}
+		case *ssa.Call:
+			expr = ir.Apply{Function: l.value(step.Call.Value), Argument: l.value(step.Call.Args[0])}
 		}
 		steps = append(steps, ir.Binding{Binder: l.bind(step), Value: expr})
 	}
@@ -104,21 +115,27 @@ func (l *lowerer) lowerLoopSteps(values []ssa.Value) []ir.Binding {
 }
 
 type lowerer struct {
-	root     *ssa.Package
-	file     string
-	bindings map[ssa.Value]ir.Binder
-	effects  map[*ssa.Function]bool
-	canPanic bool
-	next     int
-	usesWord bool
-	checked  subset.Checked
-	records  map[ir.Type]ir.Record
+	root      *ssa.Package
+	file      string
+	bindings  map[ssa.Value]ir.Binder
+	effects   map[*ssa.Function]bool
+	canPanic  bool
+	next      int
+	usesWord  bool
+	checked   subset.Checked
+	records   map[ir.Type]ir.Record
+	instances map[*ssa.Function]string
 }
 
 func (l *lowerer) symbol(fn *ssa.Function) ir.Symbol {
 	symbol := ir.Symbol{Package: l.root.Pkg.Path(), File: l.file, Name: fn.Name()}
-	if fn.Pkg != l.root {
-		symbol.Dependency = fn.Pkg.Pkg.Path()
+	pkg := fn.Pkg
+	if name, ok := l.instances[fn]; ok {
+		symbol.Name = name
+		pkg = fn.Origin().Pkg
+	}
+	if pkg != l.root {
+		symbol.Dependency = pkg.Pkg.Path()
 	}
 	return symbol
 }
@@ -273,6 +290,9 @@ func (l *lowerer) checkedIndex(value, sequence, index ssa.Value) ir.Binding {
 }
 
 func (l *lowerer) value(value ssa.Value) ir.Expr {
+	if fn, ok := value.(*ssa.Function); ok {
+		return ir.FunctionRef(l.symbol(fn))
+	}
 	if c, ok := value.(*ssa.Const); ok {
 		typ := l.valueType(c.Type())
 		if typ.Pointee() != "" {

@@ -85,6 +85,16 @@ func (t Type) IsWord() bool { return t == IntWord || t == UIntWord }
 
 func TypeParameter(index int) Type { return Type("α" + strconv.Itoa(index)) }
 
+func UnaryFunctionType(input, output Type) Type { return Type("func:" + input + "\x00" + output) }
+
+func (t Type) UnaryFunctionShape() (input, output Type) {
+	if signature, ok := strings.CutPrefix(string(t), "func:"); ok {
+		input, output, _ := strings.Cut(signature, "\x00")
+		return Type(input), Type(output)
+	}
+	return "", ""
+}
+
 func RecordType(pkg, name string) Type { return Type("struct:" + pkg + "." + name) }
 
 func (t Type) IsRecord() bool { return strings.HasPrefix(string(t), "struct:") }
@@ -216,6 +226,13 @@ type Call struct {
 	Args   []Expr
 }
 
+type FunctionRef Symbol
+
+type Apply struct {
+	Function Expr
+	Argument Expr
+}
+
 type Binary struct {
 	Op          Operator
 	Left, Right Expr
@@ -241,6 +258,8 @@ func (CheckedIndex) expr()       {}
 func (Convert) expr()            {}
 func (Binary) expr()             {}
 func (Call) expr()               {}
+func (FunctionRef) expr()        {}
+func (Apply) expr()              {}
 
 type Operator int
 

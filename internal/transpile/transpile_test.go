@@ -201,6 +201,59 @@ func double(xs []int64) []int64 {
 	}
 }
 
+const genericSliceBuilder = `
+func transform[T any](xs []T, apply func(T) T) []T {
+	dst := make([]T, len(xs))
+	for i, value := range xs {
+		dst[i] = apply(value)
+	}
+	return dst
+}
+`
+
+func TestGenericSliceBuilderInstances(t *testing.T) {
+	dir := newModule(t)
+	writeFile(t, filepath.Join(dir, "input.go"), `package sample
+//golean:verify
+func wide(xs []int64) []int64 { return transform(xs, increment) }
+//golean:verify
+func narrow(xs []uint8) []uint8 { return transform(xs, func(x uint8) uint8 { return x * 3 }) }
+//golean:verify
+func wideAgain(xs []int64) []int64 { return transform(xs, func(x int64) int64 { return x - 1 }) }
+func increment(x int64) int64 { return x + 1 }
+`+genericSliceBuilder)
+	outputs, err := transpile.Generate(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := outputs[0].Source
+	for _, want := range []string{"Int64 → Int64", "UInt8 → UInt8", "«increment»", "«wideAgain$1»", "UInt8.ofNat (3)"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in output:\n%s", want, got)
+		}
+	}
+	if strings.Count(got, "return List.map") != 2 {
+		t.Errorf("expected one slice builder per concrete type:\n%s", got)
+	}
+}
+
+func TestRejectGenericSliceCallbacks(t *testing.T) {
+	for _, test := range []struct{ name, body, want string }{
+		{"unknown callback", "func f(xs []int64, apply func(int64) int64) []int64 { return transform(xs, apply) }", "parameter must have a supported"},
+		{"nil callback", "func f(xs []int64) []int64 { return transform(xs, nil) }", "statically known function"},
+		{"captured callback", "func f(xs []int64, y int64) []int64 { return transform(xs, func(x int64) int64 { return x+y }) }", "closures may only be used in direct calls"},
+		{"transitive panic", "func f(xs []int64) []int64 { return transform(xs, func(x int64) int64 { return divide(x) }) }; func divide(x int64) int64 { return 1/x }", "must use only total operations"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := newModule(t)
+			writeFile(t, filepath.Join(dir, "input.go"), "package sample\n//golean:verify\n"+test.body+"\n"+genericSliceBuilder)
+			if _, err := transpile.Generate(dir); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("got %v, want %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestRejectUnsupportedSSA(t *testing.T) {
 	tests := []struct {
 		name, source, want string

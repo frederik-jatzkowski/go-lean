@@ -74,7 +74,7 @@ func Load(dir string) ([]Program, error) {
 	}
 	slices.SortFunc(selected, func(a, b selectedFile) int { return cmp.Compare(a.path, b.path) })
 
-	prog, _ := ssautil.AllPackages(selectedPackages, 0)
+	prog, _ := ssautil.AllPackages(selectedPackages, ssa.InstantiateGenerics)
 	prog.Build()
 	programs := make([]Program, 0, len(selected))
 	for _, file := range selected {

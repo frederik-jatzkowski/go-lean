@@ -1,5 +1,3 @@
-//go:build golean_planned
-
 package narrow_signed
 
 //golean:verify

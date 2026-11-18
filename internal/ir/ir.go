@@ -29,9 +29,21 @@ type Binder struct {
 type Type string
 
 const (
+	Int8  Type = "Int8"
+	Int16 Type = "Int16"
+	Int32 Type = "Int32"
 	Int64 Type = "Int64"
 	Bool  Type = "Bool"
 )
+
+func (t Type) IsInteger() bool {
+	switch t {
+	case Int8, Int16, Int32, Int64:
+		return true
+	default:
+		return false
+	}
+}
 
 // Body introduces immutable bindings and ends in a return or a returning branch.
 type Body struct {
@@ -60,7 +72,11 @@ func (If) result()     {}
 
 type Expr interface{ expr() }
 
-type IntLiteral string
+type IntLiteral struct {
+	Value string
+	Type  Type
+}
+
 type BoolLiteral bool
 type Ref Binder
 type Negate struct{ Value Expr }
@@ -74,6 +90,7 @@ type Call struct {
 type Binary struct {
 	Op          Operator
 	Left, Right Expr
+	OperandType Type
 }
 
 func (IntLiteral) expr()  {}

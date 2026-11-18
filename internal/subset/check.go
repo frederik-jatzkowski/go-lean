@@ -54,11 +54,11 @@ func (c *checker) function(fn *ssa.Function) error {
 	if fn.Pkg == nil || fn.Parent() != nil || fn.Synthetic != "" || sig.Recv() != nil ||
 		sig.TypeParams().Len() != 0 || sig.Variadic() ||
 		sig.Results().Len() != 1 || Type(sig.Results().At(0).Type()) == "" {
-		return diagnostic(fn, fn.Pos(), "expected a top-level function with an int64 or bool result and no type parameters or variadic arguments")
+		return diagnostic(fn, fn.Pos(), "expected a top-level function with one supported scalar result and no type parameters or variadic arguments")
 	}
 	for _, param := range fn.Params {
 		if Type(param.Type()) == "" {
-			return diagnostic(fn, param.Pos(), "parameter must have type int64 or bool")
+			return diagnostic(fn, param.Pos(), "parameter must have a supported scalar type")
 		}
 	}
 	c.visiting[fn] = true
@@ -105,13 +105,15 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 	switch ins := ins.(type) {
 	case *ssa.BinOp:
 		_, supported := Binary(ins.Op)
-		if supported && (hasType(ins.X, ir.Int64) && hasType(ins.Y, ir.Int64) ||
-			(ins.Op == token.EQL || ins.Op == token.NEQ) && hasType(ins.X, ir.Bool) && hasType(ins.Y, ir.Bool)) {
+		typ := Type(ins.X.Type())
+		if supported && scalar(ins.X) && hasType(ins.Y, typ) &&
+			(typ.IsInteger() || ins.Op == token.EQL || ins.Op == token.NEQ) {
 			return nil
 		}
 		return diagnostic(fn, ins.Pos(), "unsupported runtime operation %s on %s and %s", ins.Op, ins.X.Type(), ins.Y.Type())
 	case *ssa.UnOp:
-		if ins.Op == token.SUB && hasType(ins.X, ir.Int64) || ins.Op == token.NOT && hasType(ins.X, ir.Bool) {
+		if ins.Op == token.SUB && Type(ins.X.Type()).IsInteger() && scalar(ins.X) ||
+			ins.Op == token.NOT && hasType(ins.X, ir.Bool) {
 			return nil
 		}
 		return diagnostic(fn, ins.Pos(), "unsupported unary operation %s on %s", ins.Op, ins.X.Type())
@@ -122,7 +124,7 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		}
 		for _, arg := range ins.Call.Args {
 			if !scalar(arg) {
-				return diagnostic(fn, ins.Pos(), "call to %s must have int64 or bool arguments", callee)
+				return diagnostic(fn, ins.Pos(), "call to %s requires supported scalar arguments", callee)
 			}
 		}
 		if err := c.function(callee); err != nil {
@@ -148,7 +150,7 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		if len(ins.Results) == 1 && scalar(ins.Results[0]) {
 			return nil
 		}
-		return diagnostic(fn, ins.Pos(), "return must have one int64 or bool value")
+		return diagnostic(fn, ins.Pos(), "return must have one supported scalar value")
 	case *ssa.Jump:
 		return nil
 	default:
@@ -168,7 +170,7 @@ func scalar(value ssa.Value) bool {
 	switch value := value.(type) {
 	case *ssa.Const:
 		return value.Value != nil &&
-			(typ == ir.Int64 && value.Value.Kind() == constant.Int ||
+			(typ.IsInteger() && value.Value.Kind() == constant.Int ||
 				typ == ir.Bool && value.Value.Kind() == constant.Bool)
 	case *ssa.Parameter, *ssa.BinOp, *ssa.UnOp, *ssa.Call, *ssa.Phi:
 		return true
@@ -180,6 +182,12 @@ func scalar(value ssa.Value) bool {
 func Type(t types.Type) ir.Type {
 	if basic, ok := types.Unalias(t).(*types.Basic); ok {
 		switch basic.Kind() {
+		case types.Int8:
+			return ir.Int8
+		case types.Int16:
+			return ir.Int16
+		case types.Int32:
+			return ir.Int32
 		case types.Int64:
 			return ir.Int64
 		case types.Bool, types.UntypedBool:

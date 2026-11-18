@@ -60,7 +60,7 @@ func renderBody(out *strings.Builder, body ir.Body, indent string, canPanic bool
 func renderExpr(expr ir.Expr) string {
 	switch expr := expr.(type) {
 	case ir.IntLiteral:
-		return fmt.Sprintf("(Int64.ofInt (%s))", expr)
+		return fmt.Sprintf("(%s.ofInt (%s))", expr.Type, expr.Value)
 	case ir.BoolLiteral:
 		if expr {
 			return "true"
@@ -75,7 +75,7 @@ func renderExpr(expr ir.Expr) string {
 	case ir.Binary:
 		left, right := renderExpr(expr.Left), renderExpr(expr.Right)
 		if expr.Op == ir.Divide {
-			return fmt.Sprintf("if %s = 0 then none else some (Int64.ofInt ((%s).toInt.tdiv (%s).toInt))", right, left, right)
+			return fmt.Sprintf("if %s = 0 then none else some (%s.ofInt ((%s).toInt.tdiv (%s).toInt))", right, expr.OperandType, left, right)
 		}
 		value := fmt.Sprintf("(%s %s %s)", left, operators[expr.Op], right)
 		if expr.Op >= ir.Equal {

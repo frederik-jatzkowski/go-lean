@@ -4,8 +4,8 @@
 
 ## Supported
 
-- Ordinary top-level functions with `int64` or `bool` parameters and one `int64` or `bool` result. Statically resolved calls can cross package boundaries when the callee's Go body is available and within the supported subset.
-- Folded Go constants and runtime `+`, `-`, `*`, and `/`. Lean `Int64` models Go's signed 64-bit wraparound. Runtime division truncates toward zero and lifts its function and transitive callers to an `Option` result, with `none` for a zero divisor.
+- Ordinary top-level functions with fixed-width signed integer or `bool` parameters and one result of a supported type. Statically resolved calls can cross package boundaries when the callee's Go body is available and within the supported subset.
+- Folded Go constants and runtime `+`, `-`, `*`, and `/`. Lean's `Int8`, `Int16`, `Int32`, and `Int64` model Go's signed wraparound at the corresponding widths. Runtime division truncates toward zero and lifts its function and transitive callers to an `Option` result, with `none` for a zero divisor.
 - Local bindings, assignments, early returns, and branches with boolean conditions. Short-circuit expressions evaluate their right operand only when needed. The checker rejects non-boolean values at control-flow joins, loops, recursive or indirect calls, and unsupported effects such as reads of mutable globals.
 - Checked proofs for arithmetic identities, wraparound, clamp bounds and idempotence, and division panic freedom, signed boundaries, and panic propagation. The `clampimport` example proves the clamp properties using `Min` and `Max` translated from an imported Go package.
 
@@ -40,11 +40,11 @@ Apply the panic model to bounds checks and pointer dereferences.
 
 ## Example index
 
-`examples/provable/` contains 32 examples. The default build regenerates and checks `arithmetic`, `boolean_implication`, `clamp`, `clampimport`, `division_guarded`, `division_precondition`, and `division_propagation`. The other 25 have valid Go source behind the `golean_planned` build tag and draft Lean theorem statements with unfinished proofs.
+`examples/provable/` contains 32 examples. The default build regenerates and checks `arithmetic`, `boolean_implication`, `clamp`, `clampimport`, `division_guarded`, `division_precondition`, `division_propagation`, and `narrow_signed`. The other 24 have valid Go source behind the `golean_planned` build tag and draft Lean theorem statements with unfinished proofs.
 
 | Area | Pending examples |
 | --- | --- |
-| Scalars and constants | `narrow_signed`, `unsigned_wrap`, `machine_words`, `byte_rune`, `string_bytes`, `float32_rounding`, `float64_special`, `constant_conversions` |
+| Scalars and constants | `unsigned_wrap`, `machine_words`, `byte_rune`, `string_bytes`, `float32_rounding`, `float64_special`, `constant_conversions` |
 | Aggregates and references | `array_bounds`, `slice_bounds`, `slice_copy`, `map_lookup`, `map_build`, `struct_fields`, `embedded_struct`, `acyclic_list`, `nil_dereference` |
 | Control flow and termination | `branch_join`, `switch_value`, `switch_tagless`, `bounded_counter`, `range_fold` |
 | Generics and functions | `generic_identity`, `generic_map`, `immutable_closure` |

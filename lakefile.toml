@@ -13,4 +13,5 @@ roots = [
   "division_guarded.division_guarded_gen", "division_guarded.division_guarded_proofs",
   "division_precondition.division_precondition_gen", "division_precondition.division_precondition_proofs",
   "division_propagation.division_propagation_gen", "division_propagation.division_propagation_proofs",
+  "narrow_signed.narrow_signed_gen", "narrow_signed.narrow_signed_proofs",
 ]

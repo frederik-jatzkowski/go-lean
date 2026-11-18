@@ -111,7 +111,7 @@ func (l *lowerer) value(value ssa.Value) ir.Expr {
 		if c.Value.Kind() == constant.Bool {
 			return ir.BoolLiteral(constant.BoolVal(c.Value))
 		}
-		return ir.IntLiteral(c.Value.ExactString())
+		return ir.IntLiteral{Value: c.Value.ExactString(), Type: subset.Type(c.Type())}
 	}
 	if binder, ok := l.bindings[value]; ok {
 		return ir.Ref(binder)
@@ -121,5 +121,5 @@ func (l *lowerer) value(value ssa.Value) ir.Expr {
 
 func (l *lowerer) binary(expr *ssa.BinOp) ir.Binary {
 	op, _ := subset.Binary(expr.Op)
-	return ir.Binary{Op: op, Left: l.value(expr.X), Right: l.value(expr.Y)}
+	return ir.Binary{Op: op, Left: l.value(expr.X), Right: l.value(expr.Y), OperandType: subset.Type(expr.X.Type())}
 }

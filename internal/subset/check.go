@@ -109,7 +109,7 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		if supported && scalar(ins.X) && hasType(ins.Y, typ) &&
 			(typ.IsInteger() ||
 				typ == ir.Bool && (ins.Op == token.EQL || ins.Op == token.NEQ) ||
-				typ == ir.Bytes && ins.Op == token.ADD) {
+				(typ == ir.Bytes || typ == ir.Float32) && ins.Op == token.ADD) {
 			return nil
 		}
 		return diagnostic(fn, ins.Pos(), "unsupported runtime operation %s on %s and %s", ins.Op, ins.X.Type(), ins.Y.Type())
@@ -198,7 +198,8 @@ func scalar(value ssa.Value) bool {
 		return value.Value != nil &&
 			(typ.IsInteger() && value.Value.Kind() == constant.Int ||
 				typ == ir.Bool && value.Value.Kind() == constant.Bool ||
-				typ == ir.Bytes && value.Value.Kind() == constant.String)
+				typ == ir.Bytes && value.Value.Kind() == constant.String ||
+				typ == ir.Float32 && (value.Value.Kind() == constant.Float || value.Value.Kind() == constant.Int))
 	case *ssa.Parameter, *ssa.BinOp, *ssa.UnOp, *ssa.Call, *ssa.Phi, *ssa.Convert, *ssa.ChangeType:
 		return true
 	default:
@@ -240,6 +241,8 @@ func Type(t types.Type) ir.Type {
 			return ir.Bool
 		case types.String, types.UntypedString:
 			return ir.Bytes
+		case types.Float32:
+			return ir.Float32
 		}
 	}
 	return ""

@@ -9,6 +9,7 @@
 - Go's `int` and `uint` use the target width reported by Go, including for conversions between them. Generated modules expose that width through the `GoTypes.Int` and `GoTypes.UInt` aliases in their source namespace.
 - Named integer types use their underlying representation. Go resolves package constants at compile time.
 - Go strings model raw bytes with Lean `ByteArray`. Concatenation preserves those bytes, and `len` returns the byte count at the Go target's `int` width.
+- `float32` addition uses Lean's binary32 arithmetic. Go constants are emitted as their already-rounded binary32 bits.
 - Local bindings, assignments, early returns, branches with boolean conditions, and value and tagless switches. Control-flow joins select the supported scalar value from the branch taken. Short-circuit expressions evaluate their right operand only when needed. The checker rejects loops, recursive or indirect calls, and unsupported effects such as reads of mutable globals.
 - Checked proofs for arithmetic identities, wraparound, clamp bounds and idempotence, and division panic freedom, signed boundaries, and panic propagation. The `clampimport` example proves the clamp properties using `Min` and `Max` translated from an imported Go package.
 
@@ -43,11 +44,11 @@ Apply the panic model to bounds checks and pointer dereferences.
 
 ## Example index
 
-`examples/provable/` contains 32 examples. The default build regenerates and checks `arithmetic`, `boolean_implication`, `branch_join`, `byte_rune`, `clamp`, `clampimport`, `constant_conversions`, `division_guarded`, `division_precondition`, `division_propagation`, `machine_words`, `narrow_signed`, `string_bytes`, `switch_tagless`, `switch_value`, and `unsigned_wrap`. The other 16 have valid Go source behind the `golean_planned` build tag and draft Lean theorem statements with unfinished proofs.
+`examples/provable/` contains 32 examples. The default build regenerates and checks `arithmetic`, `boolean_implication`, `branch_join`, `byte_rune`, `clamp`, `clampimport`, `constant_conversions`, `division_guarded`, `division_precondition`, `division_propagation`, `float32_rounding`, `machine_words`, `narrow_signed`, `string_bytes`, `switch_tagless`, `switch_value`, and `unsigned_wrap`. The other 15 have valid Go source behind the `golean_planned` build tag and draft Lean theorem statements with unfinished proofs.
 
 | Area | Pending examples |
 | --- | --- |
-| Scalars and constants | `float32_rounding`, `float64_special` |
+| Scalars and constants | `float64_special` |
 | Aggregates and references | `array_bounds`, `slice_bounds`, `slice_copy`, `map_lookup`, `map_build`, `struct_fields`, `embedded_struct`, `acyclic_list`, `nil_dereference` |
 | Control flow and termination | `bounded_counter`, `range_fold` |
 | Generics and functions | `generic_identity`, `generic_map`, `immutable_closure` |

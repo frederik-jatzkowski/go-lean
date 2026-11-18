@@ -95,6 +95,8 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 			bytes[i] = fmt.Sprintf("%d", expr[i])
 		}
 		return "(ByteArray.mk #[" + strings.Join(bytes, ", ") + "])"
+	case ir.Float32Literal:
+		return fmt.Sprintf("(Float32.ofBits 0x%08x)", uint32(expr))
 	case ir.ByteLen:
 		return fmt.Sprintf("(%s.ofNat (%s).size)", r.leanType(ir.IntWord), r.renderExpr(expr.Value))
 	case ir.Ref:

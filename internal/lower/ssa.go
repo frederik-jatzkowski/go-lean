@@ -5,6 +5,7 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"math"
 	"net/url"
 	"slices"
 
@@ -126,13 +127,18 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 
 func (l *lowerer) value(value ssa.Value) ir.Expr {
 	if c, ok := value.(*ssa.Const); ok {
+		typ := l.valueType(c.Type())
+		if typ == ir.Float32 {
+			f, _ := constant.Float32Val(c.Value)
+			return ir.Float32Literal(math.Float32bits(f))
+		}
 		switch c.Value.Kind() {
 		case constant.Bool:
 			return ir.BoolLiteral(constant.BoolVal(c.Value))
 		case constant.String:
 			return ir.BytesLiteral(constant.StringVal(c.Value))
 		}
-		return ir.IntLiteral{Value: c.Value.ExactString(), Type: l.valueType(c.Type())}
+		return ir.IntLiteral{Value: c.Value.ExactString(), Type: typ}
 	}
 	if binder, ok := l.bindings[value]; ok {
 		return ir.Ref(binder)

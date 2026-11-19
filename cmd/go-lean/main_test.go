@@ -28,7 +28,7 @@ func TestExamplesMatchGeneratedOutput(t *testing.T) {
 		found[filepath.ToSlash(relative)] = true
 		want := read(t, output.Path)
 		if output.Source != want {
-			t.Errorf("%s differs from transpiler output. Run make generate.", output.Path)
+			t.Errorf("%s differs from transpiler output. Run go tool task generate.", output.Path)
 		}
 	}
 	for _, dir := range []string{"examples/provable", "internal/lower"} {

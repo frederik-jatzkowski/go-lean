@@ -43,7 +43,7 @@ The examples and lowering self-proofs declare their laws in Go doc comments. Eac
 //golean:verify+ low ≤ Clamp value low high ∧ Clamp value low high ≤ high
 ```
 
-Write each proof in `<stem>_proofs.lean` under the generated model's namespace followed by `.Proofs`. A theorem named `clampBounds` can use `Laws.clampBounds` as its statement. Add the model, proof, and generated `<stem>_verify.lean` modules to the default Lake library's roots. Lake checks that the companion supplies each theorem, its type matches the Go law, and its dependencies use only the allowed Lean axioms. Run `make generate` after Go edits and `make check` to check generated-file freshness and build the proofs.
+Write each proof in `<stem>_proofs.lean` under the generated model's namespace followed by `.Proofs`. A theorem named `clampBounds` can use `Laws.clampBounds` as its statement. Add the model, proof, and generated `<stem>_verify.lean` modules to the default Lake library's roots. Lake checks that the companion supplies each theorem, its type matches the Go law, and its dependencies use only the allowed Lean axioms. Run `go tool task generate` after Go edits and `go tool task check` to check generated-file freshness and build the proofs.
 
 ### Abstract calls and assumed laws
 
@@ -74,7 +74,7 @@ of the receiver transition. Interface contracts and callbacks retain their
 single-result signatures.
 
 The [self-proof](internal/subset/check_proofs.lean) checks the generated model of
-`subset.Binary` for all operator tokens. Use `make generate` to regenerate its
+`subset.Binary` for all operator tokens. Use `go tool task generate` to regenerate its
 Lean definition and `lake build SelfProofs` to check the proof.
 
 ## Bounded stateful methods
@@ -144,7 +144,7 @@ Run the 15 rejection fixtures individually in the test suite and assert both the
 
 ## Example index
 
-`examples/provable/` contains 41 examples with checked Lean proofs. `make generate` regenerates every module, and `make check` verifies every proof. The examples are `acyclic_list`, `arithmetic`, `array_bounds`, `batch_fulfillment`, `boolean_implication`, `bounded_counter`, `branch_join`, `byte_rune`, `clamp`, `clampimport`, `constant_conversions`, `division_guarded`, `division_precondition`, `division_propagation`, `embedded_struct`, `float32_rounding`, `float64_special`, `generic_identity`, `generic_map`, `grid_game`, `immutable_closure`, `integer_remainder`, `interface_dispatch`, `kv_store_contract_impl`, `kv_store_contract_use`, `machine_words`, `map_build`, `map_lookup`, `movement_arrival`, `multi_result`, `narrow_signed`, `nil_dereference`, `range_fold`, `slice_bounds`, `slice_copy`, `string_bytes`, `struct_fields`, `switch_tagless`, `switch_value`, `territory_methods`, and `unsigned_wrap`.
+`examples/provable/` contains 41 examples with checked Lean proofs. `go tool task generate` regenerates every module, and `go tool task check` verifies every proof. The examples are `acyclic_list`, `arithmetic`, `array_bounds`, `batch_fulfillment`, `boolean_implication`, `bounded_counter`, `branch_join`, `byte_rune`, `clamp`, `clampimport`, `constant_conversions`, `division_guarded`, `division_precondition`, `division_propagation`, `embedded_struct`, `float32_rounding`, `float64_special`, `generic_identity`, `generic_map`, `grid_game`, `immutable_closure`, `integer_remainder`, `interface_dispatch`, `kv_store_contract_impl`, `kv_store_contract_use`, `machine_words`, `map_build`, `map_lookup`, `movement_arrival`, `multi_result`, `narrow_signed`, `nil_dereference`, `range_fold`, `slice_bounds`, `slice_copy`, `string_bytes`, `struct_fields`, `switch_tagless`, `switch_value`, `territory_methods`, and `unsigned_wrap`.
 
 The [territory methods example](examples/provable/territory_methods/territory_methods_proofs.lean) proves that a territory at its configured cap cannot claim another tile and that dereferencing a nil territory produces a panic outcome.
 
@@ -194,24 +194,24 @@ go test -tags=golean_reject ./examples/reject/...
 
 ## Run the examples
 
-Use Go 1.27, Lean 4.36.0, and GNU Make. The [Lean installation guide](https://lean-lang.org/install/manual/) covers Elan, which reads the repository's `lean-toolchain` file. Once Elan is installed, open the repository root in VSCodium with the Lean 4 extension and open an example's `*_proofs.lean` file.
+Use Go 1.27 and Lean 4.36.0. The Go module pins Task, which you can run with `go tool task`. The [Lean installation guide](https://lean-lang.org/install/manual/) covers Elan, which reads the repository's `lean-toolchain` file. Once Elan is installed, open the repository root in VSCodium with the Lean 4 extension and open an example's `*_proofs.lean` file.
 
 Put theorems in `<example>_proofs.lean` beside the Go source. The proof file imports `<example>_gen.lean`. For example, `clamp_proofs.lean` uses `import clamp.clamp_gen`.
 
 Generated definitions use a namespace based on the Go import path and source filename. A concrete method uses the name `«Receiver$Method»` and takes its receiver as the first Go value parameter. Open the relevant namespace in the proof file, such as `GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clamp».clamp`.
 
-From the repository root, run `make generate` after editing the Go examples, then `make check`. The Go tests compare the checked-in definitions with current transpiler output.
+From the repository root, run `go tool task generate` after editing the Go examples, then `go tool task check`. The Go tests compare the checked-in definitions with current transpiler output.
 
 | Command | Action |
 | --- | --- |
-| `make` or `make build` | Build the Go CLI in the repository root |
-| `make generate` | Regenerate Lean modules for all marked Go source files |
-| `make test` | Run Go tests |
-| `make vet` | Run Go vet |
-| `make fmt` | Format Go source |
-| `make prove` | Check the Lean proofs with Lake |
-| `make check` | Run the Go tests, vet, and Lean proofs |
-| `make clean` | Remove the CLI binary and Lake build artifacts |
+| `go tool task` or `go tool task build` | Build the Go CLI in the repository root |
+| `go tool task generate` | Regenerate Lean modules for all marked Go source files |
+| `go tool task test` | Run Go tests |
+| `go tool task vet` | Run Go vet |
+| `go tool task fmt` | Format Go source |
+| `go tool task prove` | Check the Lean proofs with Lake |
+| `go tool task check` | Run the Go tests, vet, and Lean proofs |
+| `go tool task clean` | Remove the CLI binary and Lake build artifacts |
 
 To invoke the transpiler directly from this repository, run:
 

@@ -23,6 +23,12 @@ func Generate(dir string) ([]Output, error) {
 	if err != nil {
 		return nil, err
 	}
+	return generate(programs, func(file string) (string, error) {
+		return leanModule(dir, file)
+	})
+}
+
+func generate(programs []gosource.Program, resolveModule func(string) (string, error)) ([]Output, error) {
 	lowered := make(map[string]ir.Program, len(programs))
 	roots, err := verificationRoots(programs)
 	if err != nil {
@@ -58,7 +64,7 @@ func Generate(dir string) ([]Output, error) {
 	var outputs []Output
 	for _, program := range programs {
 		model := lowered[program.Path]
-		verification, err := makeVerification(dir, program, roots, lowered)
+		verification, err := makeVerification(resolveModule, program, roots, lowered)
 		if err != nil {
 			return nil, err
 		}

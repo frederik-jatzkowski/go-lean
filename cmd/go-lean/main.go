@@ -25,11 +25,7 @@ func newCommand() *cobra.Command {
 			if args[0] != "./..." {
 				return errors.New("use go-lean transpile ./...")
 			}
-			outputs, err := transpile.Generate(".")
-			if err != nil {
-				return err
-			}
-			return transpile.Write(outputs)
+			return transpile.Reconcile(".")
 		},
 	}
 	root.AddCommand(transpileCmd)

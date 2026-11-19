@@ -44,7 +44,25 @@ Declare each law in the doc comment that matches its scope. Use a function or me
 //golean:verify+ low ≤ Clamp value low high ∧ Clamp value low high ≤ high
 ```
 
-Write each proof in `<stem>_proofs.lean` under the source file's Lean namespace followed by `.Proofs`. A theorem named `clampBounds` can use `Laws.clampBounds` as its statement. The proof companion imports `<stem>_laws` when generated and `<stem>_gen` otherwise. Add the generated modules and the proof companion to the default Lake library's roots. Building `<stem>_verify` checks that the companion supplies each theorem, its type matches the Go law, and its dependencies use only the allowed Lean axioms. Run `go tool task generate` after Go edits and `go tool task check` to check generated-file freshness and build the proofs.
+Write each proof in `<stem>_proofs.lean` under the source file's Lean namespace followed by `.Proofs`. A theorem named `clampBounds` can use `Laws.clampBounds` as its statement. The proof companion imports `<stem>_laws` when generated and `<stem>_gen` otherwise. Building `<stem>_verify` checks that the companion supplies each theorem, its type matches the Go law, and its dependencies use only the allowed Lean axioms. Run `go tool task generate` after Go edits and `go tool task check` to check generated-file freshness and build the proofs.
+
+### Managed Lake roots
+
+Add the two markers to a library's `roots` array in `lakefile.toml` once. Set `srcDir` to cover the generated modules and omit `globs` so Lake builds the listed roots. Include the library in `defaultTargets` to check its proofs with plain `lake build`.
+
+```toml
+[[lean_lib]]
+name = "Proofs"
+srcDir = "."
+roots = [
+  # BEGIN go-lean managed roots
+  # END go-lean managed roots
+]
+```
+
+Run `go-lean transpile ./...` from the project root to register generated modules and the proof companions required by active verification modules. When migrating, remove their existing manual entries from the array. Reserve the marker text for standalone lines inside managed `roots` arrays. Keep handwritten reference modules and standalone Lean roots outside the markers, with a trailing comma on each manual entry. Projects without markers continue to register modules manually.
+
+When directives change or Go files move, transpile removes obsolete generated roots and prunes obsolete files with the go-lean generated header in managed source trees. It keeps generated files for Go sources excluded by the current build configuration. Move any handwritten proof companions yourself and update their imports and namespaces before building.
 
 ### Import Lean modules into Go laws
 

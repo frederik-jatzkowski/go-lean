@@ -11,6 +11,14 @@ import (
 
 // Write checks all destinations before replacing any changed generated files.
 func Write(outputs []Output) error {
+	changed, err := changedOutputs(outputs)
+	if err != nil {
+		return err
+	}
+	return writeOutputs(changed)
+}
+
+func changedOutputs(outputs []Output) ([]Output, error) {
 	var changed []Output
 	for _, output := range outputs {
 		existing, err := os.Lstat(output.Path)
@@ -19,26 +27,34 @@ func Write(outputs []Output) error {
 			continue
 		}
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if !existing.Mode().IsRegular() {
-			return fmt.Errorf("%s: expected a regular generated file", output.Path)
+			return nil, fmt.Errorf("%s: expected a regular generated file", output.Path)
 		}
 		current, err := os.ReadFile(output.Path)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		line, _, _ := strings.Cut(string(current), "\n")
-		if strings.TrimSuffix(line, "\r") != lean.GeneratedHeader {
-			return fmt.Errorf("%s: refusing to overwrite a file without the go-lean generated header", output.Path)
+		if !hasGeneratedHeader(string(current)) {
+			return nil, fmt.Errorf("%s: refusing to overwrite a file without the go-lean generated header", output.Path)
 		}
 		if string(current) != output.Source {
 			changed = append(changed, output)
 		}
 	}
+	return changed, nil
+}
+
+func hasGeneratedHeader(source string) bool {
+	line, _, _ := strings.Cut(source, "\n")
+	return strings.TrimSuffix(line, "\r") == lean.GeneratedHeader
+}
+
+func writeOutputs(changed []Output) error {
 	for _, output := range changed {
 		if err := replace(output); err != nil {
-			return err
+			return fmt.Errorf("%s: replace generated file: %w", output.Path, err)
 		}
 	}
 	return nil

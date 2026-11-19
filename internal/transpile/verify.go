@@ -4,16 +4,12 @@ import (
 	"fmt"
 	"go/types"
 	"net/url"
-	"os"
-	"path/filepath"
 	"slices"
-	"strings"
 
 	"github.com/frederik-jatzkowski/go-lean/internal/gosource"
 	"github.com/frederik-jatzkowski/go-lean/internal/ir"
 	"github.com/frederik-jatzkowski/go-lean/internal/lean"
 	"github.com/frederik-jatzkowski/go-lean/internal/subset"
-	"github.com/pelletier/go-toml/v2"
 	"golang.org/x/tools/go/ssa"
 )
 
@@ -139,7 +135,7 @@ func findModel(program ir.Program, symbol ir.Symbol) (ir.Function, bool) {
 	return ir.Function{}, false
 }
 
-func makeVerification(dir string, program gosource.Program, owners map[*ssa.Function]gosource.Program, lowered map[string]ir.Program) (lean.Verification, error) {
+func makeVerification(resolveModule func(string) (string, error), program gosource.Program, owners map[*ssa.Function]gosource.Program, lowered map[string]ir.Program) (lean.Verification, error) {
 	packagePath := program.Package.Pkg.Path()
 	imports := program.LeanImports[packagePath]
 	verification := lean.Verification{
@@ -192,7 +188,7 @@ func makeVerification(dir string, program gosource.Program, owners map[*ssa.Func
 			if !found || concrete.CanPanic || len(concrete.Contracts) != 0 {
 				return verification, fmt.Errorf("%s: abstract callee %s must have a total concrete model", target.Position, target.Callee)
 			}
-			module, err := leanModule(dir, owner.Path)
+			module, err := resolveModule(owner.Path)
 			if err != nil {
 				return verification, err
 			}
@@ -209,47 +205,7 @@ func makeVerification(dir string, program gosource.Program, owners map[*ssa.Func
 	if len(verification.Roots) == 0 && len(verification.ScopedLaws) == 0 {
 		return verification, nil
 	}
-	module, err := leanModule(dir, program.Path)
+	module, err := resolveModule(program.Path)
 	verification.Module = module
 	return verification, err
-}
-
-// leanModule uses the most specific configured Lake source directory.
-func leanModule(dir, file string) (string, error) {
-	type library struct{ SrcDir string }
-	var config struct {
-		SrcDir    string
-		Libraries []library `toml:"lean_lib"`
-	}
-	configPath := filepath.Join(dir, "lakefile.toml")
-	data, err := os.ReadFile(configPath)
-	if err == nil {
-		if err := toml.Unmarshal(data, &config); err != nil {
-			return "", fmt.Errorf("%s: %w", configPath, err)
-		}
-	} else if !os.IsNotExist(err) {
-		return "", err
-	}
-	projectRoot, err := filepath.Abs(dir)
-	if err != nil {
-		return "", err
-	}
-	packageRoot := filepath.Join(projectRoot, config.SrcDir)
-	sourceRoot := packageRoot
-	for _, lib := range config.Libraries {
-		candidate := filepath.Join(packageRoot, lib.SrcDir)
-		rel, err := filepath.Rel(candidate, file)
-		if err == nil && filepath.IsLocal(rel) && len(candidate) > len(sourceRoot) {
-			sourceRoot = candidate
-		}
-	}
-	relative, err := filepath.Rel(sourceRoot, file)
-	if err != nil || !filepath.IsLocal(relative) {
-		return "", fmt.Errorf("%s: cannot determine Lean module relative to %s", file, sourceRoot)
-	}
-	module := filepath.ToSlash(strings.TrimSuffix(relative, ".go"))
-	if strings.ContainsAny(module, "«»\n\r") {
-		return "", fmt.Errorf("%s: unsupported Lean module path", file)
-	}
-	return module, nil
 }

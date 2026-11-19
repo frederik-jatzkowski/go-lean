@@ -9,20 +9,26 @@ import (
 
 // SliceBuild captures a checked fresh slice returned after a full iteration.
 type SliceBuild struct {
-	Source    ssa.Value
-	Element   *ssa.UnOp
-	Steps     []ssa.Value
-	Value     ssa.Value
-	Callback  *ssa.Parameter
-	Effectful bool
-	Callbacks []*ssa.Function
-	Iteration *TraversalIteration
+	Destination *ssa.MakeSlice
+	Exit        *ssa.BasicBlock
+	ExitStart   int
+	Lengths     []*ssa.Call
+	Copy        *ssa.Call
+	Source      ssa.Value
+	Element     *ssa.UnOp
+	Steps       []ssa.Value
+	Value       ssa.Value
+	Callback    *ssa.Parameter
+	Effectful   bool
+	Callbacks   []*ssa.Function
+	Iteration   *TraversalIteration
 }
 
 func checkSliceBuild(blocks loopBlocks) *SliceBuild {
 	iter := matchRangeIteration(blocks, 1)
-	dst, allocated := blocks.result.(*ssa.MakeSlice)
-	if len(blocks.exit.Instrs) != 1 || iter == nil || !allocated || dst.Block() != blocks.entry {
+	dst := sliceDestination(blocks.exit)
+	allocated := dst != nil
+	if iter == nil || !allocated || dst.Block() != blocks.entry {
 		return nil
 	}
 	dstElem := Type(dst.Type()).SliceElem()
@@ -62,7 +68,7 @@ func checkSliceBuild(blocks loopBlocks) *SliceBuild {
 			len(call.Call.Args) == 1 && call.Call.Args[0] == iter.Element {
 			if callback, ok := call.Call.Value.(*ssa.Parameter); ok &&
 				callbackType(callback.Type(), Type(iter.Element.Type()), dstElem) != "" {
-				return &SliceBuild{Source: iter.Source, Element: iter.Element, Steps: []ssa.Value{call}, Value: call, Callback: callback}
+				return sliceContinuation(&SliceBuild{Source: iter.Source, Element: iter.Element, Steps: []ssa.Value{call}, Value: call, Callback: callback}, dst, blocks.exit, 0, nil)
 			}
 		}
 	}
@@ -71,7 +77,7 @@ func checkSliceBuild(blocks loopBlocks) *SliceBuild {
 	if !ok || !loopValue(store.Val, available) {
 		return nil
 	}
-	return &SliceBuild{Source: iter.Source, Element: iter.Element, Steps: steps, Value: store.Val}
+	return sliceContinuation(&SliceBuild{Source: iter.Source, Element: iter.Element, Steps: steps, Value: store.Val}, dst, blocks.exit, 0, nil)
 }
 
 // CallbackType represents the function parameter validated by the slice build.
@@ -105,14 +111,13 @@ func checkSliceCopy(fn *ssa.Function) *SliceBuild {
 		return nil
 	}
 	instructions := fn.Blocks[0].Instrs
-	if len(instructions) != 4 {
+	if len(instructions) < 4 {
 		return nil
 	}
 	length, lengthOK := instructions[0].(*ssa.Call)
 	dst, dstOK := instructions[1].(*ssa.MakeSlice)
 	copyCall, copyOK := instructions[2].(*ssa.Call)
-	ret, retOK := instructions[3].(*ssa.Return)
-	if !lengthOK || !dstOK || !copyOK || !retOK || ret.Results[0] != dst ||
+	if !lengthOK || !dstOK || !copyOK || sliceDestination(fn.Blocks[0]) != dst ||
 		dst.Len != length || dst.Cap != length {
 		return nil
 	}
@@ -127,7 +132,69 @@ func checkSliceCopy(fn *ssa.Function) *SliceBuild {
 	if !ok || elem == "" || elem != Type(src.Type()).SliceElem() {
 		return nil
 	}
-	return &SliceBuild{Source: src}
+	return sliceContinuation(&SliceBuild{Source: src}, dst, fn.Blocks[0], 3, copyCall)
+}
+
+// sliceDestination selects the one allocation modeled by the slice traversal.
+func sliceDestination(block *ssa.BasicBlock) *ssa.MakeSlice {
+	ret, ok := block.Instrs[len(block.Instrs)-1].(*ssa.Return)
+	if !ok {
+		return nil
+	}
+	var destination *ssa.MakeSlice
+	for _, value := range ret.Results {
+		if allocation, ok := value.(*ssa.MakeSlice); ok {
+			if destination != nil {
+				return nil
+			}
+			destination = allocation
+		}
+	}
+	return destination
+}
+
+func sliceContinuation(build *SliceBuild, dst *ssa.MakeSlice, exit *ssa.BasicBlock, start int, copyCall *ssa.Call) *SliceBuild {
+	ret := exit.Instrs[len(exit.Instrs)-1].(*ssa.Return)
+	if len(ret.Results) == 1 {
+		if len(exit.Instrs) != start+1 {
+			return nil
+		}
+		return build
+	}
+	available := make(map[ssa.Value]bool)
+	setup := dst.Block().Instrs
+	if dst.Block() == exit {
+		setup = setup[:start]
+	}
+	for _, ins := range setup {
+		if length, ok := ins.(*ssa.Call); ok && lengthOf(length, build.Source) {
+			available[length] = true
+			build.Lengths = append(build.Lengths, length)
+		}
+	}
+	if copyCall != nil {
+		available[copyCall] = true
+	}
+	for _, ins := range exit.Instrs[start:] {
+		for _, operand := range ins.Operands(nil) {
+			if operand == nil || *operand == nil || available[*operand] {
+				continue
+			}
+			if *operand == dst && ins == ret {
+				continue
+			}
+			switch (*operand).(type) {
+			case *ssa.Const, *ssa.Parameter, *ssa.FreeVar, *ssa.Function, *ssa.Builtin:
+				continue
+			}
+			return nil
+		}
+		if value, ok := ins.(ssa.Value); ok {
+			available[value] = true
+		}
+	}
+	build.Destination, build.Exit, build.ExitStart, build.Copy = dst, exit, start, copyCall
+	return build
 }
 
 func sliceCallbackUse(call *ssa.Call, closure *ssa.MakeClosure) bool {
@@ -162,12 +229,12 @@ type TraversalIteration struct {
 
 func matchSliceIteration(fn *ssa.Function) *SliceBuild {
 	blocks, ok := matchLoopRegion(fn)
-	if !ok || len(blocks.exit.Instrs) != 1 {
+	if !ok {
 		return nil
 	}
 	iter := matchRangeIteration(blocks, 1)
-	dst, ok := blocks.result.(*ssa.MakeSlice)
-	if iter == nil || !ok || dst.Block() != blocks.entry || Type(dst.Type()).SliceElem() == "" ||
+	dst := sliceDestination(blocks.exit)
+	if iter == nil || dst == nil || dst.Block() != blocks.entry || Type(dst.Type()).SliceElem() == "" ||
 		!lengthOf(dst.Len, iter.Source) || !lengthOf(dst.Cap, iter.Source) {
 		return nil
 	}
@@ -232,8 +299,8 @@ func matchSliceIteration(fn *ssa.Function) *SliceBuild {
 			}
 		}
 	}
-	return &SliceBuild{Source: iter.Source, Element: iter.Element,
-		Iteration: &TraversalIteration{Entry: blocks.body, Header: blocks.header, Skip: skip, Stores: stores}}
+	return sliceContinuation(&SliceBuild{Source: iter.Source, Element: iter.Element,
+		Iteration: &TraversalIteration{Entry: blocks.body, Header: blocks.header, Skip: skip, Stores: stores}}, dst, blocks.exit, 0, nil)
 }
 
 // The loop region is already known to be acyclic up to its header. Validate
@@ -275,7 +342,7 @@ func writesOncePerIteration(body, header *ssa.BasicBlock, stores map[ssa.Instruc
 func iterationInstruction(ins ssa.Instruction) bool {
 	switch ins.(type) {
 	case *ssa.BinOp, *ssa.UnOp, *ssa.Convert, *ssa.ChangeType, *ssa.Call, *ssa.Field,
-		*ssa.If, *ssa.Jump, *ssa.Phi:
+		*ssa.If, *ssa.Jump, *ssa.Phi, *ssa.Extract:
 		return true
 	default:
 		return false

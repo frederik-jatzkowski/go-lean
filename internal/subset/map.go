@@ -24,14 +24,14 @@ func supportedMapLookup(lookup *ssa.Lookup) bool {
 
 // freshMapResult checks that every return yields the same allocation and that
 // only local reads and writes can observe it before return.
-func freshMapResult(fn *ssa.Function) *ssa.MakeMap {
+func freshMapResult(fn *ssa.Function, index int) *ssa.MakeMap {
 	var fresh *ssa.MakeMap
 	for _, block := range fn.Blocks {
 		ret, ok := block.Instrs[len(block.Instrs)-1].(*ssa.Return)
 		if !ok {
 			continue
 		}
-		allocation, ok := ret.Results[0].(*ssa.MakeMap)
+		allocation, ok := ret.Results[index].(*ssa.MakeMap)
 		if !ok || fresh != nil && fresh != allocation {
 			return nil
 		}
@@ -57,8 +57,10 @@ func freshMapResult(fn *ssa.Function) *ssa.MakeMap {
 				}
 			}
 		case *ssa.Return:
-			if len(use.Results) != 1 || use.Results[0] != fresh {
-				return nil
+			for position, value := range use.Results {
+				if value == fresh && position != index {
+					return nil
+				}
 			}
 		default:
 			return nil

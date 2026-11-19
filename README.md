@@ -4,8 +4,8 @@
 
 ## Supported
 
-- Ordinary top-level functions with integer or `bool` parameters and one result of a supported type. `byte` and `rune` use the same representations as `uint8` and `int32`. Statically resolved calls can cross package boundaries when the callee's Go body is available and within the supported subset.
-- Declared, non-generic concrete methods with one supported result can be marked or called directly. The receiver uses the existing value representation or the read-only record pointer model. A nil receiver can return normally if the method does not dereference it. Bound method values and synthetic method wrappers are unsupported. The bounded stateful subset below handles receiver writes.
+- Ordinary top-level functions with integer or `bool` parameters and one or more supported results. `byte` and `rune` use the same representations as `uint8` and `int32`. Statically resolved calls can cross package boundaries when the callee's Go body is available and within the supported subset.
+- Declared, non-generic concrete methods with one or more supported results can be marked or called directly. The receiver uses the existing value representation or the read-only record pointer model. A nil receiver can return normally if the method does not dereference it. Bound method values and synthetic method wrappers are unsupported. The bounded stateful subset below handles receiver writes.
 - Folded Go constants and runtime `+`, `-`, `*`, `/`, and `%`. Lean's signed and unsigned fixed-width integer types model Go's wraparound at 8, 16, 32, and 64 bits. Runtime division uses signed truncation toward zero or the unsigned quotient. A nonzero signed remainder has the sign of the dividend, including when the divisor is negative. Taking the remainder of the minimum signed value with divisor `-1` gives zero. Runtime division and remainder lift the function and transitive callers to an `Option` result, with `none` for a zero divisor.
 - Go's `int` and `uint` use the target width reported by Go, including for conversions between them. Generated modules expose that width through the `GoTypes.Int` and `GoTypes.UInt` aliases in their source namespace.
 - Named integer types use their underlying representation. Go resolves package constants at compile time.
@@ -33,6 +33,19 @@
 Add `//golean:verify` to a function or concrete method’s doc comment and run `go-lean transpile ./...` from the Go module root. The command scans the packages matched by Go's `./...` pattern, using the active build settings. Each marked source file gets one sibling module, so `clamp.go` generates `clamp_gen.lean`. Each module includes all marked functions and methods in that file and their reachable callees, deduplicated within the module.
 
 The transpiler runs SSA loading, subset and call graph checking, lowering to a structured IR, and Lean generation in that order. Every selected function must pass checking before the command writes any modules. If the last directive is removed from a file, remove its old generated module and update any Lean imports as needed.
+
+## Multiple results
+
+Go results become right-nested Lean products in declaration order. For example,
+`(int64, bool, uint8)` becomes `Int64 × (Bool × UInt8)`. A call that can panic
+returns one `Option` around the whole product, even when the caller discards
+some or all results. Stateful methods put the product in the result component
+of the receiver transition. Interface contracts and callbacks retain their
+single-result signatures.
+
+The [self-proof](internal/subset/check_proofs.lean) checks the generated model of
+`subset.Binary` for all operator tokens. Use `make generate` to regenerate its
+Lean definition and `lake build SelfProofs` to check the proof.
 
 ## Bounded stateful methods
 
@@ -91,7 +104,7 @@ Run the 15 rejection fixtures individually in the test suite and assert both the
 
 ## Example index
 
-`examples/provable/` contains 40 examples with checked Lean proofs. `make generate` regenerates every module, and `make check` verifies every proof. The examples are `acyclic_list`, `arithmetic`, `array_bounds`, `batch_fulfillment`, `boolean_implication`, `bounded_counter`, `branch_join`, `byte_rune`, `clamp`, `clampimport`, `constant_conversions`, `division_guarded`, `division_precondition`, `division_propagation`, `embedded_struct`, `float32_rounding`, `float64_special`, `generic_identity`, `generic_map`, `grid_game`, `immutable_closure`, `integer_remainder`, `interface_dispatch`, `kv_store_contract_impl`, `kv_store_contract_use`, `machine_words`, `map_build`, `map_lookup`, `movement_arrival`, `narrow_signed`, `nil_dereference`, `range_fold`, `slice_bounds`, `slice_copy`, `string_bytes`, `struct_fields`, `switch_tagless`, `switch_value`, `territory_methods`, and `unsigned_wrap`.
+`examples/provable/` contains 41 examples with checked Lean proofs. `make generate` regenerates every module, and `make check` verifies every proof. The examples are `acyclic_list`, `arithmetic`, `array_bounds`, `batch_fulfillment`, `boolean_implication`, `bounded_counter`, `branch_join`, `byte_rune`, `clamp`, `clampimport`, `constant_conversions`, `division_guarded`, `division_precondition`, `division_propagation`, `embedded_struct`, `float32_rounding`, `float64_special`, `generic_identity`, `generic_map`, `grid_game`, `immutable_closure`, `integer_remainder`, `interface_dispatch`, `kv_store_contract_impl`, `kv_store_contract_use`, `machine_words`, `map_build`, `map_lookup`, `movement_arrival`, `multi_result`, `narrow_signed`, `nil_dereference`, `range_fold`, `slice_bounds`, `slice_copy`, `string_bytes`, `struct_fields`, `switch_tagless`, `switch_value`, `territory_methods`, and `unsigned_wrap`.
 
 The [territory methods example](examples/provable/territory_methods/territory_methods_proofs.lean) proves that a territory at its configured cap cannot claim another tile and that dereferencing a nil territory produces a panic outcome.
 

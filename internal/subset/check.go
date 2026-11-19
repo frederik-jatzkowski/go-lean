@@ -127,19 +127,21 @@ func (c *checker) function(fn *ssa.Function) error {
 		return diagnostic(fn, fn.Pos(), "method must be a declared concrete method with a non-generic receiver")
 	}
 	if (!instance && (fn.Pkg == nil || fn.Synthetic != "")) ||
-		sig.Variadic() || sig.Results().Len() != 1 {
-		return diagnostic(fn, fn.Pos(), "expected a function or concrete method with one supported result and no variadic arguments")
+		sig.Variadic() || sig.Results().Len() == 0 {
+		return diagnostic(fn, fn.Pos(), "expected a function or concrete method with supported results and no variadic arguments")
 	}
-	result := sig.Results().At(0).Type()
-	if isInterfaceValue(result) {
-		if err := c.checkInterface(fn, fn.Pos(), result); err != nil {
-			return err
+	for entry := range sig.Results().Variables() {
+		result := entry.Type()
+		if isInterfaceValue(result) {
+			if err := c.checkInterface(fn, fn.Pos(), result); err != nil {
+				return err
+			}
+		} else if Type(result) == "" {
+			return diagnostic(fn, fn.Pos(), "expected a function or concrete method with supported results and no variadic arguments")
 		}
-	} else if Type(result) == "" {
-		return diagnostic(fn, fn.Pos(), "expected a function or concrete method with one supported result and no variadic arguments")
-	}
-	if Type(result).Pointee() != "" {
-		return diagnostic(fn, fn.Pos(), "record pointers may not escape as results")
+		if Type(result).Pointee() != "" {
+			return diagnostic(fn, fn.Pos(), "record pointers may not escape as results")
+		}
 	}
 	if parent := fn.Parent(); parent != nil && parent.TypeParams().Len() != 0 {
 		return diagnostic(fn, fn.Pos(), "closures in generic functions are unsupported")
@@ -159,7 +161,7 @@ func (c *checker) function(fn *ssa.Function) error {
 			return diagnostic(fn, param.Obj().Pos(), "type parameter %s must use the unrestricted any constraint", param.Obj().Name())
 		}
 	}
-	if Type(sig.Results().At(0).Type()).SliceElem() != "" {
+	if hasSliceResult(sig.Results()) {
 		build = checkSliceCopy(fn)
 		if blocks, ok := matchLoopBlocks(fn); build == nil && ok {
 			build = checkSliceBuild(blocks)
@@ -185,6 +187,16 @@ func (c *checker) function(fn *ssa.Function) error {
 	}
 	c.visiting[fn] = true
 	if build != nil {
+		if build.Exit != nil {
+			if err := c.checkResultOwnership(fn, build.Destination); err != nil {
+				return err
+			}
+			for _, ins := range build.Exit.Instrs[build.ExitStart:] {
+				if err := c.instruction(fn, ins); err != nil {
+					return err
+				}
+			}
+		}
 		if build.Iteration != nil {
 			if err := c.checkIteration(fn, build.Iteration); err != nil {
 				return err
@@ -202,25 +214,85 @@ func (c *checker) function(fn *ssa.Function) error {
 	return nil
 }
 
-func (c *checker) checkBody(fn *ssa.Function) error {
-	result := Type(fn.Signature.Results().At(0).Type())
-	if key, _ := result.MapShape(); key != "" {
-		fresh := freshMapResult(fn)
-		if fresh == nil {
-			return diagnostic(fn, fn.Pos(), "map results require a fresh local allocation with local uses before return")
+func hasSliceResult(results *types.Tuple) bool {
+	for result := range results.Variables() {
+		if Type(result.Type()).SliceElem() != "" {
+			return true
 		}
-		c.freshMaps[fresh] = true
 	}
-	if result.SliceElem() != "" {
-		for _, block := range fn.Blocks {
-			ret, ok := block.Instrs[len(block.Instrs)-1].(*ssa.Return)
-			if ok {
-				// Calls are validated transitively and subject to this same rule.
-				if call, ok := ret.Results[0].(*ssa.Call); !ok || call.Call.StaticCallee() == nil {
-					return diagnostic(fn, fn.Pos(), "slice results require a validated fresh construction")
+	return false
+}
+
+type callResultSlot struct {
+	call  *ssa.Call
+	index int
+}
+
+func staticResultSlot(value ssa.Value) (callResultSlot, bool) {
+	var slot callResultSlot
+	switch value := value.(type) {
+	case *ssa.Call:
+		slot.call = value
+	case *ssa.Extract:
+		slot.call, _ = value.Tuple.(*ssa.Call)
+		slot.index = value.Index
+	}
+	return slot, slot.call != nil && slot.call.Call.StaticCallee() != nil
+}
+
+func (c *checker) checkResultOwnership(fn *ssa.Function, destination *ssa.MakeSlice) error {
+	results := fn.Signature.Results()
+	for index := 0; index < results.Len(); index++ {
+		result := Type(results.At(index).Type())
+		if key, _ := result.MapShape(); key != "" {
+			fresh := freshMapResult(fn, index)
+			if fresh != nil {
+				c.freshMaps[fresh] = true
+				continue
+			}
+			if results.Len() == 1 || !returnsStaticResult(fn, index, nil) {
+				return diagnostic(fn, fn.Pos(), "map results require a fresh local allocation with local uses before return")
+			}
+		}
+		if result.SliceElem() != "" && !returnsStaticResult(fn, index, destination) {
+			return diagnostic(fn, fn.Pos(), "slice results require a validated fresh construction")
+		}
+	}
+	for _, block := range fn.Blocks {
+		if ret, ok := block.Instrs[len(block.Instrs)-1].(*ssa.Return); ok {
+			seen := make(map[callResultSlot]bool)
+			for _, value := range ret.Results {
+				typ := Type(value.Type())
+				key, _ := typ.MapShape()
+				if source, ok := staticResultSlot(value); ok && (typ.SliceElem() != "" || key != "") {
+					if seen[source] {
+						return diagnostic(fn, ret.Pos(), "aggregate results must have distinct fresh sources")
+					}
+					seen[source] = true
 				}
 			}
 		}
+	}
+	return nil
+}
+
+// Static callees are validated transitively and subject to the same ownership rules.
+func returnsStaticResult(fn *ssa.Function, index int, destination *ssa.MakeSlice) bool {
+	for _, block := range fn.Blocks {
+		ret, ok := block.Instrs[len(block.Instrs)-1].(*ssa.Return)
+		if !ok || destination != nil && ret.Results[index] == destination {
+			continue
+		}
+		if _, ok := staticResultSlot(ret.Results[index]); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *checker) checkBody(fn *ssa.Function) error {
+	if err := c.checkResultOwnership(fn, nil); err != nil {
+		return err
 	}
 	if loop := checkCountedLoop(fn); loop != nil {
 		c.loops[fn] = loop
@@ -408,7 +480,12 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 				return nil
 			}
 		}
-		return diagnostic(fn, ins.Pos(), "only comma-ok map lookup results may be extracted")
+		if call, ok := ins.Tuple.(*ssa.Call); ok && call.Call.StaticCallee() != nil &&
+			ins.Index >= 0 && ins.Index < call.Call.Signature().Results().Len() &&
+			call.Call.Signature().Results().Len() > 1 {
+			return nil
+		}
+		return diagnostic(fn, ins.Pos(), "only static call or comma-ok map lookup results may be extracted")
 	case *ssa.MakeMap:
 		if c.freshMaps[ins] {
 			return nil
@@ -456,10 +533,12 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		}
 		return nil
 	case *ssa.Return:
-		if len(ins.Results) == 1 && (supportedValue(ins.Results[0]) || supportedHandle(ins.Results[0])) {
-			return nil
+		for _, value := range ins.Results {
+			if !supportedValue(value) && !supportedHandle(value) {
+				return diagnostic(fn, ins.Pos(), "return must have supported values")
+			}
 		}
-		return diagnostic(fn, ins.Pos(), "return must have one supported value")
+		return nil
 	case *ssa.Jump:
 		return nil
 	default:
@@ -492,7 +571,7 @@ func supportedValue(value ssa.Value) bool {
 			typ == ir.Bytes && value.Value.Kind() == constant.String ||
 			(typ == ir.Float32 || typ == ir.Float64) &&
 				(value.Value.Kind() == constant.Float || value.Value.Kind() == constant.Int)
-	case *ssa.Parameter, *ssa.BinOp, *ssa.UnOp, *ssa.Call, *ssa.Phi, *ssa.Convert, *ssa.ChangeType, *ssa.Field, *ssa.Index, *ssa.Extract, *ssa.Lookup, *ssa.MakeMap:
+	case *ssa.Parameter, *ssa.BinOp, *ssa.UnOp, *ssa.Call, *ssa.Phi, *ssa.Convert, *ssa.ChangeType, *ssa.Field, *ssa.Index, *ssa.Extract, *ssa.Lookup, *ssa.MakeMap, *ssa.MakeSlice:
 		return true
 	default:
 		return false
@@ -603,15 +682,32 @@ func diagnostic(fn *ssa.Function, pos token.Pos, format string, args ...any) err
 	return fmt.Errorf("%s: %w", fn.Prog.Fset.Position(pos), fmt.Errorf(format, args...))
 }
 
-var binary = map[token.Token]ir.Operator{
-	token.ADD: ir.Add, token.SUB: ir.Subtract, token.MUL: ir.Multiply,
-	token.QUO: ir.Divide,
-	token.REM: ir.Remainder,
-	token.EQL: ir.Equal, token.NEQ: ir.NotEqual, token.LSS: ir.Less,
-	token.LEQ: ir.LessEqual, token.GTR: ir.Greater, token.GEQ: ir.GreaterEqual,
-}
-
+//golean:verify
 func Binary(op token.Token) (ir.Operator, bool) {
-	result, ok := binary[op]
-	return result, ok
+	switch op {
+	case token.ADD:
+		return ir.Add, true
+	case token.SUB:
+		return ir.Subtract, true
+	case token.MUL:
+		return ir.Multiply, true
+	case token.QUO:
+		return ir.Divide, true
+	case token.REM:
+		return ir.Remainder, true
+	case token.EQL:
+		return ir.Equal, true
+	case token.NEQ:
+		return ir.NotEqual, true
+	case token.LSS:
+		return ir.Less, true
+	case token.LEQ:
+		return ir.LessEqual, true
+	case token.GTR:
+		return ir.Greater, true
+	case token.GEQ:
+		return ir.GreaterEqual, true
+	default:
+		return 0, false
+	}
 }

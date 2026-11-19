@@ -15,19 +15,23 @@ type ChainRecursion struct {
 	Element ir.Type
 	Head    *ssa.UnOp
 	Tail    *ssa.UnOp
-	Base    ssa.Value
+	Base    []ssa.Value
 	Steps   []ssa.Value
-	Result  ssa.Value
+	Result  []ssa.Value
 }
 
 func checkChainRecursion(fn *ssa.Function) *ChainRecursion {
 	if fn.Parent() != nil || fn.Signature.TypeParams().Len() != 0 || len(fn.Params) == 0 ||
-		!Type(fn.Signature.Results().At(0).Type()).IsInteger() || len(fn.Blocks) != 3 {
+		len(fn.Blocks) != 3 {
 		return nil
 	}
 	input := fn.Params[0]
 	link, ok := chainLink(input.Type())
-	resultType := Type(fn.Signature.Results().At(0).Type())
+	for result := range fn.Signature.Results().Variables() {
+		if !Type(result.Type()).IsInteger() {
+			return nil
+		}
+	}
 	if !ok {
 		return nil
 	}
@@ -61,11 +65,16 @@ func checkChainRecursion(fn *ssa.Function) *ChainRecursion {
 	nilReturn, nilOK := base.Instrs[0].(*ssa.Return)
 	end := len(step.Instrs) - 1
 	stepReturn, stepOK := step.Instrs[end].(*ssa.Return)
-	if !nilOK || !stepOK || !invariant(nilReturn.Results[0], resultType) {
+	if !nilOK || !stepOK {
 		return nil
 	}
 
-	chain := &ChainRecursion{Input: input, Element: ir.Int64, Base: nilReturn.Results[0], Result: stepReturn.Results[0]}
+	for _, value := range nilReturn.Results {
+		if !invariant(value, Type(value.Type())) {
+			return nil
+		}
+	}
+	chain := &ChainRecursion{Input: input, Element: ir.Int64, Base: nilReturn.Results, Result: stepReturn.Results}
 	available := make(map[ssa.Value]bool)
 	called := false
 	for i := 0; i < end; i++ {
@@ -104,8 +113,23 @@ func checkChainRecursion(fn *ssa.Function) *ChainRecursion {
 			called = true
 			available[ins] = true
 			chain.Steps = append(chain.Steps, ins)
+		case *ssa.Extract:
+			call, ok := ins.Tuple.(*ssa.Call)
+			if !ok || call.Call.Value != fn || !available[call] {
+				return nil
+			}
+			available[ins] = true
+			chain.Steps = append(chain.Steps, ins)
 		default:
-			arithmetic := integerStep(ins, available, resultType)
+			value, ok := ins.(ssa.Value)
+			if !ok {
+				return nil
+			}
+			typ := Type(value.Type())
+			if !typ.IsInteger() {
+				return nil
+			}
+			arithmetic := integerStep(ins, available, typ)
 			if arithmetic == nil {
 				return nil
 			}
@@ -113,8 +137,13 @@ func checkChainRecursion(fn *ssa.Function) *ChainRecursion {
 			chain.Steps = append(chain.Steps, arithmetic)
 		}
 	}
-	if !called || !(available[chain.Result] || invariant(chain.Result, resultType)) {
+	if !called {
 		return nil
+	}
+	for _, value := range chain.Result {
+		if !available[value] && !invariant(value, Type(value.Type())) {
+			return nil
+		}
 	}
 	return chain
 }

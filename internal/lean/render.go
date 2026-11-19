@@ -258,7 +258,13 @@ func (r renderer) renderBody(out *strings.Builder, body ir.Body, indent string, 
 		fmt.Fprintf(out, "%s) %s %s\n", indent, r.renderExpr(result.Initial), r.renderExpr(result.Sequence))
 		r.renderBody(out, result.Continuation, indent, canPanic)
 	case ir.ListBuild:
-		if result.Effectful {
+		if result.Destination != nil {
+			operator, traversal := ":=", "List.map"
+			if result.Effectful {
+				operator, traversal = "←", "List.mapM"
+			}
+			fmt.Fprintf(out, "%slet %s : %s %s %s (fun", indent, binderName(*result.Destination), r.leanType(result.Destination.Type), operator, traversal)
+		} else if result.Effectful {
 			fmt.Fprintf(out, "%sList.mapM (fun", indent)
 		} else {
 			fmt.Fprintf(out, "%sreturn List.map (fun", indent)
@@ -276,6 +282,9 @@ func (r renderer) renderBody(out *strings.Builder, body ir.Body, indent string, 
 			out.WriteString(" =>\n")
 			r.renderBindings(out, result.Steps, indent+"  ")
 			fmt.Fprintf(out, "%s%s) %s\n", indent+"  ", r.renderExpr(result.Next), r.renderExpr(result.Sequence))
+		}
+		if result.Continuation != nil {
+			r.renderBody(out, *result.Continuation, indent, canPanic)
 		}
 	case ir.ListRecursion:
 		head := "_"

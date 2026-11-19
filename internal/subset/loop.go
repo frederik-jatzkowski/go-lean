@@ -53,7 +53,7 @@ type rangeIteration struct {
 // it is executed only when the counter is strictly below that bound.
 func checkCountedLoop(fn *ssa.Function) *CountedLoop {
 	blocks, ok := matchLoopBlocks(fn)
-	if !ok || len(blocks.header.Instrs) != 4 {
+	if !ok || blocks.result == nil || len(blocks.header.Instrs) != 4 {
 		return nil
 	}
 	header, body, incoming, back := blocks.header, blocks.body, blocks.incoming, blocks.back
@@ -111,7 +111,7 @@ func checkCountedLoop(fn *ssa.Function) *CountedLoop {
 
 func checkRangeFold(fn *ssa.Function) *RangeFold {
 	blocks, ok := matchLoopBlocks(fn)
-	if !ok || len(blocks.exit.Instrs) != 1 {
+	if !ok || blocks.result == nil || len(blocks.exit.Instrs) != 1 {
 		return nil
 	}
 	iter := matchRangeIteration(blocks, 2)
@@ -334,7 +334,7 @@ func matchLoopRegion(fn *ssa.Function) (loopBlocks, bool) {
 		return loopBlocks{}, false
 	}
 	ret, ok := exit.Instrs[len(exit.Instrs)-1].(*ssa.Return)
-	if !ok || len(ret.Results) != 1 {
+	if !ok || len(ret.Results) == 0 {
 		return loopBlocks{}, false
 	}
 	seen := make(map[*ssa.BasicBlock]bool)
@@ -363,8 +363,12 @@ func matchLoopRegion(fn *ssa.Function) (loopBlocks, bool) {
 	if !visit(body) || len(seen)+3 != len(fn.Blocks) {
 		return loopBlocks{}, false
 	}
-	return loopBlocks{entry: entry, header: header, body: body, latch: latch, exit: exit,
-		result: ret.Results[0], incoming: incoming, back: back, backs: backs}, true
+	blocks := loopBlocks{entry: entry, header: header, body: body, latch: latch, exit: exit,
+		incoming: incoming, back: back, backs: backs}
+	if len(ret.Results) == 1 {
+		blocks.result = ret.Results[0]
+	}
+	return blocks, true
 }
 
 func allBackEdges(phi *ssa.Phi, blocks loopBlocks, want ssa.Value) bool {

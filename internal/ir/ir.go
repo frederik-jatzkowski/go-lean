@@ -217,12 +217,14 @@ type StructuredFold struct {
 }
 
 type ListBuild struct {
-	Effectful bool
-	Body      *Body
-	Sequence  Expr
-	Element   Binder
-	Steps     []Binding
-	Next      Expr
+	Destination  *Binder
+	Continuation *Body
+	Effectful    bool
+	Body         *Body
+	Sequence     Expr
+	Element      Binder
+	Steps        []Binding
+	Next         Expr
 }
 
 // ListRecursion exposes the tail as the structurally smaller input.

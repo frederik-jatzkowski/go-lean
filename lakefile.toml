@@ -1,5 +1,5 @@
 name = "goLean"
-defaultTargets = ["ExampleProofs"]
+defaultTargets = ["ExampleProofs", "SelfProofs"]
 moreLeanArgs = ["-DwarningAsError=true"]
 
 [[lean_lib]]
@@ -35,6 +35,7 @@ roots = [
   "map_build.map_build_gen", "map_build.map_build_proofs",
   "map_lookup.map_lookup_gen", "map_lookup.map_lookup_proofs",
   "movement_arrival.movement_arrival_gen", "movement_arrival.movement_arrival_proofs",
+  "multi_result.multi_result_gen", "multi_result.multi_result_proofs",
   "narrow_signed.narrow_signed_gen", "narrow_signed.narrow_signed_proofs",
   "nil_dereference.nil_dereference_gen", "nil_dereference.nil_dereference_proofs",
   "range_fold.range_fold_gen", "range_fold.range_fold_proofs",
@@ -47,3 +48,8 @@ roots = [
   "territory_methods.territory_methods_gen", "territory_methods.territory_methods_proofs",
   "unsigned_wrap.unsigned_wrap_gen", "unsigned_wrap.unsigned_wrap_proofs",
 ]
+
+[[lean_lib]]
+name = "SelfProofs"
+srcDir = "internal"
+roots = ["subset.check_gen", "subset.check_proofs"]

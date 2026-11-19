@@ -98,9 +98,13 @@ func (c *checker) checkStateful(fn *ssa.Function) error {
 	receiver := pointerReceiver(fn)
 	sig := fn.Signature
 	if receiver == nil || StatefulRecord(receiver.Type()) == nil || fn.Pkg == nil ||
-		fn.Synthetic != "" || sig.RecvTypeParams().Len() != 0 || sig.Variadic() || len(fn.Blocks) == 0 ||
-		sig.Results().Len() > 1 || sig.Results().Len() == 1 && !stateValueType(sig.Results().At(0).Type()) {
-		return diagnostic(fn, fn.Pos(), "stateful methods require a declared record pointer receiver and at most one supported result")
+		fn.Synthetic != "" || sig.RecvTypeParams().Len() != 0 || sig.Variadic() || len(fn.Blocks) == 0 {
+		return diagnostic(fn, fn.Pos(), "stateful methods require a declared record pointer receiver")
+	}
+	for result := range sig.Results().Variables() {
+		if !stateValueType(result.Type()) {
+			return diagnostic(fn, fn.Pos(), "unsupported stateful method result")
+		}
 	}
 	spec := &StatefulMethod{Receiver: receiver, writes: make(map[int]bool)}
 	for _, param := range fn.Params[1:] {
@@ -239,8 +243,15 @@ func (c *checker) stateInstruction(fn *ssa.Function, spec *StatefulMethod, ins s
 			}
 		}
 		return c.checkStateful(target) == nil && c.stateful[target].Callback == nil
+	case *ssa.Extract:
+		return stateValue(ins) && c.instruction(fn, ins) == nil
 	case *ssa.Return:
-		return len(ins.Results) == 0 || len(ins.Results) == 1 && stateValue(ins.Results[0])
+		for _, value := range ins.Results {
+			if !stateValue(value) {
+				return false
+			}
+		}
+		return true
 	case *ssa.BinOp:
 		return stateValue(ins.X) && stateValue(ins.Y) && c.instruction(fn, ins) == nil
 	case *ssa.Convert:

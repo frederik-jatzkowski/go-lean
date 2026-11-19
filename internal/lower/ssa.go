@@ -39,7 +39,7 @@ func FromSSA(checked subset.Checked, sourceStem string, wordBits int64) ir.Progr
 			}
 			continue
 		}
-		result := ir.Function{Symbol: l.symbol(fn), Result: l.valueType(fn.Signature.Results().At(0).Type())}
+		result := ir.Function{Symbol: l.symbol(fn), Result: productType(fn.Signature.Results(), l.valueType)}
 		for i := 0; i < fn.Signature.TypeParams().Len(); i++ {
 			result.TypeParams = append(result.TypeParams, ir.TypeParameter(i))
 		}
@@ -69,7 +69,9 @@ func FromSSA(checked subset.Checked, sourceStem string, wordBits int64) ir.Progr
 				result.Body.Result = l.lowerRangeFold(fold)
 			}
 		} else if build := checked.SliceBuild(fn); build != nil {
-			if build.Element == nil {
+			if build.Exit != nil {
+				result.Body = l.lowerSliceResults(build)
+			} else if build.Element == nil {
 				l.canPanic = true
 				result.Body.Result = ir.Return{Value: l.value(build.Source)}
 			} else {
@@ -127,6 +129,32 @@ func (l *lowerer) lowerRangeFold(fold *subset.RangeFold) ir.ListFold {
 	return result
 }
 
+func (l *lowerer) lowerSliceResults(build *subset.SliceBuild) ir.Body {
+	var body ir.Body
+	for _, length := range build.Lengths {
+		body.Bindings = append(body.Bindings, ir.Binding{Binder: l.bind(length),
+			Value: ir.SliceLength{List: l.value(build.Source)}})
+	}
+	if build.Copy != nil {
+		body.Bindings = append(body.Bindings, ir.Binding{Binder: l.bind(build.Copy),
+			Value: ir.SliceLength{List: l.value(build.Source)}})
+	}
+	destination := l.bind(build.Destination)
+	if build.Element == nil {
+		l.canPanic = true
+		body.Bindings = append(body.Bindings, ir.Binding{Binder: destination, Value: l.value(build.Source)})
+		exit := l.instructions(build.Exit, nil, build.ExitStart)
+		body.Bindings = append(body.Bindings, exit.Bindings...)
+		body.Result = exit.Result
+	} else {
+		result := l.lowerSliceBuild(build)
+		exit := l.instructions(build.Exit, nil, build.ExitStart)
+		result.Destination, result.Continuation = &destination, &exit
+		body.Result = result
+	}
+	return body
+}
+
 func (l *lowerer) lowerSliceBuild(build *subset.SliceBuild) ir.ListBuild {
 	result := ir.ListBuild{Sequence: l.value(build.Source), Element: l.bind(build.Element), Effectful: build.Effectful}
 	if iter := build.Iteration; iter != nil {
@@ -150,13 +178,13 @@ func (l *lowerer) lowerSliceBuild(build *subset.SliceBuild) ir.ListBuild {
 
 func (l *lowerer) lowerChainRecursion(chain *subset.ChainRecursion) ir.ListRecursion {
 	input := l.bindings[chain.Input]
-	result := ir.ListRecursion{Input: input, Tail: l.bindAs(chain.Tail, input.Type), Base: l.value(chain.Base)}
+	result := ir.ListRecursion{Input: input, Tail: l.bindAs(chain.Tail, input.Type), Base: packResults(chain.Base, l.value)}
 	if chain.Head != nil {
 		head := l.bind(chain.Head)
 		result.Head = &head
 	}
 	result.Step.Bindings = l.lowerPureSteps(chain.Steps)
-	result.Step.Result = ir.Return{Value: l.value(chain.Result)}
+	result.Step.Result = ir.Return{Value: packResults(chain.Result, l.value)}
 	return result
 }
 
@@ -169,6 +197,8 @@ func (l *lowerer) lowerPureSteps(values []ssa.Value) []ir.Binding {
 			expr = l.binary(step)
 		case *ssa.UnOp:
 			expr = ir.Negate{Value: l.value(step.X)}
+		case *ssa.Extract:
+			expr = l.project(step)
 		case *ssa.Call:
 			arg := l.value(step.Call.Args[0])
 			if callee := step.Call.StaticCallee(); callee != nil {
@@ -246,12 +276,16 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 	if l.iteration != nil && block == l.iteration.header {
 		value := l.iteration.stored
 		if l.iteration.backValues != nil {
-			value = l.tuple(l.iteration.backValues[predecessor])
+			value = packResults(l.iteration.backValues[predecessor], l.value)
 		}
 		return ir.Body{Result: ir.Return{Value: value}}
 	}
+	return l.instructions(block, predecessor, 0)
+}
+
+func (l *lowerer) instructions(block, predecessor *ssa.BasicBlock, start int) ir.Body {
 	var result ir.Body
-	for _, ins := range block.Instrs {
+	for _, ins := range block.Instrs[start:] {
 		if l.iteration != nil && l.iteration.skip[ins] {
 			if value := l.iteration.stores[ins]; value != nil {
 				l.iteration.stored = l.value(value)
@@ -331,6 +365,10 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bindAs(ins, typ), Value: value})
 		case *ssa.Extract:
 			binder := l.bind(ins)
+			if _, ok := ins.Tuple.(*ssa.Call); ok {
+				result.Bindings = append(result.Bindings, ir.Binding{Binder: binder, Value: l.project(ins)})
+				continue
+			}
 			lookup := l.value(ins.Tuple)
 			var value ir.Expr = ir.OptionIsSome{Value: lookup}
 			if ins.Index == 0 {
@@ -439,7 +477,7 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 			edge := ins.Edges[slices.Index(block.Preds, predecessor)]
 			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: l.value(edge)})
 		case *ssa.Return:
-			result.Result = ir.Return{Value: l.value(ins.Results[0])}
+			result.Result = ir.Return{Value: packResults(ins.Results, l.value)}
 		case *ssa.Jump:
 			next := l.body(block.Succs[0], block)
 			result.Bindings = append(result.Bindings, next.Bindings...)
@@ -510,7 +548,45 @@ func (l *lowerer) binary(expr *ssa.BinOp) ir.Binary {
 	return ir.Binary{Op: op, Left: l.value(expr.X), Right: l.value(expr.Y), OperandType: l.valueType(expr.X.Type())}
 }
 
+func productType(results *types.Tuple, valueType func(types.Type) ir.Type) ir.Type {
+	if results.Len() == 0 {
+		return ir.Unit
+	}
+	last := results.Len() - 1
+	typ := valueType(results.At(last).Type())
+	for i := last - 1; i >= 0; i-- {
+		typ = ir.ProductType(valueType(results.At(i).Type()), typ)
+	}
+	return typ
+}
+
+func packResults(results []ssa.Value, value func(ssa.Value) ir.Expr) ir.Expr {
+	if len(results) == 0 {
+		return ir.UnitLiteral{}
+	}
+	last := len(results) - 1
+	result := value(results[last])
+	for i := last - 1; i >= 0; i-- {
+		result = ir.Pair{Left: value(results[i]), Right: result}
+	}
+	return result
+}
+
+func (l *lowerer) project(extract *ssa.Extract) ir.Expr {
+	value := l.value(extract.Tuple)
+	for i := 0; i < extract.Index; i++ {
+		value = ir.PairField{Value: value, Second: true}
+	}
+	if extract.Index < extract.Tuple.Type().(*types.Tuple).Len()-1 {
+		value = ir.PairField{Value: value}
+	}
+	return value
+}
+
 func (l *lowerer) valueType(t types.Type) ir.Type {
+	if tuple, ok := t.(*types.Tuple); ok {
+		return productType(tuple, l.valueType)
+	}
 	if handle := subset.InterfaceHandle(t); handle != "" {
 		l.useContract(t, handle)
 		return handle
@@ -662,17 +738,10 @@ func (l *lowerer) sliceCallback(value ssa.Value, effectful bool) ir.Expr {
 	return callback
 }
 
-func (l *lowerer) tuple(values []ssa.Value) ir.Expr {
-	if len(values) == 1 {
-		return l.value(values[0])
-	}
-	return ir.Pair{Left: l.value(values[0]), Right: l.tuple(values[1:])}
-}
-
 func (l *lowerer) lowerStructuredFold(fold *subset.RangeFold) ir.StructuredFold {
 	spec := fold.Structured
 	iter := spec.Iteration
-	result := ir.StructuredFold{Sequence: l.value(fold.Source), Initial: l.tuple(spec.Initial),
+	result := ir.StructuredFold{Sequence: l.value(fold.Source), Initial: packResults(spec.Initial, l.value),
 		Element: l.bind(fold.Element)}
 	typ := l.loopStateType(spec.States)
 	result.State = l.freshBinder("state", typ)
@@ -739,7 +808,7 @@ func (l *lowerer) lowerStructuredCountedLoop(fn *ir.Function, loop *subset.Count
 		call.Args = append(call.Args, ir.Ref(param))
 	}
 	call.Args = append(call.Args, ir.LoopFuel{Start: l.value(loop.Start), Bound: l.value(loop.Bound),
-		Signed: !subset.Type(loop.Bound.Type()).IsUnsigned(), ZeroStart: subset.IsZero(loop.Start)}, l.tuple(spec.Initial))
+		Signed: !subset.Type(loop.Bound.Type()).IsUnsigned(), ZeroStart: subset.IsZero(loop.Start)}, packResults(spec.Initial, l.value))
 	initialBindings := l.unpackLoopState(spec.States, helper.State)
 	wrapperBindings := maps.Clone(l.bindings)
 	l.iteration = &iteration{header: iter.Header, backValues: spec.Next}

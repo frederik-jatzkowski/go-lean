@@ -74,7 +74,7 @@ func supportedHandle(value ssa.Value) bool {
 		return false
 	}
 	switch value.(type) {
-	case *ssa.Parameter, *ssa.Call, *ssa.Phi:
+	case *ssa.Parameter, *ssa.Call, *ssa.Phi, *ssa.Extract:
 		return true
 	default:
 		return false

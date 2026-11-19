@@ -23,12 +23,10 @@ type statefulLowerer struct {
 	fuel       ir.Expr
 }
 
-func stateResult(fn *ssa.Function, state ir.Type) ir.Type {
-	value := ir.Unit
-	if results := fn.Signature.Results(); results.Len() != 0 {
-		value = stateType(subset.Type(results.At(0).Type()))
-	}
-	return ir.ProductType(state, value)
+func (l *lowerer) statePayload(results *types.Tuple) ir.Type {
+	return productType(results, func(typ types.Type) ir.Type {
+		return stateType(l.valueType(typ))
+	})
 }
 
 func stateType(typ ir.Type) ir.Type {
@@ -56,12 +54,12 @@ func (l *lowerer) lowerStateful(fn *ssa.Function, method *subset.StatefulMethod)
 	binder := l.bindAs(method.Receiver, stateType)
 	s := statefulLowerer{lowerer: l, method: method, record: recordType, state: ir.Ref(binder)}
 	result := ir.Function{Symbol: l.symbol(fn), CanPanic: true, Params: []ir.Binder{binder},
-		Result: stateResult(fn, stateType)}
+		Result: ir.ProductType(stateType, l.statePayload(fn.Signature.Results()))}
 	for _, param := range fn.Params[1:] {
 		if param == method.Callback {
 			input := l.valueType(subset.BooleanCallbackInput(param.Type()))
 			s.traceType = ir.SliceType(input)
-			result.Result = ir.ProductType(stateType, ir.ProductType(callbackResult(fn), s.traceType))
+			result.Result = ir.ProductType(stateType, ir.ProductType(l.statePayload(fn.Signature.Results()), s.traceType))
 			result.Params = append(result.Params, l.bindAs(param, ir.UnaryFunctionType(ir.Nat, ir.UnaryFunctionType(input, ir.Bool))))
 		} else {
 			result.Params = append(result.Params, s.bind(param))
@@ -96,14 +94,10 @@ func (l *lowerer) lowerStateful(fn *ssa.Function, method *subset.StatefulMethod)
 	return []ir.Function{loop, result}
 }
 
-func callbackResult(fn *ssa.Function) ir.Type {
-	if results := fn.Signature.Results(); results.Len() != 0 {
-		return stateType(subset.Type(results.At(0).Type()))
-	}
-	return ir.Unit
-}
-
 func (s *statefulLowerer) bind(value ssa.Value) ir.Binder {
+	if tuple, ok := value.Type().(*types.Tuple); ok {
+		return s.bindAs(value, s.statePayload(tuple))
+	}
 	return s.bindAs(value, stateType(s.valueType(value.Type())))
 }
 
@@ -226,11 +220,10 @@ func (s *statefulLowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 			next := s.child(block.Succs[0], block)
 			body.Bindings = append(body.Bindings, next.Bindings...)
 			body.Result = next.Result
+		case *ssa.Extract:
+			body.Bindings = append(body.Bindings, ir.Binding{Binder: s.bind(ins), Value: s.lowerer.project(ins)})
 		case *ssa.Return:
-			var value ir.Expr = ir.UnitLiteral{}
-			if len(ins.Results) != 0 {
-				value = s.value(ins.Results[0])
-			}
+			value := packResults(ins.Results, s.value)
 			if s.traceType != "" {
 				value = ir.Pair{Left: value, Right: ir.Reverse{List: s.trace}}
 			}
@@ -261,7 +254,7 @@ func (s *statefulLowerer) call(body *ir.Body, ins *ssa.Call) {
 			call.Args = append(call.Args, s.value(arg))
 		}
 		stateType := ir.OptionType(s.record)
-		result := s.fresh("transition", stateResult(target, stateType))
+		result := s.fresh("transition", ir.ProductType(stateType, s.statePayload(target.Signature.Results())))
 		state := s.fresh("state", stateType)
 		body.Bindings = append(body.Bindings, ir.Binding{Binder: result, Value: call, CanPanic: true},
 			ir.Binding{Binder: state, Value: ir.PairField{Value: ir.Ref(result)}})

@@ -11,6 +11,29 @@ import (
 	"github.com/frederik-jatzkowski/go-lean/internal/transpile"
 )
 
+func TestRejectMultiResultInterfaceContract(t *testing.T) {
+	dir := newModule(t)
+	writeFile(t, filepath.Join(dir, "input.go"), `package sample
+
+// golean:start
+// law : True
+// golean:end
+type Service interface {
+	Get() (int64, bool)
+}
+
+//golean:verify
+func Read(s Service) int64 {
+	n, _ := s.Get()
+	return n
+}
+`)
+	_, err := transpile.Generate(dir)
+	if err == nil || !strings.Contains(err.Error(), "interface contract methods require one result") {
+		t.Fatalf("expected a result-arity diagnostic, got %v", err)
+	}
+}
+
 func TestImportedInterfaceContract(t *testing.T) {
 	dir := newModule(t)
 	source, err := format.Source([]byte(`package boundary

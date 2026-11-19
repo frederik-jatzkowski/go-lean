@@ -9,8 +9,9 @@ type Sample struct {
 	Scale int64
 }
 
-//golean:verify
+//golean:verify promotionReadsEmbeddedField : ∀ (sample : Sample),
+//golean:verify+   PromotedX sample = ExplicitX sample
 func PromotedX(sample Sample) int64 { return sample.X }
 
-//golean:verify
+//golean:export
 func ExplicitX(sample Sample) int64 { return sample.Point.X }

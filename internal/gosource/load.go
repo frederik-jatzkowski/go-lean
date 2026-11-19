@@ -3,12 +3,11 @@ package gosource
 
 import (
 	"cmp"
-	"go/ast"
+
 	"go/token"
 	"go/types"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/go/ssa"
@@ -19,6 +18,7 @@ type Program struct {
 	Path          string
 	Package       *ssa.Package
 	Roots         []*ssa.Function
+	Directives    map[*ssa.Function]Directives
 	WordBits      int64
 	InterfaceDocs map[*types.TypeName]InterfaceDoc
 }
@@ -26,7 +26,7 @@ type Program struct {
 type selectedFile struct {
 	path  string
 	pkg   *packages.Package
-	roots []*types.Func
+	roots []selectedRoot
 }
 
 // Load finds marked functions in ./... and groups them by their source file.
@@ -83,42 +83,26 @@ func Load(dir string) ([]Program, error) {
 		result := Program{
 			Path: filepath.Clean(file.path), Package: prog.Package(file.pkg.Types),
 			InterfaceDocs: docs,
+			Directives:    make(map[*ssa.Function]Directives),
 			WordBits:      8 * file.pkg.TypesSizes.Sizeof(types.Typ[types.Int]),
 		}
 		for _, root := range file.roots {
-			fn := prog.FuncValue(root)
+			fn := prog.FuncValue(root.fn)
 			if fn == nil {
-				return nil, packages.Error{Pos: fset.Position(root.Pos()).String(), Msg: "no SSA definition for " + root.Name()}
+				return nil, packages.Error{Pos: fset.Position(root.fn.Pos()).String(), Msg: "no SSA definition for " + root.fn.Name()}
 			}
 			result.Roots = append(result.Roots, fn)
+			directives := Directives{Laws: root.laws}
+			for _, target := range root.abstract {
+				callee := prog.FuncValue(target.fn)
+				if callee == nil {
+					return nil, packages.Error{Pos: target.position.String(), Msg: "no SSA definition for " + target.fn.FullName()}
+				}
+				directives.Abstract = append(directives.Abstract, Abstract{Callee: callee, Position: target.position})
+			}
+			result.Directives[fn] = directives
 		}
 		programs = append(programs, result)
 	}
 	return programs, nil
-}
-
-func selectRoots(pkg *packages.Package, file *ast.File) ([]*types.Func, error) {
-	var roots []*types.Func
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || !marked(fn.Doc) {
-			continue
-		}
-		if fn.Name.Name == "_" || (fn.Recv == nil && fn.Name.Name == "init") {
-			return nil, packages.Error{Pos: pkg.Fset.Position(fn.Pos()).String(), Msg: "verification requires a named function or concrete method"}
-		}
-		roots = append(roots, pkg.TypesInfo.Defs[fn.Name].(*types.Func))
-	}
-	return roots, nil
-}
-
-func marked(doc *ast.CommentGroup) bool {
-	if doc != nil {
-		for _, comment := range doc.List {
-			if strings.TrimSpace(comment.Text) == "//golean:verify" {
-				return true
-			}
-		}
-	}
-	return false
 }

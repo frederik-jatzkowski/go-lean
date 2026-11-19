@@ -2,7 +2,7 @@
 
 package slice_mutation
 
-//golean:verify
+//golean:export
 func ReplaceFirst(values []int64, value int64) int64 {
 	if len(values) == 0 {
 		return 0

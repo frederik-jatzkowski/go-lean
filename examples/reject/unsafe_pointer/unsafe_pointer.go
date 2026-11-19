@@ -4,5 +4,5 @@ package unsafe_pointer
 
 import "unsafe"
 
-//golean:verify
+//golean:export
 func Address(value *int64) uintptr { return uintptr(unsafe.Pointer(value)) }

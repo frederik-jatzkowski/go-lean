@@ -1,22 +1,25 @@
 import string_bytes.string_bytes_gen
 
-open GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/string_bytes».string_bytes
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/string_bytes».string_bytes.Proofs
 
 -- Go strings are byte sequences and can contain invalid UTF-8.
-theorem joinBytes (a b : ByteArray) :
-    (Join a b).data.toList = a.data.toList ++ b.data.toList := by
+theorem joinBytes : Laws.joinBytes := by
+  intro a b
   simp [Join]
 
-theorem lengthIsByteCount (s : ByteArray) (fits : s.size < 2 ^ (GoTypes.WordBits - 1)) :
-    (ByteLen s).toInt = Int.ofNat s.size := by
+theorem lengthIsByteCount : Laws.lengthIsByteCount := by
+  intro s fits
   unfold ByteLen
   first
   | exact Int64.toInt_ofNat_of_lt fits
   | exact Int32.toInt_ofNat_of_lt fits
 
-theorem preservesRawBytes :
-    (AddRawPrefix (ByteArray.mk #[128])).data.toList = [255, 0, 128] := by
+theorem preservesRawBytes : Laws.preservesRawBytes := by
+  unfold Laws.preservesRawBytes
   decide
 
-theorem lenCountsRawBytes : ByteLen (AddRawPrefix (ByteArray.mk #[128])) = 3 := by
+theorem lenCountsRawBytes : Laws.lenCountsRawBytes := by
+  unfold Laws.lenCountsRawBytes
   decide
+
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/string_bytes».string_bytes.Proofs

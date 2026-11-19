@@ -1,12 +1,17 @@
 import narrow_signed.narrow_signed_gen
 
-open GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/narrow_signed».narrow_signed
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/narrow_signed».narrow_signed.Proofs
 
-theorem increment8Wraps : Increment8 Int8.maxValue = Int8.minValue := by
+theorem increment8Wraps : Laws.increment8Wraps := by
+  unfold Laws.increment8Wraps
   decide
 
-theorem increment16Wraps : Increment16 Int16.maxValue = Int16.minValue := by
+theorem increment16Wraps : Laws.increment16Wraps := by
+  unfold Laws.increment16Wraps
   decide
 
-theorem increment32Wraps : Increment32 Int32.maxValue = Int32.minValue := by
+theorem increment32Wraps : Laws.increment32Wraps := by
+  unfold Laws.increment32Wraps
   decide
+
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/narrow_signed».narrow_signed.Proofs

@@ -11,6 +11,11 @@ import (
 )
 
 func FromSSA(input Input, sourceStem string, wordBits int64) ir.Program {
+	return FromSSAWithAbstractCalls(input, sourceStem, wordBits, nil)
+}
+
+// FromSSAWithAbstractCalls lowers designated direct calls as total operations.
+func FromSSAWithAbstractCalls(input Input, sourceStem string, wordBits int64, abstract map[ir.Symbol]map[ir.Symbol]bool) ir.Program {
 	program := ir.Program{Records: make(map[ir.Type]ir.Record), Contracts: make(map[ir.Type]ir.Contract)}
 	file := url.PathEscape(sourceStem)
 	reader := inputReader{input: input, objects: make(map[int64]any)}
@@ -35,6 +40,7 @@ func FromSSA(input Input, sourceStem string, wordBits int64) ir.Program {
 			continue
 		}
 		result := ir.Function{Symbol: l.symbol(fn), Result: productType(fn.Results, l.valueType)}
+		l.abstract = abstract[result.Symbol]
 		for i := 0; i < fn.TypeParameters; i++ {
 			result.TypeParams = append(result.TypeParams, ir.TypeParameter(i))
 		}
@@ -90,7 +96,12 @@ func FromSSA(input Input, sourceStem string, wordBits int64) ir.Program {
 
 // lookupBindingID resolves a source value in the current branch's store.
 //
-//golean:verify
+//golean:verify lookupAfterBinding : ∀ {S : Type} (store : InterfaceContracts.StateStoreContract S) (state : S) (value binder : Int64),
+//golean:verify+   lookupBindingID store (store.Bind state value binder) value = (binder, true)
+//golean:verify interveningBindingsPreserveLookup : ∀ {S : Type} (store : InterfaceContracts.StateStoreContract S) (state : S) (value : Int64)
+//golean:verify+   (writes : List (Int64 × Int64)) (distinct : ∀ entry ∈ writes, value ≠ entry.1),
+//golean:verify+   lookupBindingID store (writes.foldl (fun s entry => store.Bind s entry.1 entry.2) state) value =
+//golean:verify+   lookupBindingID store state value
 func lookupBindingID(state StateStore, value int64) (int64, bool) {
 	if !state.HasBinding(value) {
 		return 0, false
@@ -100,7 +111,7 @@ func lookupBindingID(state StateStore, value int64) (int64, bool) {
 
 // recordEmission records the effect fact after a definition has been emitted.
 //
-//golean:verify
+//golean:export
 func recordEmission(state StateStore, function int64, canPanic bool) StateStore {
 	if canPanic {
 		return state.PutFact(function, effectFact, 1)
@@ -110,7 +121,18 @@ func recordEmission(state StateStore, function int64, canPanic bool) StateStore 
 
 // lookupEmission distinguishes a known pure definition from an absent one.
 //
-//golean:verify
+//golean:verify lookupAfterEmission : ∀ {S : Type} (store : InterfaceContracts.StateStoreContract S) (state : S) (function : Int64)
+//golean:verify+   (effect : Bool),
+//golean:verify+   lookupEmission store (recordEmission store state function effect) function = (effect, true)
+//golean:verify writingDependencyIndexPreservesEmission : ∀ {S : Type} (store : InterfaceContracts.StateStoreContract S) (state : S)
+//golean:verify+   (function callee dependencyIndex : Int64),
+//golean:verify+   lookupEmission store (store.PutFact state function 1 dependencyIndex) callee =
+//golean:verify+   lookupEmission store state callee
+//golean:verify interveningEmissionsPreserveCallee : ∀ {S : Type} (store : InterfaceContracts.StateStoreContract S) (state : S) (callee : Int64)
+//golean:verify+   (effect : Bool) (later : List (Int64 × Bool)) (distinct : ∀ entry ∈ later, callee ≠ entry.1),
+//golean:verify+   lookupEmission store
+//golean:verify+   (later.foldl (fun s entry => recordEmission store s entry.1 entry.2)
+//golean:verify+   (recordEmission store state callee effect)) callee = (effect, true)
 func lookupEmission(state StateStore, function int64) (bool, bool) {
 	if !state.HasFact(function, effectFact) {
 		return false, false
@@ -249,6 +271,7 @@ type iteration struct {
 }
 
 type lowerer struct {
+	abstract      map[ir.Symbol]bool
 	iteration     *iteration
 	root          string
 	input         Input
@@ -430,7 +453,7 @@ func (l *lowerer) instructions(block, predecessor *sourceBlock, start int) ir.Bo
 					call.Args = append(call.Args, l.value(arg))
 				}
 			}
-			canPanic := l.facts.effect(target)
+			canPanic := !l.abstract[call.Callee] && l.facts.effect(target)
 			result.Bindings = append(result.Bindings, ir.Binding{
 				Binder: l.bind(ins), Value: call, CanPanic: canPanic,
 			})

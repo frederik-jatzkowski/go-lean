@@ -4,7 +4,7 @@ package global_write
 
 var total int64
 
-//golean:verify
+//golean:export
 func Accumulate(value int64) int64 {
 	total += value
 	return total

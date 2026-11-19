@@ -16,12 +16,20 @@ type renderer struct {
 	wordBits  int64
 	records   map[ir.Type]ir.Record
 	contracts map[ir.Type]ir.Contract
+	abstract  map[ir.Symbol]string
 }
 
 func Render(program ir.Program) string {
+	return RenderVerification(program, Verification{})
+}
+
+func RenderVerification(program ir.Program, verification Verification) string {
 	var out strings.Builder
 	r := renderer{wordBits: program.WordBits, records: program.Records, contracts: program.Contracts}
 	out.WriteString(GeneratedHeader + "\nimport Init\n")
+	if len(verification.Roots) != 0 {
+		out.WriteString("import Lean.Elab.Command\n")
+	}
 	// Go allows unused parameters, and they are part of the generated signature.
 	out.WriteString("\nset_option linter.unusedVariables false\n")
 	out.WriteString("\nnamespace GoLean\n")
@@ -33,7 +41,20 @@ func Render(program ir.Program) string {
 	}
 	r.renderRecords(&out)
 	r.renderContracts(&out)
+	if len(verification.Roots) != 0 {
+		out.WriteString(declareLaw)
+		for _, root := range verification.Roots {
+			for _, target := range root.Abstract {
+				r.renderAbstractContract(&out, root, target)
+			}
+		}
+	}
 	for _, fn := range program.Functions {
+		root := verification.root(fn.Symbol)
+		r.abstract = make(map[ir.Symbol]string, len(root.Abstract))
+		for _, target := range root.Abstract {
+			r.abstract[target.Call] = abstractBinder(target) + ".operation"
+		}
 		if fn.Loop != nil {
 			r.renderCountedLoop(&out, *fn.Loop)
 		}
@@ -49,6 +70,9 @@ func Render(program ir.Program) string {
 		}
 		for _, handle := range fn.Contracts {
 			fmt.Fprintf(&out, " {%s : Type} (%s : %s %s)", r.leanType(handle), contractBinder(handle), contractName(r.contracts[handle]), r.leanType(handle))
+		}
+		for _, target := range root.Abstract {
+			fmt.Fprintf(&out, " (%s : %s)", abstractBinder(target), abstractType(root, target))
 		}
 		r.renderParams(&out, fn.Params)
 		if fn.CanPanic {
@@ -70,6 +94,9 @@ func Render(program ir.Program) string {
 		if recursive || fn.Fuel != nil {
 			fmt.Fprintf(&out, "\nend %s\n", symbolNamespace(fn.Symbol))
 		}
+	}
+	for _, root := range verification.Roots {
+		renderLaws(&out, root)
 	}
 	out.WriteString("\nend GoLean\n")
 	return out.String()
@@ -437,6 +464,9 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 		return value
 	case ir.Call:
 		call := "_root_.GoLean." + symbolName(expr.Callee)
+		if abstract, ok := r.abstract[expr.Callee]; ok {
+			call = abstract
+		}
 		if len(expr.Args) == 0 && len(expr.Contracts) == 0 {
 			return call
 		}

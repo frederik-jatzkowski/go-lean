@@ -4,5 +4,5 @@ package init_function
 
 var ready bool
 
-//golean:verify
+//golean:export
 func init() { ready = true }

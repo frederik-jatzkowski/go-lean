@@ -4,5 +4,5 @@ package reflection
 
 import "reflect"
 
-//golean:verify
+//golean:export
 func ReadAsInt(value int64) int64 { return reflect.ValueOf(value).Int() }

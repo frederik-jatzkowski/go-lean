@@ -1,7 +1,9 @@
 import immutable_closure.immutable_closure_gen
 
-open GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/immutable_closure».immutable_closure
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/immutable_closure».immutable_closure.Proofs
 
-theorem capturedOffsetIsAdded (value offset : Int64) :
-    AddOffset value offset = value + offset := by
+theorem capturedOffsetIsAdded : Laws.capturedOffsetIsAdded := by
+  intro value offset
   rfl
+
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/immutable_closure».immutable_closure.Proofs

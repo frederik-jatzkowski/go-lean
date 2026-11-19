@@ -1,42 +1,39 @@
 import multi_result.multi_result_gen
 
-open GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/multi_result».multi_result
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/multi_result».multi_result.Proofs
 
-theorem reordersAllResults :
-    Reorder (-12) 3 = some (true, (-4, -12)) := by
+theorem reordersAllResults : Laws.reordersAllResults := by
+  unfold Laws.reordersAllResults
   decide
 
-theorem laterResultPanicAbortsCall (x : Int64) :
-    Reorder x 0 = none ∧ First x 0 = none ∧ Discard x 0 = none := by
+theorem laterResultPanicAbortsCall : Laws.laterResultPanicAbortsCall := by
+  intro x
   simp [Reorder, First, Discard, Divide]
 
-theorem concreteReceiverResults :
-    «Counter$Read» ⟨-3⟩ = (-3, true) ∧
-    «Counter$Peek» (some ⟨4⟩) = some (4, false) ∧
-    «Counter$Peek» none = none := by
+theorem concreteReceiverResults : Laws.concreteReceiverResults := by
+  unfold Laws.concreteReceiverResults
   decide
 
-theorem statefulCallsThreadReceiver :
-    «Counter$AddTwice» (some ⟨3⟩) 2 = some (some ⟨7⟩, (3, 7)) := by
+theorem statefulCallsThreadReceiver : Laws.statefulCallsThreadReceiver := by
   rfl
 
-theorem loopAndRecursiveResults :
-    Count 4 = (4, 8) ∧ Fold [7, -1, 2] = (3, 8) ∧ Chain [7, -1, 2] = (3, 8) := by
+theorem loopAndRecursiveResults : Laws.loopAndRecursiveResults := by
+  unfold Laws.loopAndRecursiveResults
   decide
 
-theorem distinctFreshMaps :
-    ForwardMaps 5 = some ([(5, 1)], (true, [(5, 2)])) := by
+theorem distinctFreshMaps : Laws.distinctFreshMaps := by
+  unfold Laws.distinctFreshMaps
   decide
 
-theorem freshSliceResults :
-    ForwardSlice [3, 5] = some ([3, 5], 2) ∧ Double [3, 5] = some (2, [6, 10]) := by
+theorem freshSliceResults : Laws.freshSliceResults := by
+  unfold Laws.freshSliceResults
   decide
 
-theorem effectfulSliceResults :
-    Reciprocals [3, 6] = some ([4, 2], 2) ∧ Reciprocals [3, 0] = none := by
+theorem effectfulSliceResults : Laws.effectfulSliceResults := by
+  unfold Laws.effectfulSliceResults
   decide
 
-theorem statefulLoopResults :
-    «Queue$Drain» (some ⟨0, some [3, 6], 1⟩) =
-      some (some ⟨2, some [3, 6], 10⟩, (10, 2)) := by
+theorem statefulLoopResults : Laws.statefulLoopResults := by
   rfl
+
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/multi_result».multi_result.Proofs

@@ -2,7 +2,7 @@
 
 package map_mutation
 
-//golean:verify
+//golean:export
 func Set(values map[int64]int64, key, value int64) int64 {
 	if values == nil {
 		return 0

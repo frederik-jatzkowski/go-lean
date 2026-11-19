@@ -7,5 +7,5 @@ type Aliases struct {
 	Second *int64
 }
 
-//golean:verify
+//golean:export
 func Duplicate(value *int64) Aliases { return Aliases{First: value, Second: value} }

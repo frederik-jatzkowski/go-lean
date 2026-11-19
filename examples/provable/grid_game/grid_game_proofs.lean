@@ -1,39 +1,42 @@
 import grid_game.grid_game_gen
 
-open GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».grid_game
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».grid_game.Proofs
 
-namespace GridGame
+theorem stepBoundedEdge : Laws.stepBoundedEdge := by
+  unfold Laws.stepBoundedEdge
+  decide
 
--- Direction values follow the Go constants: Up = 0, Down = 1, Left = 2, Right = 3.
-private abbrev sameCoordinates (actual expected : Position) : Prop :=
-  actual.«field:X» = expected.«field:X» ∧ actual.«field:Y» = expected.«field:Y»
+theorem stepLeftWraps : Laws.stepLeftWraps := by
+  unfold Laws.stepLeftWraps
+  decide
 
-theorem stepBoundedEdge :
-    sameCoordinates (Step (Position.mk 0 3) 2 false) (Position.mk 0 3) := by decide
+theorem stepRightWraps : Laws.stepRightWraps := by
+  unfold Laws.stepRightWraps
+  decide
 
-theorem stepLeftWraps :
-    sameCoordinates (Step (Position.mk 0 3) 2 true) (Position.mk 7 3) := by decide
+theorem stepUpWraps : Laws.stepUpWraps := by
+  unfold Laws.stepUpWraps
+  decide
 
-theorem stepRightWraps :
-    sameCoordinates (Step (Position.mk 7 3) 3 true) (Position.mk 0 3) := by decide
+theorem stepDownWraps : Laws.stepDownWraps := by
+  unfold Laws.stepDownWraps
+  decide
 
-theorem stepUpWraps :
-    sameCoordinates (Step (Position.mk 1 0) 0 true) (Position.mk 1 7) := by decide
+theorem stepOrdinaryWall : Laws.stepOrdinaryWall := by
+  unfold Laws.stepOrdinaryWall
+  decide
 
-theorem stepDownWraps :
-    sameCoordinates (Step (Position.mk 1 7) 1 true) (Position.mk 1 0) := by decide
+theorem stepHorizontalSeamWall : Laws.stepHorizontalSeamWall := by
+  unfold Laws.stepHorizontalSeamWall
+  decide
 
-theorem stepOrdinaryWall :
-    sameCoordinates (Step (Position.mk 4 1) 3 false) (Position.mk 4 1) := by decide
+theorem stepVerticalSeamWall : Laws.stepVerticalSeamWall := by
+  unfold Laws.stepVerticalSeamWall
+  decide
 
-theorem stepHorizontalSeamWall :
-    sameCoordinates (Step Start 2 true) Start := by decide
-
-theorem stepVerticalSeamWall :
-    sameCoordinates (Step (Position.mk 7 6) 1 true) (Position.mk 7 6) := by decide
-
-theorem stepUnknownDirection :
-    sameCoordinates (Step Start 255 true) Start := by decide
+theorem stepUnknownDirection : Laws.stepUnknownDirection := by
+  unfold Laws.stepUnknownDirection
+  decide
 
 -- The exterior consists of the in-bounds cells outside the goal room and its walls.
 private def safe (wrap : Bool) (position : Position) : Bool :=
@@ -83,10 +86,10 @@ private theorem replaySafe (wrap : Bool) (position : Position) (moves : List UIn
     exact ih (Step position direction wrap) (stepSafe wrap position direction h)
 
 /-- No finite list of directions from the Go start position wins in either board mode. -/
-theorem youCantWin (wrap : Bool) (moves : List UInt8) :
-    Won (replay wrap Start moves) = false := by
+theorem youCantWin : Laws.youCantWin := by
+  intro wrap moves
   have h := replaySafe wrap Start moves (startSafe wrap)
   simp only [safe, Bool.and_eq_true, and_assoc] at h
-  simpa using h.2.2.2.2
+  simpa [replay] using h.2.2.2.2
 
-end GridGame
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».grid_game.Proofs

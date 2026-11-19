@@ -8,12 +8,13 @@ func mapValues[T, U any](values []T, transform func(T) U) []U {
 	return result
 }
 
-//golean:verify
+//golean:verify incrementAllIsMap : ∀ (xs : List Int64),
+//golean:verify+   IncrementAll xs = some (xs.map (fun x => x + 1))
 func IncrementAll(values []int64) []int64 {
 	return mapValues(values, func(value int64) int64 { return value + 1 })
 }
 
-//golean:verify
+//golean:export
 func Nonzero(values []int64) []bool {
 	return mapValues(values, func(value int64) bool { return value != 0 })
 }

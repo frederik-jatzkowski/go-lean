@@ -3,6 +3,7 @@ module github.com/frederik-jatzkowski/go-lean
 go 1.27.0
 
 require (
+	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/tools v0.52.0
 )

@@ -4,5 +4,5 @@ package nondeterministic_time
 
 import "time"
 
-//golean:verify
+//golean:export
 func Timestamp() int64 { return time.Now().UnixNano() }

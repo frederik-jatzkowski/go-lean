@@ -1,6 +1,6 @@
 import bounded_counter.bounded_counter_gen
 
-open GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/bounded_counter».bounded_counter
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/bounded_counter».bounded_counter.Proofs
 
 private theorem loopAdds (value : Int64) (fuel : Nat) (acc : Int64) :
     «RepeatAdd$loop» value fuel acc = acc + value * Int64.ofNat fuel := by
@@ -14,6 +14,8 @@ private theorem loopAdds (value : Int64) (fuel : Nat) (acc : Int64) :
     rw [ih, step, Int64.mul_succ]
     ac_rfl
 
-theorem repeatedAdditionIsMultiplication (value : Int64) (count : GoTypes.Int) :
-    RepeatAdd value count = value * Int64.ofNat count.toInt.toNat := by
+theorem repeatedAdditionIsMultiplication : Laws.repeatedAdditionIsMultiplication := by
+  intro value count
   simp [RepeatAdd, loopAdds]
+
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/bounded_counter».bounded_counter.Proofs

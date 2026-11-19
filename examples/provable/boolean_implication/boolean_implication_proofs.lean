@@ -1,15 +1,21 @@
 import boolean_implication.boolean_implication_gen
 
-open GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/boolean_implication».boolean_implication
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/boolean_implication».boolean_implication.Proofs
 
-theorem impliesFalse (q : Bool) : Implies false q = true := by
+theorem impliesFalse : Laws.impliesFalse := by
+  intro q
   rfl
 
-theorem impliesTrue (q : Bool) : Implies true q = q := by
+theorem impliesTrue : Laws.impliesTrue := by
+  intro q
   rfl
 
-theorem falseSkipsDivision (x : Int64) : AndCheck false x 0 = some false := by
+theorem falseSkipsDivision : Laws.falseSkipsDivision := by
+  intro x
   rfl
 
-theorem trueEvaluatesDivision (x : Int64) : AndCheck true x 0 = none := by
+theorem trueEvaluatesDivision : Laws.trueEvaluatesDivision := by
+  intro x
   rfl
+
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/boolean_implication».boolean_implication.Proofs

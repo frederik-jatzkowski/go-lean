@@ -15,7 +15,7 @@ func TestRejectMultiResultInterfaceContract(t *testing.T) {
 	dir := newModule(t)
 	writeFile(t, filepath.Join(dir, "input.go"), `package sample
 
-//golean:law law : True
+//golean:assume law : True
 type Service interface {
 	Get() (int64, bool)
 }
@@ -38,14 +38,14 @@ func TestImportedInterfaceContract(t *testing.T) {
 
 // Evaluator models a read.
 //
-//golean:law read_identity : ∀ s x, Read s x = x
-//golean:law second_law : True
+//golean:assume read_identity : ∀ s x, Read s x = x
+//golean:assume second_law : True
 type Evaluator interface {
-	//golean:law read_zero : ∀ s, Read s 0 = 0
+	//golean:assume read_zero : ∀ s, Read s 0 = 0
 	Read(int) int
 }
 
-//golean:law unused_law : True
+//golean:assume unused_law : True
 type Unused interface { Read(int) int }
 `))
 	if err != nil {
@@ -94,16 +94,17 @@ func Divide(e boundary.Evaluator, x int) int { return x / read(e, x) }
 }
 
 func TestInterfaceContractRejections(t *testing.T) {
-	const contract = "//golean:law valid : True\n"
+	const contract = "//golean:assume valid : True\n"
 	for _, test := range []struct {
 		name, declaration, function, message string
 	}{
 		{"unannotated", "type Evaluator interface { Evaluate(int64) int64 }", "func Apply(e Evaluator, x int64) int64 { return e.Evaluate(x) }", "requires a golean contract"},
-		{"legacy start", "//golean:start\ntype Evaluator interface { Evaluate(int64) int64 }", "func Apply(e Evaluator) int64 { return e.Evaluate(0) }", "use //golean:law"},
-		{"legacy end", "//golean:end\ntype Evaluator interface { Evaluate(int64) int64 }", "func Apply(e Evaluator) int64 { return e.Evaluate(0) }", "use //golean:law"},
-		{"empty law", "//golean:law\ntype Evaluator interface { Evaluate(int64) int64 }", "func Apply(e Evaluator) int64 { return e.Evaluate(0) }", "expected //golean:law"},
-		{"missing law name", "//golean:law : True\ntype Evaluator interface { Evaluate(int64) int64 }", "func Apply(e Evaluator) int64 { return e.Evaluate(0) }", "expected //golean:law"},
-		{"missing proposition", "//golean:law empty :\ntype Evaluator interface { Evaluate(int64) int64 }", "func Apply(e Evaluator) int64 { return e.Evaluate(0) }", "expected //golean:law"},
+		{"legacy start", "//golean:start\ntype Evaluator interface { Evaluate(int64) int64 }", "func Apply(e Evaluator) int64 { return e.Evaluate(0) }", "use //golean:assume"},
+		{"legacy end", "//golean:end\ntype Evaluator interface { Evaluate(int64) int64 }", "func Apply(e Evaluator) int64 { return e.Evaluate(0) }", "use //golean:assume"},
+		{"legacy law", "//golean:law valid : True\ntype Evaluator interface { Evaluate(int64) int64 }", "func Apply(e Evaluator) int64 { return e.Evaluate(0) }", "use //golean:assume"},
+		{"empty law", "//golean:assume\ntype Evaluator interface { Evaluate(int64) int64 }", "func Apply(e Evaluator) int64 { return e.Evaluate(0) }", "expected //golean:assume"},
+		{"missing law name", "//golean:assume : True\ntype Evaluator interface { Evaluate(int64) int64 }", "func Apply(e Evaluator) int64 { return e.Evaluate(0) }", "expected //golean:assume"},
+		{"missing proposition", "//golean:assume empty :\ntype Evaluator interface { Evaluate(int64) int64 }", "func Apply(e Evaluator) int64 { return e.Evaluate(0) }", "expected //golean:assume"},
 		{"embedded", "type Reader interface { Evaluate(int64) int64 }\n" + contract + "type Evaluator interface { Reader }", "func Apply(e Evaluator) int64 { return e.Evaluate(0) }", "embedded interfaces"},
 		{"nil receiver", contract + "type Evaluator interface { Evaluate(int64) int64 }", "func Apply() int64 { return Evaluator(nil).Evaluate(0) }", "non-nil handle"},
 		{"nil comparison", contract + "type Evaluator interface { Evaluate(int64) int64 }", "func Apply(e Evaluator) bool { return e == nil }", "unsupported runtime operation"},
@@ -131,7 +132,7 @@ func TestIllTypedInterfaceLawRejectedByLean(t *testing.T) {
 	dir := newModule(t)
 	writeFile(t, filepath.Join(dir, "input.go"), `package sample
 type Evaluator interface {
-	//golean:law invalid_law : ∀ s, Evaluate s true = 0
+	//golean:assume invalid_law : ∀ s, Evaluate s true = 0
 	Evaluate(int64) int64
 }
 

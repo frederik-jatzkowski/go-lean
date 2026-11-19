@@ -4,7 +4,7 @@ package io_read
 
 import "os"
 
-//golean:verify
+//golean:export
 func ReadByte() int64 {
 	var buffer [1]byte
 	if n, _ := os.Stdin.Read(buffer[:]); n == 0 {

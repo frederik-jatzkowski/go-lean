@@ -63,13 +63,13 @@ func (doc InterfaceDoc) Laws() ([]string, error) {
 				continue
 			}
 			switch fields[0] {
-			case "golean:start", "golean:end":
-				return nil, doc.error(comment.Pos(), "legacy contract marker; use //golean:law for each law")
-			case "golean:law":
-				law := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "golean:law"))
+			case "golean:start", "golean:end", "golean:law":
+				return nil, doc.error(comment.Pos(), "legacy contract marker; use //golean:assume for each law")
+			case "golean:assume":
+				law := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "golean:assume"))
 				name, proposition, valid := strings.Cut(law, ":")
 				if !valid || len(strings.Fields(name)) != 1 || strings.TrimSpace(proposition) == "" {
-					return nil, doc.error(comment.Pos(), "expected //golean:law <name> : <Lean proposition>")
+					return nil, doc.error(comment.Pos(), "expected //golean:assume <name> : <Lean proposition>")
 				}
 				laws = append(laws, law)
 			}

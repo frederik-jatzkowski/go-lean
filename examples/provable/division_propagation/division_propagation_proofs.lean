@@ -1,10 +1,13 @@
 import division_propagation.division_propagation_gen
 
-open GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/division_propagation».division_propagation
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/division_propagation».division_propagation.Proofs
 
-theorem propagatesDivisionPanic (x : Int64) : DivideThenIncrement x 0 = none := by
+theorem propagatesDivisionPanic : Laws.propagatesDivisionPanic := by
+  intro x
   simp [DivideThenIncrement, quotient]
 
-theorem incrementsSuccessfulQuotient (x divisor : Int64) (h : divisor ≠ 0) :
-    DivideThenIncrement x divisor = some (Int64.ofInt (x.toInt.tdiv divisor.toInt) + 1) := by
+theorem incrementsSuccessfulQuotient : Laws.incrementsSuccessfulQuotient := by
+  intro x divisor h
   simp [DivideThenIncrement, quotient, h]
+
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/division_propagation».division_propagation.Proofs

@@ -1,33 +1,37 @@
 import integer_remainder.integer_remainder_gen
 
-open GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/integer_remainder».integer_remainder
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/integer_remainder».integer_remainder.Proofs
 
-theorem dayBounds (elapsed : UInt64) :
-    ∃ day, DayOfMonth elapsed = some day ∧ 1 ≤ day ∧ day ≤ 30 := by
+theorem dayBounds : Laws.dayBounds := by
+  intro elapsed
   refine ⟨elapsed % 30 + 1, ?_, ?_⟩
   · simp [DayOfMonth]
   · rw [UInt64.le_iff_toNat_le, UInt64.le_iff_toNat_le]
     simp [UInt64.toNat_ofNat]
     omega
 
-theorem monthRollover :
-    DayOfMonth 29 = some 30 ∧ DayOfMonth 30 = some 1 := by
+theorem monthRollover : Laws.monthRollover := by
+  unfold Laws.monthRollover
   decide
 
-theorem signedRemainder :
-    OffsetInPeriod (-7) 3 = some (-1) ∧ OffsetInPeriod 7 (-3) = some 1 := by
+theorem signedRemainder : Laws.signedRemainder := by
+  unfold Laws.signedRemainder
   decide
 
-theorem minimumByNegativeOne :
-    OffsetInPeriod (-9223372036854775808) (-1) = some 0 := by
+theorem minimumByNegativeOne : Laws.minimumByNegativeOne := by
+  unfold Laws.minimumByNegativeOne
   decide
 
-theorem zeroPeriodPanics (offset : Int64) : OffsetInPeriod offset 0 = none := by
+theorem zeroPeriodPanics : Laws.zeroPeriodPanics := by
+  intro offset
   rfl
 
-theorem zeroPeriodFallback (offset : Int64) : OffsetOrZero offset 0 = some 0 := by
+theorem zeroPeriodFallback : Laws.zeroPeriodFallback := by
+  intro offset
   rfl
 
-theorem nonzeroPeriod (offset period : Int64) (h : period ≠ 0) :
-    OffsetOrZero offset period = some (offset % period) := by
+theorem nonzeroPeriod : Laws.nonzeroPeriod := by
+  intro offset period h
   simp [OffsetOrZero, OffsetInPeriod, h]
+
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/integer_remainder».integer_remainder.Proofs

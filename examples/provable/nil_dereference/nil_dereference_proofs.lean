@@ -1,17 +1,19 @@
 import nil_dereference.nil_dereference_gen
 
-open GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/nil_dereference».nil_dereference
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/nil_dereference».nil_dereference.Proofs
 
-theorem readNonNilPanicFree (record : Record) :
-    ∃ value, Read (some record) = some value := by
+theorem readNonNilPanicFree : Laws.readNonNilPanicFree := by
+  intro record
   exact ⟨record.«field:Value», rfl⟩
 
-theorem readNilPanics : Read (none : Option Record) = none := by
+theorem readNilPanics : Laws.readNilPanics := by
   rfl
 
-theorem readReturnsField (record : Record) :
-    Read (some record) = some record.«field:Value» := by
+theorem readReturnsField : Laws.readReturnsField := by
+  intro record
   rfl
 
-theorem takingNilFieldAddressPanics : Touch (none : Option Record) = none := by
+theorem takingNilFieldAddressPanics : Laws.takingNilFieldAddressPanics := by
   rfl
+
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/nil_dereference».nil_dereference.Proofs

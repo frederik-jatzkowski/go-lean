@@ -1,16 +1,20 @@
 import territory_methods.territory_methods_gen
 
-open GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/territory_methods».territory_methods
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/territory_methods».territory_methods.Proofs
 
-theorem configuredCaps : «Tier$TileLimit» 1 = 25 ∧ «Tier$TileLimit» 2 = 35 := by
+theorem configuredCaps : Laws.configuredCaps := by
+  unfold Laws.configuredCaps
   decide
 
-theorem villageCanClaimItsLastTile : «Territory$CanClaim» (some ⟨2, 34⟩) = some true := by
+theorem villageCanClaimItsLastTile : Laws.villageCanClaimItsLastTile := by
+  unfold Laws.villageCanClaimItsLastTile
   decide
 
-theorem fullTerritoryCannotClaim (tier : UInt8) :
-    «Territory$CanClaim» (some ⟨tier, «Tier$TileLimit» tier⟩) = some false := by
+theorem fullTerritoryCannotClaim : Laws.fullTerritoryCannotClaim := by
+  intro tier
   simp [«Territory$CanClaim»]
 
-theorem nilTerritoryPanics : «Territory$CanClaim» none = none := by
+theorem nilTerritoryPanics : Laws.nilTerritoryPanics := by
   rfl
+
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/territory_methods».territory_methods.Proofs

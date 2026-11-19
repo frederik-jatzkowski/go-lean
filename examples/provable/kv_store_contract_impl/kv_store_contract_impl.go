@@ -10,7 +10,8 @@ type MemStore struct {
 
 var _ kv_store_contract_use.KVStore = MemStore{}
 
-//golean:verify
+//golean:verify getAfterPut : ∀ (store : MemStore) (key value : Int64),
+//golean:verify+   GetValue (PutValue store key value) key = value
 func GetValue(store MemStore, key int64) int64 {
 	if key == store.Key {
 		return store.Value
@@ -18,7 +19,7 @@ func GetValue(store MemStore, key int64) int64 {
 	return 0
 }
 
-//golean:verify
+//golean:export
 func PutValue(_ MemStore, key, value int64) MemStore {
 	return MemStore{Key: key, Value: value}
 }

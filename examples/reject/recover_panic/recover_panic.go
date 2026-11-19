@@ -2,7 +2,7 @@
 
 package recover_panic
 
-//golean:verify
+//golean:export
 func RecoverDivision(value, divisor int64) (result int64) {
 	defer func() {
 		if recover() != nil {

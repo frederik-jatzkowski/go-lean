@@ -30,9 +30,22 @@
 
 ## Select functions to verify
 
-Add `//golean:verify` to a function or concrete method’s doc comment and run `go-lean transpile ./...` from the Go module root. The command scans the packages matched by Go's `./...` pattern, using the active build settings. Each marked source file gets one sibling module, so `clamp.go` generates `clamp_gen.lean`. Each module includes all marked functions and methods in that file and their reachable callees, deduplicated within the module.
+Add a named `//golean:verify` law to a function or concrete method’s doc comment. Use `//golean:export` to generate a model without declaring a law. Run `go-lean transpile ./...` from the Go module root. The command scans the packages matched by Go's `./...` pattern, using the active build settings. Each marked source file gets a sibling model module, so `clamp.go` generates `clamp_gen.lean`. The model includes the marked functions and methods and their reachable concrete callees, deduplicated within the module.
 
 The transpiler runs SSA loading, subset and call graph checking, lowering to a structured IR, and Lean generation in that order. Every selected function must pass checking before the command writes any modules. If the last directive is removed from a file, remove its old generated module and update any Lean imports as needed.
+
+### Laws declared in Go
+
+The examples and lowering self-proofs declare their laws in Go doc comments. Each law has a name unique to the Go file and a Lean proposition. Use consecutive `//golean:verify+` lines to continue it.
+
+```go
+//golean:verify clampBounds : ∀ value low high : Int64, low ≤ high →
+//golean:verify+ low ≤ Clamp value low high ∧ Clamp value low high ≤ high
+```
+
+Write each proof in `<stem>_proofs.lean` under the generated model's namespace followed by `.Proofs`. A theorem named `clampBounds` can use `Laws.clampBounds` as its statement. Add the model, proof, and generated `<stem>_verify.lean` modules to the default Lake library's roots. Lake checks that the companion supplies each theorem, its type matches the Go law, and its dependencies use only the allowed Lean axioms. Run `make generate` after Go edits and `make check` to check generated-file freshness and build the proofs.
+
+[ClampImport](examples/provable/clampimport/clampimport.go) uses `//golean:abstract limits.Min` and `//golean:abstract limits.Max` to prove its laws through the callees' contracts. The pilot supports direct calls to imported, total scalar functions that declare their own verification laws in this Go module. Write each callee law using its unqualified Go function name for the operation. The caller model takes those operations and law fields as arguments. The generated verification module supplies the actual operations with their checked proofs and specializes the caller theorems.
 
 ## Multiple results
 
@@ -49,7 +62,7 @@ Lean definition and `lake build SelfProofs` to check the proof.
 
 ## Bounded stateful methods
 
-Mark a concrete pointer-receiver method with `//golean:verify`. A method that writes its receiver, directly or through a checked same-receiver helper, can use a single tracked record, supported value fields, and read-only value slices. The checker accepts direct field assignment and checked helper calls, including void helpers. It rejects escaping addresses, writes through other pointers, and writes to slice elements. Slice operations include `len`, checked indexing, nil assignment, and direct calls to the standard library's `slices.Clone`. Lean represents these slices as optional lists so nil and empty remain distinguishable.
+A concrete pointer-receiver method can use named `//golean:verify` laws or `//golean:export`. A method that writes its receiver, directly or through a checked same-receiver helper, can use a single tracked record, supported value fields, and read-only value slices. The checker accepts direct field assignment and checked helper calls, including void helpers. It rejects escaping addresses, writes through other pointers, and writes to slice elements. Slice operations include `len`, checked indexing, nil assignment, and direct calls to the standard library's `slices.Clone`. Lean represents these slices as optional lists so nil and empty remain distinguishable.
 
 The bounded loop shape uses an `int` receiver field as the cursor and another receiver field as the slice. The loop can follow straight-line receiver setup, tests `cursor < len(slice)`, and increments the cursor once on each path back to the test. Helpers on continuing paths must preserve the cursor and slice. Branches and early exits can update the state, including replacing the slice on an exit path. The loop guard's signed distance supplies structural recursion fuel. Use Go-representable slice lengths when applying the proofs.
 
@@ -61,12 +74,12 @@ The [movement example](examples/provable/movement_arrival/movement_arrival_proof
 
 ## Interface contracts
 
-Write each Lean law field on its own `//golean:law <name> : <proposition>` line in the interface or method doc comment. Repeat the directive for each law. These lines survive `gofmt`.
+Write each Lean law field on its own `//golean:assume <name> : <proposition>` line in the interface or method doc comment. Repeat the directive for each law. These lines survive `gofmt`.
 
 ```go
 type KVStore interface {
     Get(key int64) int64
-    //golean:law get_after_put : ∀ s k v, Get (Put s k v) k = v
+    //golean:assume get_after_put : ∀ s k v, Get (Put s k v) k = v
     Put(key, value int64) KVStore
 }
 ```
@@ -122,7 +135,7 @@ The game loop requests each direction through a callback and passes it to the sa
 Go `Step` function that go-lean translates. In wraparound mode, seam walls keep
 the goal room closed across the board edges.
 
-Run `lake build grid_game.grid_game_proofs` to check the [no-win proof](examples/provable/grid_game/grid_game_proofs.lean).
+Run `lake build grid_game.grid_game_verify` to check the [no-win proof](examples/provable/grid_game/grid_game_proofs.lean) against its Go declaration.
 It proves that `Won` returns false after every finite sequence of directions from
 `Start`, in either mode. This covers every finite prefix supplied by the callback.
 

@@ -1,7 +1,9 @@
 import embedded_struct.embedded_struct_gen
 
-open GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/embedded_struct».embedded_struct
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/embedded_struct».embedded_struct.Proofs
 
-theorem promotionReadsEmbeddedField (sample : Sample) :
-    PromotedX sample = ExplicitX sample := by
+theorem promotionReadsEmbeddedField : Laws.promotionReadsEmbeddedField := by
+  intro sample
   rfl
+
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/embedded_struct».embedded_struct.Proofs

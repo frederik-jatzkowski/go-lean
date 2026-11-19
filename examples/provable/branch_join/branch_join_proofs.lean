@@ -1,15 +1,17 @@
 import branch_join.branch_join_gen
 
-open GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/branch_join».branch_join
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/branch_join».branch_join.Proofs
 
-theorem branchAssignmentReachesJoin (first second : Int64) :
-    PickThenIncrement first second = (if first < second then first else second) + 1 := by
+theorem branchAssignmentReachesJoin : Laws.branchAssignmentReachesJoin := by
+  intro first second
   by_cases h : first < second <;> simp [PickThenIncrement, h]
 
-theorem skippedDivisionReachesJoin (value : Int64) :
-    IncrementWithOptionalQuotient false value 0 = some (value + 1) := by
+theorem skippedDivisionReachesJoin : Laws.skippedDivisionReachesJoin := by
+  intro value
   rfl
 
-theorem divisionPanicSkipsJoin (value : Int64) :
-    IncrementWithOptionalQuotient true value 0 = none := by
+theorem divisionPanicSkipsJoin : Laws.divisionPanicSkipsJoin := by
+  intro value
   rfl
+
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/branch_join».branch_join.Proofs

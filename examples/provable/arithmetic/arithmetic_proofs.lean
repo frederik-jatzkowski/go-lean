@@ -1,15 +1,17 @@
 import arithmetic.arithmetic_gen
-import Std.Tactic.BVDecide
 
-open GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/arithmetic».arithmetic
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/arithmetic».arithmetic.Proofs
 
-theorem cancelAdd (x y : Int64) : CancelAdd x y = x := by
-  unfold CancelAdd
-  bv_decide
+theorem cancelAdd : Laws.cancelAdd := by
+  intro x y
+  simp [CancelAdd]
 
-theorem multiplyByOne (x : Int64) : MultiplyByOne x = x := by
-  unfold MultiplyByOne
-  bv_decide
+theorem multiplyByOne : Laws.multiplyByOne := by
+  intro x
+  simp [MultiplyByOne]
 
-theorem incrementWraps : Increment Int64.maxValue = Int64.minValue := by
+theorem incrementWraps : Laws.incrementWraps := by
+  unfold Laws.incrementWraps
   decide
+
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/arithmetic».arithmetic.Proofs

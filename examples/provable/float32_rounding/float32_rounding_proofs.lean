@@ -1,12 +1,17 @@
 import float32_rounding.float32_rounding_gen
 
-open GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/float32_rounding».float32_rounding
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/float32_rounding».float32_rounding.Proofs
 
-theorem addUnitAtPrecisionBoundary : (AddUnit 16777216 == (16777216 : Float32)) = true := by
+theorem addUnitAtPrecisionBoundary : Laws.addUnitAtPrecisionBoundary := by
+  unfold Laws.addUnitAtPrecisionBoundary
   decide
 
-theorem addUnitBelowPrecisionBoundary : (AddUnit 16777215 == (16777216 : Float32)) = true := by
+theorem addUnitBelowPrecisionBoundary : Laws.addUnitBelowPrecisionBoundary := by
+  unfold Laws.addUnitBelowPrecisionBoundary
   decide
 
-theorem constantRoundsOnce : RoundedConstant.toBits = 0x3f800001 := by
+theorem constantRoundsOnce : Laws.constantRoundsOnce := by
+  unfold Laws.constantRoundsOnce
   decide
+
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/float32_rounding».float32_rounding.Proofs

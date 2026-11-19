@@ -5,5 +5,6 @@ type Point struct {
 	Y int64
 }
 
-//golean:verify
+//golean:verify swapInvolutive : ∀ (point : Point),
+//golean:verify+   Swap (Swap point) = point
 func Swap(point Point) Point { return Point{X: point.Y, Y: point.X} }

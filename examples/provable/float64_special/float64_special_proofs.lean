@@ -1,6 +1,6 @@
 import float64_special.float64_special_gen
 
-open GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/float64_special».float64_special
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/float64_special».float64_special.Proofs
 open Float.Model (UnpackedFloat)
 
 private theorem unpackedUnequalToSelf (x : UnpackedFloat) : (!x.beq x) = x.isNaN := by
@@ -11,23 +11,29 @@ private theorem unpackedUnequalToSelf (x : UnpackedFloat) : (!x.beq x) = x.isNaN
   | finite sign _ _ _ =>
     cases sign <;> simp [UnpackedFloat.beq, UnpackedFloat.compare, UnpackedFloat.isNaN]
 
-theorem detectsNaN (x : Float) : IsNaN x = x.isNaN :=
-  unpackedUnequalToSelf x.toModel.unpack
+theorem detectsNaN : Laws.detectsNaN := by
+  intro x
+  exact unpackedUnequalToSelf x.toModel.unpack
 
 private theorem unpackedNaNIsUnordered (x y : UnpackedFloat)
     (h : x.isNaN = true ∨ y.isNaN = true) : x.lt y = false := by
   cases x <;> cases y <;>
     simp [UnpackedFloat.lt, UnpackedFloat.compare, UnpackedFloat.isNaN] at *
 
-theorem nanIsUnordered (x y : Float) (h : x.isNaN = true ∨ y.isNaN = true) :
-    Less x y = false :=
-  unpackedNaNIsUnordered x.toModel.unpack y.toModel.unpack h
+theorem nanIsUnordered : Laws.nanIsUnordered := by
+  intro x y h
+  exact unpackedNaNIsUnordered x.toModel.unpack y.toModel.unpack h
 
-theorem signedZeroEqualsZero : IsZero (Float.ofBits 0x8000000000000000) = true := by
+theorem signedZeroEqualsZero : Laws.signedZeroEqualsZero := by
+  unfold Laws.signedZeroEqualsZero
   decide
 
-theorem nanDoesNotEqualZero : IsZero (Float.ofBits 0x7ff8000000000000) = false := by
+theorem nanDoesNotEqualZero : Laws.nanDoesNotEqualZero := by
+  unfold Laws.nanDoesNotEqualZero
   decide
 
-theorem preservesSubnormalConstant : SmallestPositive.toBits = 1 := by
+theorem preservesSubnormalConstant : Laws.preservesSubnormalConstant := by
+  unfold Laws.preservesSubnormalConstant
   decide
+
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/float64_special».float64_special.Proofs

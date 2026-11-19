@@ -1,22 +1,29 @@
 import unsigned_wrap.unsigned_wrap_gen
 
-open GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/unsigned_wrap».unsigned_wrap
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/unsigned_wrap».unsigned_wrap.Proofs
 
-theorem increment8Wraps : Increment8 0xff = 0 := by
+theorem increment8Wraps : Laws.increment8Wraps := by
+  unfold Laws.increment8Wraps
   decide
 
-theorem increment16Wraps : Increment16 0xffff = 0 := by
+theorem increment16Wraps : Laws.increment16Wraps := by
+  unfold Laws.increment16Wraps
   decide
 
-theorem increment32Wraps : Increment32 0xffffffff = 0 := by
+theorem increment32Wraps : Laws.increment32Wraps := by
+  unfold Laws.increment32Wraps
   decide
 
-theorem increment64Wraps : Increment64 0xffffffffffffffff = 0 := by
+theorem increment64Wraps : Laws.increment64Wraps := by
+  unfold Laws.increment64Wraps
   decide
 
-theorem zeroDivisorPanics (value : UInt64) : Quotient64 value 0 = none := by
+theorem zeroDivisorPanics : Laws.zeroDivisorPanics := by
+  intro value
   simp [Quotient64]
 
-theorem quotientUsesUnsignedMagnitude :
-    Quotient64 0xffffffffffffffff 2 = some 0x7fffffffffffffff := by
+theorem quotientUsesUnsignedMagnitude : Laws.quotientUsesUnsignedMagnitude := by
+  unfold Laws.quotientUsesUnsignedMagnitude
   decide
+
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/unsigned_wrap».unsigned_wrap.Proofs

@@ -7,7 +7,7 @@ const (
 	Village      Tier = 2
 )
 
-//golean:verify
+//golean:verify configuredCaps : «Tier$TileLimit» 1 = 25 ∧ «Tier$TileLimit» 2 = 35
 func (tier Tier) TileLimit() uint8 {
 	switch tier {
 	case ClaimedLands:
@@ -26,7 +26,10 @@ type Territory struct {
 
 // CanClaim reports whether there is room for one additional tile.
 //
-//golean:verify
+//golean:verify villageCanClaimItsLastTile : «Territory$CanClaim» (some ⟨2, 34⟩) = some true
+//golean:verify fullTerritoryCannotClaim : ∀ (tier : UInt8),
+//golean:verify+   «Territory$CanClaim» (some ⟨tier, «Tier$TileLimit» tier⟩) = some false
+//golean:verify nilTerritoryPanics : «Territory$CanClaim» none = none
 func (territory *Territory) CanClaim() bool {
 	return territory.Controlled < territory.Tier.TileLimit()
 }

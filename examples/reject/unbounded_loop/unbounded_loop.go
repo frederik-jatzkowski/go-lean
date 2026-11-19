@@ -2,7 +2,7 @@
 
 package unbounded_loop
 
-//golean:verify
+//golean:export
 func WaitForZero(value int64) int64 {
 	// Adding two preserves parity, so odd inputs never reach zero.
 	for value != 0 {

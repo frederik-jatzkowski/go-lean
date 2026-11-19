@@ -1,6 +1,6 @@
 import batch_fulfillment.batch_fulfillment_gen
 
-open GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/batch_fulfillment».batch_fulfillment
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/batch_fulfillment».batch_fulfillment.Proofs
 
 private def orders (batch : Batch) : List Order := batch.«field:orders».getD []
 
@@ -88,19 +88,25 @@ private theorem entryFuel (batch : Batch) :
       (((Int64.ofNat (batch.«field:orders».getD []).length).toInt -
         batch.«field:cursor».toInt).toNat + 1) := by rfl
 
-theorem nonnegativeAndConservesStock (batch final : Batch) (rejected : Bool)
-    (nonnegative : 0 ≤ batch.«field:stock»)
-    (result : «Batch$Fulfill» (some batch) = some (some final, rejected)) :
-    final.«field:orders» = batch.«field:orders» ∧ 0 ≤ final.«field:stock» ∧
-      ∃ shipped, ShippedPrefix (orders batch) batch.«field:cursor» final.«field:cursor» shipped ∧
-        batch.«field:stock».toInt = final.«field:stock».toInt + shipped.sum := by
+private theorem shippedPrefixChecks {pending : List Order} {start finish : Int64} {shipped : List Int}
+    (path : ShippedPrefix pending start finish shipped) :
+    shipped.foldr (fun quantity tail cursor =>
+      ∃ order : Order, pending[cursor.toNatClampNeg]? = some order ∧
+        0 < order.«field:Quantity» ∧ quantity = order.«field:Quantity».toInt ∧ tail (cursor + 1))
+      (fun cursor => cursor = finish) start := by
+  induction path with
+  | stop => rfl
+  | ship _ _ order _ atCursor positive _ ih =>
+    exact ⟨order, atCursor, positive, rfl, ih⟩
+
+theorem nonnegativeAndConservesStock : Laws.nonnegativeAndConservesStock := by
+  intro batch final rejected nonnegative result
   rw [entryFuel] at result
-  exact accounting _ batch final rejected nonnegative result
+  obtain ⟨ordersUnchanged, stock, shipped, path, sum⟩ := accounting _ batch final rejected nonnegative result
+  exact ⟨ordersUnchanged, stock, shipped, shippedPrefixChecks path, sum⟩
 
-theorem rejectedOrderStaysAtTheCursor :
-    let pending : Option (List Order) := some [⟨7⟩, ⟨2⟩, ⟨3⟩, ⟨1⟩]
-    «Batch$Fulfill» (some ⟨4, pending, 1⟩) = some (some ⟨2, pending, 2⟩, true) := by rfl
+theorem rejectedOrderStaysAtTheCursor : Laws.rejectedOrderStaysAtTheCursor := by rfl
 
-theorem resumedBatchProcessesPreviouslyRejectedOrder :
-    let pending : Option (List Order) := some [⟨7⟩, ⟨2⟩, ⟨3⟩, ⟨1⟩]
-    «Batch$Fulfill» (some ⟨3, pending, 2⟩) = some (some ⟨0, pending, 3⟩, true) := by rfl
+theorem resumedBatchProcessesPreviouslyRejectedOrder : Laws.resumedBatchProcessesPreviouslyRejectedOrder := by rfl
+
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/batch_fulfillment».batch_fulfillment.Proofs

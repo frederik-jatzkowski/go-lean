@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,24 +31,29 @@ func TestExamplesMatchGeneratedOutput(t *testing.T) {
 			t.Errorf("%s differs from transpiler output. Run make generate.", output.Path)
 		}
 	}
-	for _, example := range []string{
-		"acyclic_list", "arithmetic", "array_bounds", "batch_fulfillment", "boolean_implication", "bounded_counter", "branch_join", "byte_rune", "clamp", "clampimport", "constant_conversions",
-		"division_guarded", "division_precondition", "division_propagation", "embedded_struct", "float32_rounding", "float64_special",
-		"generic_identity", "generic_map", "immutable_closure", "integer_remainder", "machine_words", "map_build", "map_lookup", "movement_arrival", "multi_result", "narrow_signed", "nil_dereference", "range_fold",
-		"slice_bounds", "slice_copy", "string_bytes", "struct_fields", "switch_tagless", "switch_value", "territory_methods", "unsigned_wrap",
-	} {
-		if !found["examples/provable/"+example+"/"+example+"_gen.lean"] {
-			t.Errorf("missing generated module for %s", example)
+	for _, dir := range []string{"examples/provable", "internal/lower"} {
+		err := fs.WalkDir(os.DirFS(root), dir, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil || entry.IsDir() {
+				return err
+			}
+			if stem, ok := strings.CutSuffix(path, "_proofs.lean"); ok {
+				for _, suffix := range []string{"_gen.lean", "_verify.lean"} {
+					if !found[stem+suffix] {
+						t.Errorf("missing generated module %s", stem+suffix)
+					}
+				}
+			}
+			if strings.HasSuffix(path, "_verify.lean") && !found[path] {
+				t.Errorf("obsolete generated verification module %s", path)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
 	}
 	if !found["internal/subset/check_gen.lean"] {
 		t.Error("missing generated module for subset.Binary")
-	}
-	if !found["internal/lower/contract_gen.lean"] {
-		t.Error("missing generated module for lowering contracts")
-	}
-	if !found["internal/lower/ssa_gen.lean"] {
-		t.Error("missing generated module for SSA lowering")
 	}
 }
 
@@ -64,7 +70,7 @@ func helper(x int64) int64 { return x + 1 }
 func B(x int64) int64 { return A(x) }
 `)
 	write(t, "nested/c.go", `package tree
-//golean:verify
+//golean:export
 func C(x int64) int64 { return x }
 `)
 	write(t, "nested/unmarked.go", "package tree\nfunc Unmarked(x int64) int64 { return x % 2 }\n")
@@ -83,7 +89,7 @@ func C(x int64) int64 { return x }
 			t.Errorf("%s is missing %q:\n%s", file, definition, got)
 		}
 	}
-	for _, path := range []string{"nested/unmarked_gen.lean", "nested/skipped_gen.lean"} {
+	for _, path := range []string{"nested/c_verify.lean", "nested/unmarked_gen.lean", "nested/skipped_gen.lean"} {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Errorf("expected no file at %s, got %v", path, err)
 		}

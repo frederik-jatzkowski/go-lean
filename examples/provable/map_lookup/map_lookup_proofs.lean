@@ -1,16 +1,19 @@
 import map_lookup.map_lookup_gen
 
-open GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/map_lookup».map_lookup
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/map_lookup».map_lookup.Proofs
 
 -- Valid map representations have unique keys. Nil maps use the empty list.
-theorem missingKeyUsesFallback (key fallback : Int64) :
-    ReadOr ([] : List (Int64 × Int64)) key fallback = fallback := by
+theorem missingKeyUsesFallback : Laws.missingKeyUsesFallback := by
+  intro key fallback
   rfl
 
-theorem presentZeroIsAValue (key : Int64) : ReadOr [(key, 0)] key 9 = 0 := by
+theorem presentZeroIsAValue : Laws.presentZeroIsAValue := by
+  intro key
   simp [ReadOr]
 
-theorem missingKeyInNonemptyMap (entry key value fallback : Int64) (different : key ≠ entry) :
-    ReadOr [(entry, value)] key fallback = fallback := by
+theorem missingKeyInNonemptyMap : Laws.missingKeyInNonemptyMap := by
+  intro entry key value fallback different
   have keyMiss : (key == entry) = false := beq_eq_false_iff_ne.mpr different
   simp [ReadOr, List.lookup, keyMiss]
+
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/map_lookup».map_lookup.Proofs

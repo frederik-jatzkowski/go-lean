@@ -1,19 +1,25 @@
 import division_precondition.division_precondition_gen
 
-open GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/division_precondition».division_precondition
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/division_precondition».division_precondition.Proofs
 
-theorem dividePanicFree (x divisor : Int64) (h : divisor ≠ 0) :
-    Divide x divisor = some (Int64.ofInt (x.toInt.tdiv divisor.toInt)) := by
+theorem dividePanicFree : Laws.dividePanicFree := by
+  intro x divisor h
   simp [Divide, h]
 
-theorem divideByZeroPanics (x : Int64) : Divide x 0 = none := by
+theorem divideByZeroPanics : Laws.divideByZeroPanics := by
+  intro x
   simp [Divide]
 
-theorem negativeDividendTruncates : Divide (-7) 3 = some (-2) := by
+theorem negativeDividendTruncates : Laws.negativeDividendTruncates := by
+  unfold Laws.negativeDividendTruncates
   decide
 
-theorem negativeDivisorTruncates : Divide 7 (-3) = some (-2) := by
+theorem negativeDivisorTruncates : Laws.negativeDivisorTruncates := by
+  unfold Laws.negativeDivisorTruncates
   decide
 
-theorem minDividedByNegativeOne : Divide Int64.minValue (-1) = some Int64.minValue := by
+theorem minDividedByNegativeOne : Laws.minDividedByNegativeOne := by
+  unfold Laws.minDividedByNegativeOne
   decide
+
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/division_precondition».division_precondition.Proofs

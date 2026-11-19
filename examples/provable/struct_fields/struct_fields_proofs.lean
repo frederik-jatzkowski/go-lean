@@ -1,6 +1,9 @@
 import struct_fields.struct_fields_gen
 
-open GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/struct_fields».struct_fields
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/struct_fields».struct_fields.Proofs
 
-theorem swapInvolutive (point : Point) : Swap (Swap point) = point := by
+theorem swapInvolutive : Laws.swapInvolutive := by
+  intro point
   cases point <;> rfl
+
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/struct_fields».struct_fields.Proofs

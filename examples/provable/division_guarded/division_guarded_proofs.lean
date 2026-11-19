@@ -1,17 +1,20 @@
 import division_guarded.division_guarded_gen
 
-open GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/division_guarded».division_guarded
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/division_guarded».division_guarded.Proofs
 
-theorem divideOrZero (x fallback : Int64) : DivideOr x 0 fallback = some fallback := by
+theorem divideOrZero : Laws.divideOrZero := by
+  intro x fallback
   simp [DivideOr]
 
-theorem divideOrNonzero (x divisor fallback : Int64) (h : divisor ≠ 0) :
-    DivideOr x divisor fallback = some (Int64.ofInt (x.toInt.tdiv divisor.toInt)) := by
+theorem divideOrNonzero : Laws.divideOrNonzero := by
+  intro x divisor fallback h
   simp [DivideOr, h]
 
-theorem divideOrPanicFree (x divisor fallback : Int64) :
-    ∃ result, DivideOr x divisor fallback = some result := by
+theorem divideOrPanicFree : Laws.divideOrPanicFree := by
+  intro x divisor fallback
   by_cases h : divisor = 0
   · subst divisor
     exact ⟨fallback, divideOrZero x fallback⟩
   · exact ⟨_, divideOrNonzero x divisor fallback h⟩
+
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/division_guarded».division_guarded.Proofs

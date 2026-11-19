@@ -1,9 +1,13 @@
 import machine_words.machine_words_gen
 
-open GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/machine_words».machine_words
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/machine_words».machine_words.Proofs
 
-theorem roundTrip (x : GoTypes.Int) : RoundTrip x = x := by
+theorem roundTrip : Laws.roundTrip := by
+  intro x
   rfl
 
-theorem negativeOneUsesAllBits : ToUnsigned (-1) = (0 : GoTypes.UInt) - 1 := by
+theorem negativeOneUsesAllBits : Laws.negativeOneUsesAllBits := by
+  unfold Laws.negativeOneUsesAllBits
   decide
+
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/machine_words».machine_words.Proofs

@@ -55,17 +55,18 @@ func (c Checked) RecordCell(value ssa.Value) (RecordCell, bool) {
 func Check(program gosource.Program) (Checked, error) {
 	c := checker{
 		contracts: make(map[*types.TypeName][]string), interfaceDocs: program.InterfaceDocs,
-		visiting:  make(map[*ssa.Function]bool),
-		done:      make(map[*ssa.Function]bool),
-		cells:     make(map[*ssa.Alloc]*ssa.Store),
-		records:   make(map[*ssa.Alloc]RecordCell),
-		arrays:    make(map[*ssa.Alloc]*ssa.Store),
-		loops:     make(map[*ssa.Function]*CountedLoop),
-		ranges:    make(map[*ssa.Function]*RangeFold),
-		builds:    make(map[*ssa.Function]*SliceBuild),
-		chains:    make(map[*ssa.Function]*ChainRecursion),
-		freshMaps: make(map[*ssa.MakeMap]bool),
-		stateful:  make(map[*ssa.Function]*StatefulMethod),
+		directives: program.Directives,
+		visiting:   make(map[*ssa.Function]bool),
+		done:       make(map[*ssa.Function]bool),
+		cells:      make(map[*ssa.Alloc]*ssa.Store),
+		records:    make(map[*ssa.Alloc]RecordCell),
+		arrays:     make(map[*ssa.Alloc]*ssa.Store),
+		loops:      make(map[*ssa.Function]*CountedLoop),
+		ranges:     make(map[*ssa.Function]*RangeFold),
+		builds:     make(map[*ssa.Function]*SliceBuild),
+		chains:     make(map[*ssa.Function]*ChainRecursion),
+		freshMaps:  make(map[*ssa.MakeMap]bool),
+		stateful:   make(map[*ssa.Function]*StatefulMethod),
 	}
 	for _, fn := range program.Roots {
 		if writesReceiver(fn, make(map[*ssa.Function]bool)) {
@@ -91,6 +92,7 @@ func Check(program gosource.Program) (Checked, error) {
 }
 
 type checker struct {
+	directives    map[*ssa.Function]gosource.Directives
 	contracts     map[*types.TypeName][]string
 	interfaceDocs map[*types.TypeName]gosource.InterfaceDoc
 	visiting      map[*ssa.Function]bool
@@ -424,8 +426,17 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		if callee.Signature.TypeParams().Len() != 0 {
 			return diagnostic(fn, ins.Pos(), "calls to generic functions are unsupported")
 		}
-		if err := c.function(callee); err != nil {
-			return diagnostic(fn, ins.Pos(), "call to %s: %w", callee, err)
+		abstract := false
+		for _, target := range c.directives[fn].Abstract {
+			abstract = abstract || target.Callee == callee
+		}
+		if !abstract {
+			if len(c.directives[callee].Abstract) != 0 {
+				return diagnostic(fn, ins.Pos(), "calling an abstracted verification root in the same module is unsupported")
+			}
+			if err := c.function(callee); err != nil {
+				return diagnostic(fn, ins.Pos(), "call to %s: %w", callee, err)
+			}
 		}
 		build := c.builds[callee]
 		for i, arg := range ins.Call.Args {

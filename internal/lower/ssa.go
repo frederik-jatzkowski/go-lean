@@ -51,17 +51,30 @@ func FromSSA(checked subset.Checked, sourceStem string, wordBits int64) ir.Progr
 			if build := checked.SliceBuild(fn); build != nil && param == build.Callback {
 				result.Params = append(result.Params, l.bindAs(param, build.CallbackType()))
 			} else if chain != nil && param == chain.Input {
-				result.Params = append(result.Params, l.bindAs(param, ir.SliceType(ir.Int64)))
+				result.Params = append(result.Params, l.bindAs(param, ir.SliceType(chain.Element)))
 			} else {
 				result.Params = append(result.Params, l.bind(param))
 			}
 		}
 		if loop := checked.CountedLoop(fn); loop != nil {
-			l.lowerCountedLoop(&result, loop)
+			if loop.Structured != nil {
+				l.lowerStructuredCountedLoop(&result, loop)
+			} else {
+				l.lowerCountedLoop(&result, loop)
+			}
 		} else if fold := checked.RangeFold(fn); fold != nil {
-			result.Body.Result = l.lowerRangeFold(fold)
+			if fold.Structured != nil {
+				result.Body.Result = l.lowerStructuredFold(fold)
+			} else {
+				result.Body.Result = l.lowerRangeFold(fold)
+			}
 		} else if build := checked.SliceBuild(fn); build != nil {
-			result.Body.Result = l.lowerSliceBuild(build)
+			if build.Element == nil {
+				l.canPanic = true
+				result.Body.Result = ir.Return{Value: l.value(build.Source)}
+			} else {
+				result.Body.Result = l.lowerSliceBuild(build)
+			}
 		} else if chain != nil {
 			result.Body.Result = l.lowerChainRecursion(chain)
 		} else {
@@ -90,9 +103,17 @@ func (l *lowerer) lowerCountedLoop(fn *ir.Function, loop *subset.CountedLoop) {
 		}
 	}
 	helper.Steps = l.lowerPureSteps(loop.Steps)
+	fn.Body.Bindings = l.lowerPureSteps(loop.Before)
 	helper.Next = l.value(loop.Next)
-	call.Args = append(call.Args, ir.ToNat{Value: l.value(loop.Bound)}, l.value(loop.Initial))
-	fn.Body.Result = ir.Return{Value: call}
+	call.Args = append(call.Args, ir.LoopFuel{Start: l.value(loop.Start), Bound: l.value(loop.Bound),
+		Signed: !subset.Type(loop.Bound.Type()).IsUnsigned(), ZeroStart: subset.IsZero(loop.Start)}, l.value(loop.Initial))
+	if loop.Result == loop.State && len(loop.After) == 0 {
+		fn.Body.Result = ir.Return{Value: call}
+	} else {
+		fn.Body.Bindings = append(fn.Body.Bindings, ir.Binding{Binder: helper.State, Value: call})
+		fn.Body.Bindings = append(fn.Body.Bindings, l.lowerPureSteps(loop.After)...)
+		fn.Body.Result = ir.Return{Value: l.value(loop.Result)}
+	}
 	fn.Loop = &helper
 }
 
@@ -107,8 +128,21 @@ func (l *lowerer) lowerRangeFold(fold *subset.RangeFold) ir.ListFold {
 }
 
 func (l *lowerer) lowerSliceBuild(build *subset.SliceBuild) ir.ListBuild {
+	result := ir.ListBuild{Sequence: l.value(build.Source), Element: l.bind(build.Element), Effectful: build.Effectful}
+	if iter := build.Iteration; iter != nil {
+		l.iteration = &iteration{header: iter.Header, skip: iter.Skip, stores: iter.Stores}
+		body := l.body(iter.Entry, iter.Header)
+		result.Body, result.Effectful = &body, l.canPanic
+		l.iteration = nil
+	}
 	l.canPanic = true // Keep the checked construction in the panic-result model.
-	result := ir.ListBuild{Sequence: l.value(build.Source), Element: l.bind(build.Element)}
+	if result.Body != nil {
+		return result
+	}
+	if build.Effectful {
+		result.Next = ir.Apply{Function: l.value(build.Callback), Argument: ir.Ref(result.Element)}
+		return result
+	}
 	result.Steps = l.lowerPureSteps(build.Steps)
 	result.Next = l.value(build.Value)
 	return result
@@ -138,7 +172,11 @@ func (l *lowerer) lowerPureSteps(values []ssa.Value) []ir.Binding {
 		case *ssa.Call:
 			arg := l.value(step.Call.Args[0])
 			if callee := step.Call.StaticCallee(); callee != nil {
-				expr = ir.SelfCall{Name: l.symbol(callee).Name, Argument: arg}
+				call := ir.SelfCall{Name: l.symbol(callee).Name, Args: []ir.Expr{arg}}
+				for _, arg := range step.Call.Args[1:] {
+					call.Args = append(call.Args, l.value(arg))
+				}
+				expr = call
 			} else {
 				expr = ir.Apply{Function: l.value(step.Call.Value), Argument: arg}
 			}
@@ -148,7 +186,16 @@ func (l *lowerer) lowerPureSteps(values []ssa.Value) []ir.Binding {
 	return steps
 }
 
+type iteration struct {
+	header     *ssa.BasicBlock
+	skip       map[ssa.Instruction]bool
+	stores     map[ssa.Instruction]ssa.Value
+	stored     ir.Expr
+	backValues map[*ssa.BasicBlock][]ssa.Value
+}
+
 type lowerer struct {
+	iteration     *iteration
 	root          *ssa.Package
 	file          string
 	bindings      map[ssa.Value]ir.Binder
@@ -196,8 +243,21 @@ func (l *lowerer) bindAs(value ssa.Value, typ ir.Type) ir.Binder {
 }
 
 func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
+	if l.iteration != nil && block == l.iteration.header {
+		value := l.iteration.stored
+		if l.iteration.backValues != nil {
+			value = l.tuple(l.iteration.backValues[predecessor])
+		}
+		return ir.Body{Result: ir.Return{Value: value}}
+	}
 	var result ir.Body
 	for _, ins := range block.Instrs {
+		if l.iteration != nil && l.iteration.skip[ins] {
+			if value := l.iteration.stores[ins]; value != nil {
+				l.iteration.stored = l.value(value)
+			}
+			continue
+		}
 		switch ins := ins.(type) {
 		case *ssa.BinOp:
 			value := l.binary(ins)
@@ -262,10 +322,13 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins.Map), Value: update})
 		case *ssa.Lookup:
 			_, elem := l.valueType(ins.X.Type()).MapShape()
-			result.Bindings = append(result.Bindings, ir.Binding{
-				Binder: l.bindAs(ins, ir.OptionType(elem)),
-				Value:  ir.MapLookup{Map: l.value(ins.X), Key: l.value(ins.Index)},
-			})
+			typ := ir.OptionType(elem)
+			var value ir.Expr = ir.MapLookup{Map: l.value(ins.X), Key: l.value(ins.Index)}
+			if !ins.CommaOk {
+				typ = elem
+				value = ir.OptionGetD{Value: value, Default: ir.IntLiteral{Value: "0", Type: elem}}
+			}
+			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bindAs(ins, typ), Value: value})
 		case *ssa.Extract:
 			binder := l.bind(ins)
 			lookup := l.value(ins.Tuple)
@@ -288,9 +351,13 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 				continue
 			}
 			if subset.IsLength(ins) {
-				result.Bindings = append(result.Bindings, ir.Binding{
-					Binder: l.bind(ins), Value: ir.ByteLen{Value: l.value(ins.Call.Args[0])},
-				})
+				arg := ins.Call.Args[0]
+				value := l.value(arg)
+				var length ir.Expr = ir.ByteLen{Value: value}
+				if subset.Type(arg.Type()).SliceElem() != "" {
+					length = ir.SliceLength{List: value}
+				}
+				result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: length})
 				continue
 			}
 			target := ins.Call.StaticCallee()
@@ -303,8 +370,13 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 					call.Args = append(call.Args, l.value(capture))
 				}
 			}
-			for _, arg := range ins.Call.Args {
-				call.Args = append(call.Args, l.value(arg))
+			build := l.checked.SliceBuild(target)
+			for i, arg := range ins.Call.Args {
+				if build != nil && target.Params[i] == build.Callback {
+					call.Args = append(call.Args, l.sliceCallback(arg, build.Effectful))
+				} else {
+					call.Args = append(call.Args, l.value(arg))
+				}
 			}
 			canPanic := l.effects[target]
 			result.Bindings = append(result.Bindings, ir.Binding{
@@ -318,8 +390,25 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 			})
 		case *ssa.ChangeType:
 			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: l.value(ins.X)})
+		case *ssa.Alloc:
+			if cell, ok := l.checked.RecordCell(ins); ok && cell.Mutable {
+				goType := ins.Type().Underlying().(*types.Pointer).Elem()
+				value := l.zeroValue(goType)
+				result.Bindings = append(result.Bindings, ir.Binding{
+					Binder: l.bindAs(ins, l.valueType(goType)), Value: value,
+				})
+			}
 		case *ssa.Store:
-			if _, ok := l.checked.RecordCell(ins.Addr); ok {
+			root := ins.Addr
+			for field, ok := root.(*ssa.FieldAddr); ok; field, ok = root.(*ssa.FieldAddr) {
+				root = field.X
+			}
+			if cell, ok := l.checked.RecordCell(root); ok {
+				if cell.Mutable {
+					value := l.recordStore(ins.Addr, l.value(ins.Val))
+					typ := root.Type().Underlying().(*types.Pointer).Elem()
+					result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bindAs(root, l.valueType(typ)), Value: value})
+				}
 				continue
 			}
 			if l.checked.ArrayInitializer(ins.Addr) != nil {
@@ -332,11 +421,19 @@ func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
 				Binder: l.bindAs(ins.Addr, l.captureType(ins.Addr)), Value: l.value(ins.Val),
 			})
 		case *ssa.If:
-			result.Result = ir.If{
-				Condition: l.value(ins.Cond),
-				Then:      l.body(block.Succs[0], block),
-				Else:      l.body(block.Succs[1], block),
+			condition := l.value(ins.Cond)
+			incoming := maps.Clone(l.bindings)
+			var stored ir.Expr
+			if l.iteration != nil {
+				stored = l.iteration.stored
 			}
+			then := l.body(block.Succs[0], block)
+			l.bindings = incoming
+			if l.iteration != nil {
+				l.iteration.stored = stored
+			}
+			otherwise := l.body(block.Succs[1], block)
+			result.Result = ir.If{Condition: condition, Then: then, Else: otherwise}
 		case *ssa.Phi:
 			// Each branch contains only the computations along its own path.
 			edge := ins.Edges[slices.Index(block.Preds, predecessor)]
@@ -490,6 +587,9 @@ func (l *lowerer) load(addr ssa.Value) ir.Expr {
 		return ir.RecordField{Value: l.load(field.X), Name: record.Field(field.Field).Name()}
 	}
 	if cell, ok := l.checked.RecordCell(addr); ok {
+		if cell.Mutable {
+			return l.value(addr)
+		}
 		if cell.Whole != nil {
 			return l.value(cell.Whole.Val)
 		}
@@ -508,4 +608,151 @@ func (l *lowerer) captureType(value ssa.Value) ir.Type {
 	typ := subset.CaptureType(value.Type())
 	l.usesWord = l.usesWord || typ.IsWord()
 	return typ
+}
+
+func (l *lowerer) recordStore(addr ssa.Value, value ir.Expr) ir.Expr {
+	field, ok := addr.(*ssa.FieldAddr)
+	if !ok {
+		return value
+	}
+	record := field.X.Type().Underlying().(*types.Pointer).Elem().Underlying().(*types.Struct)
+	update := ir.RecordUpdate{Record: l.load(field.X), Field: record.Field(field.Field).Name(), Value: value}
+	return l.recordStore(field.X, update)
+}
+
+func (l *lowerer) zeroValue(t types.Type) ir.Expr {
+	typ := l.valueType(t)
+	switch typ {
+	case ir.Bool:
+		return ir.BoolLiteral(false)
+	case ir.Bytes:
+		return ir.BytesLiteral("")
+	case ir.Float32:
+		return ir.Float32Literal(0)
+	case ir.Float64:
+		return ir.Float64Literal(0)
+	}
+	if record, ok := t.Underlying().(*types.Struct); ok {
+		zero := ir.RecordLiteral{Type: typ}
+		for field := range record.Fields() {
+			zero.Values = append(zero.Values, l.zeroValue(field.Type()))
+		}
+		return zero
+	}
+	return ir.IntLiteral{Type: typ, Value: "0"}
+}
+
+func (l *lowerer) sliceCallback(value ssa.Value, effectful bool) ir.Expr {
+	fn, _ := value.(*ssa.Function)
+	var captures []ir.Expr
+	if closure, ok := value.(*ssa.MakeClosure); ok {
+		fn = closure.Fn.(*ssa.Function)
+		for _, capture := range closure.Bindings {
+			captures = append(captures, l.value(capture))
+		}
+	}
+	contracts := l.dependencies[fn]
+	for _, contract := range contracts {
+		l.usedContracts[contract] = true
+	}
+	var callback ir.Expr = ir.Call{Callee: l.symbol(fn), Contracts: contracts, Args: captures}
+	if effectful && !l.effects[fn] {
+		callback = ir.LiftCallback{Function: callback}
+	}
+	return callback
+}
+
+func (l *lowerer) tuple(values []ssa.Value) ir.Expr {
+	if len(values) == 1 {
+		return l.value(values[0])
+	}
+	return ir.Pair{Left: l.value(values[0]), Right: l.tuple(values[1:])}
+}
+
+func (l *lowerer) lowerStructuredFold(fold *subset.RangeFold) ir.StructuredFold {
+	spec := fold.Structured
+	iter := spec.Iteration
+	result := ir.StructuredFold{Sequence: l.value(fold.Source), Initial: l.tuple(spec.Initial),
+		Element: l.bind(fold.Element)}
+	typ := l.loopStateType(spec.States)
+	result.State = l.freshBinder("state", typ)
+	bindings := l.unpackLoopState(spec.States, result.State)
+	result.Final = l.freshBinder("final", typ)
+	l.iteration = &iteration{header: iter.Header, skip: iter.Skip, backValues: spec.Next}
+	parameterBindings := maps.Clone(l.bindings)
+	result.Iteration = l.body(iter.Entry, iter.Header)
+	result.Iteration.Bindings = append(bindings, result.Iteration.Bindings...)
+	result.Effectful = l.canPanic
+	l.iteration = nil
+	l.bindings = parameterBindings
+	result.Continuation = l.body(spec.Exit, iter.Header)
+	result.Continuation.Bindings = append(l.unpackLoopState(spec.States, result.Final), result.Continuation.Bindings...)
+	return result
+}
+
+func (l *lowerer) freshBinder(name string, typ ir.Type) ir.Binder {
+	binder := ir.Binder{Index: l.next, Name: name, Type: typ}
+	l.next++
+	return binder
+}
+
+func (l *lowerer) loopStateType(states []*ssa.Phi) ir.Type {
+	last := len(states) - 1
+	typ := l.valueType(states[last].Type())
+	for i := last - 1; i >= 0; i-- {
+		typ = ir.ProductType(l.valueType(states[i].Type()), typ)
+	}
+	return typ
+}
+
+func (l *lowerer) unpackLoopState(states []*ssa.Phi, state ir.Binder) []ir.Binding {
+	var bindings []ir.Binding
+	var tuple ir.Expr = ir.Ref(state)
+	for i, phi := range states {
+		value := tuple
+		if i < len(states)-1 {
+			value = ir.PairField{Value: tuple}
+			tuple = ir.PairField{Value: tuple, Second: true}
+		}
+		binder, ok := l.bindings[phi]
+		if !ok {
+			binder = l.bind(phi)
+		}
+		bindings = append(bindings, ir.Binding{Binder: binder, Value: value})
+	}
+	return bindings
+}
+
+func (l *lowerer) lowerStructuredCountedLoop(fn *ir.Function, loop *subset.CountedLoop) {
+	spec := loop.Structured
+	iter := spec.Iteration
+	typ := l.loopStateType(spec.States)
+	helper := ir.CountedLoop{Symbol: fn.Symbol, State: l.freshBinder("state", typ)}
+	helper.Symbol.Name += "$loop"
+	helper.Params = slices.Clone(fn.Params)
+	fn.Body.Bindings = l.lowerPureSteps(loop.Before)
+	for _, value := range loop.Before {
+		helper.Params = append(helper.Params, l.bindings[value])
+	}
+	call := ir.Call{Callee: helper.Symbol}
+	for _, param := range helper.Params {
+		call.Args = append(call.Args, ir.Ref(param))
+	}
+	call.Args = append(call.Args, ir.LoopFuel{Start: l.value(loop.Start), Bound: l.value(loop.Bound),
+		Signed: !subset.Type(loop.Bound.Type()).IsUnsigned(), ZeroStart: subset.IsZero(loop.Start)}, l.tuple(spec.Initial))
+	initialBindings := l.unpackLoopState(spec.States, helper.State)
+	wrapperBindings := maps.Clone(l.bindings)
+	l.iteration = &iteration{header: iter.Header, backValues: spec.Next}
+	body := l.body(iter.Entry, iter.Header)
+	body.Bindings = append(initialBindings, body.Bindings...)
+	helper.Body = &body
+	l.iteration = nil
+	l.bindings = wrapperBindings
+	final := l.freshBinder("final", typ)
+	fn.Body.Bindings = append(fn.Body.Bindings, ir.Binding{Binder: final, Value: call})
+	fn.Body.Bindings = append(fn.Body.Bindings, l.unpackLoopState(spec.States, final)...)
+	continuation := l.body(spec.Exit, iter.Header)
+	fn.Body.Bindings = append(fn.Body.Bindings, continuation.Bindings...)
+	fn.Body.Result = continuation.Result
+	fn.Loop = &helper
 }

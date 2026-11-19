@@ -18,4 +18,17 @@ def «github.com/frederik-jatzkowski/go-lean/examples/provable/generic_map».«g
   let «v1_t0» : (List Int64) ← (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/generic_map».«generic_map».«mapValues$instance0» «v0_values» _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/generic_map».«generic_map».«IncrementAll$1»)
   return «v1_t0»
 
+def «github.com/frederik-jatzkowski/go-lean/examples/provable/generic_map».«generic_map».«mapValues$instance1» («v0_values» : (List Int64)) («v1_transform» : (Int64 → Bool)) : Option (List Bool) := do
+  return List.map (fun («v2_t7» : Int64) =>
+    let «v3_t8» : Bool := («v1_transform» «v2_t7»)
+    «v3_t8») «v0_values»
+
+def «github.com/frederik-jatzkowski/go-lean/examples/provable/generic_map».«generic_map».«Nonzero$1» («v0_value» : Int64) : Bool :=
+  let «v1_t0» : Bool := (decide («v0_value» ≠ (Int64.ofInt (0))))
+  «v1_t0»
+
+def «github.com/frederik-jatzkowski/go-lean/examples/provable/generic_map».«generic_map».«Nonzero» («v0_values» : (List Int64)) : Option (List Bool) := do
+  let «v1_t0» : (List Bool) ← (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/generic_map».«generic_map».«mapValues$instance1» «v0_values» _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/generic_map».«generic_map».«Nonzero$1»)
+  return «v1_t0»
+
 end GoLean

@@ -14,6 +14,6 @@ private theorem loopAdds (value : Int64) (fuel : Nat) (acc : Int64) :
     rw [ih, step, Int64.mul_succ]
     ac_rfl
 
-theorem repeatedAdditionIsMultiplication (value : Int64) (count : UInt8) :
-    RepeatAdd value count = value * Int64.ofNat count.toNat := by
+theorem repeatedAdditionIsMultiplication (value : Int64) (count : GoTypes.Int) :
+    RepeatAdd value count = value * Int64.ofNat count.toInt.toNat := by
   simp [RepeatAdd, loopAdds]

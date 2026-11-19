@@ -6,51 +6,56 @@ import (
 	"golang.org/x/tools/go/ssa"
 )
 
-func (c *checker) checkCallback(caller *ssa.Function, call *ssa.Call, value ssa.Value) error {
+func (c *checker) checkCallback(caller *ssa.Function, call *ssa.Call, value ssa.Value, build *SliceBuild) error {
 	fn, ok := value.(*ssa.Function)
-	if !ok || len(fn.FreeVars) != 0 || (fn.Parent() != nil && fn.Parent() != caller) {
-		return diagnostic(caller, call.Pos(), "slice callback must be a statically known function without captures")
+	if closure, isClosure := value.(*ssa.MakeClosure); isClosure {
+		fn, ok = closure.Fn.(*ssa.Function)
+	}
+	if !ok || fn.Parent() != nil && fn.Parent() != caller {
+		return diagnostic(caller, call.Pos(), "slice callback must be a statically known function")
 	}
 	if err := c.function(fn); err != nil {
 		return diagnostic(caller, call.Pos(), "slice callback %s: %w", fn, err)
 	}
-	if !totalCallback(fn, make(map[*ssa.Function]bool)) {
-		return diagnostic(caller, call.Pos(), "slice callback %s must use only total operations", fn)
-	}
+	build.Callbacks = append(build.Callbacks, fn)
 	return nil
 }
 
-// The ordinary checker has validated the types, call graph, and control flow.
-// Restrict callbacks further so List.map cannot erase a panic or memory access.
-func totalCallback(fn *ssa.Function, checked map[*ssa.Function]bool) bool {
-	if checked[fn] {
-		return true
+// callbackMayPanic conservatively selects the monadic traversal. Lowering
+// independently knows which concrete callbacks need to be lifted to Option.
+func callbackMayPanic(fn *ssa.Function, known map[*ssa.Function]bool) bool {
+	if effect, ok := known[fn]; ok {
+		return effect
 	}
+	known[fn] = true
 	for _, block := range fn.Blocks {
 		for _, ins := range block.Instrs {
 			switch ins := ins.(type) {
 			case *ssa.BinOp:
 				if op, _ := Binary(ins.Op); op.PanicsOnZeroDivisor() {
-					return false
+					known[fn] = true
+					return true
 				}
 			case *ssa.UnOp:
 				if ins.Op != token.SUB && ins.Op != token.NOT {
-					return false
+					known[fn] = true
+					return true
 				}
 			case *ssa.Call:
-				if IsLength(ins) {
-					continue
-				}
-				callee, ok := ins.Call.Value.(*ssa.Function)
-				if !ok || !totalCallback(callee, checked) {
-					return false
+				if !IsLength(ins) {
+					callee := ins.Call.StaticCallee()
+					if callee == nil || callbackMayPanic(callee, known) {
+						known[fn] = true
+						return true
+					}
 				}
 			case *ssa.If, *ssa.Jump, *ssa.Phi, *ssa.Return, *ssa.Convert, *ssa.ChangeType, *ssa.Field:
 			default:
-				return false
+				known[fn] = true
+				return true
 			}
 		}
 	}
-	checked[fn] = true
-	return true
+	known[fn] = false
+	return false
 }

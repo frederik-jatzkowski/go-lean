@@ -12,3 +12,8 @@ func mapValues[T, U any](values []T, transform func(T) U) []U {
 func IncrementAll(values []int64) []int64 {
 	return mapValues(values, func(value int64) int64 { return value + 1 })
 }
+
+//golean:verify
+func Nonzero(values []int64) []bool {
+	return mapValues(values, func(value int64) bool { return value != 0 })
+}

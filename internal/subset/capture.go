@@ -62,7 +62,10 @@ func (c *checker) checkLocalMemory(fn *ssa.Function) error {
 				if CaptureType(cell.Type()).IsRecord() {
 					record, ok := recordInitializer(cell)
 					if !ok {
-						return diagnostic(fn, cell.Pos(), "local record must be fully initialized before reads and must not escape")
+						if !localRecordUses(cell) {
+							return diagnostic(fn, cell.Pos(), "local record address must not escape")
+						}
+						record = RecordCell{Mutable: true}
 					}
 					c.records[cell] = record
 					continue
@@ -154,8 +157,9 @@ func (c *checker) checkClosure(fn *ssa.Function, closure *ssa.MakeClosure) error
 		return diagnostic(fn, closure.Pos(), "only locally created closures are supported")
 	}
 	for _, use := range *closure.Referrers() {
-		if call, ok := use.(*ssa.Call); !ok || call.Call.Value != closure {
-			return diagnostic(fn, use.Pos(), "closures may only be used in direct calls")
+		call, ok := use.(*ssa.Call)
+		if !ok || call.Call.Value != closure && !sliceCallbackUse(call, closure) {
+			return diagnostic(fn, use.Pos(), "closures may only be used in direct calls or checked slice callbacks")
 		}
 	}
 	for _, value := range closure.Bindings {

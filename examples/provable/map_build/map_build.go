@@ -2,7 +2,7 @@ package map_build
 
 //golean:verify
 func Overwrite(key, first, last int64) map[int64]int64 {
-	values := make(map[int64]int64)
+	values := make(map[int64]int64, 2)
 	values[key] = first
 	values[key] = last
 	return values
@@ -10,7 +10,7 @@ func Overwrite(key, first, last int64) map[int64]int64 {
 
 //golean:verify
 func WriteTwoKeys(firstKey, lastKey, first, last int64) map[int64]int64 {
-	values := make(map[int64]int64)
+	values := make(map[int64]int64, 2)
 	values[firstKey] = first
 	values[lastKey] = last
 	return values

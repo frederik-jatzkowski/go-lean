@@ -1,6 +1,8 @@
 package subset
 
 import (
+	"go/ast"
+	"go/token"
 	"go/types"
 
 	"github.com/frederik-jatzkowski/go-lean/internal/ir"
@@ -20,21 +22,25 @@ func supportedMapLookup(lookup *ssa.Lookup) bool {
 	return key != "" && supportedValue(lookup.X) && hasType(lookup.Index, key)
 }
 
-// freshMapResult checks that the returned allocation is used only for local
-// reads and writes before return. A single block gives the updates one order.
+// freshMapResult checks that every return yields the same allocation and that
+// only local reads and writes can observe it before return.
 func freshMapResult(fn *ssa.Function) *ssa.MakeMap {
-	if len(fn.Blocks) != 1 {
+	var fresh *ssa.MakeMap
+	for _, block := range fn.Blocks {
+		ret, ok := block.Instrs[len(block.Instrs)-1].(*ssa.Return)
+		if !ok {
+			continue
+		}
+		allocation, ok := ret.Results[0].(*ssa.MakeMap)
+		if !ok || fresh != nil && fresh != allocation {
+			return nil
+		}
+		fresh = allocation
+	}
+	if fresh == nil || fresh.Reserve != nil && !supportedIndex(fresh.Reserve) {
 		return nil
 	}
-	block := fn.Blocks[0]
-	ret, ok := block.Instrs[len(block.Instrs)-1].(*ssa.Return)
-	if !ok {
-		return nil
-	}
-	fresh, ok := ret.Results[0].(*ssa.MakeMap)
-	if !ok || fresh.Block() != block || fresh.Reserve != nil {
-		return nil
-	}
+	literalKeys := mapLiteralUpdates(fn, fresh.Pos())
 	for _, use := range *fresh.Referrers() {
 		switch use := use.(type) {
 		case *ssa.Lookup:
@@ -45,8 +51,13 @@ func freshMapResult(fn *ssa.Function) *ssa.MakeMap {
 			if use.Map != fresh {
 				return nil
 			}
+			if literalKeys[use.Pos()] {
+				if _, ok := use.Key.(*ssa.Const); !ok {
+					return nil
+				}
+			}
 		case *ssa.Return:
-			if use != ret {
+			if len(use.Results) != 1 || use.Results[0] != fresh {
 				return nil
 			}
 		default:
@@ -54,4 +65,27 @@ func freshMapResult(fn *ssa.Function) *ssa.MakeMap {
 		}
 	}
 	return fresh
+}
+
+// Go leaves assignment order within a map literal unspecified. For literals
+// with multiple entries, require constant keys, which Go checks for duplicates.
+func mapLiteralUpdates(fn *ssa.Function, pos token.Pos) map[token.Pos]bool {
+	if fn.Syntax() == nil || !pos.IsValid() {
+		return nil
+	}
+	var updates map[token.Pos]bool
+	ast.Inspect(fn.Syntax(), func(node ast.Node) bool {
+		literal, ok := node.(*ast.CompositeLit)
+		if !ok || literal.Lbrace != pos || len(literal.Elts) < 2 {
+			return true
+		}
+		updates = make(map[token.Pos]bool, len(literal.Elts))
+		for _, element := range literal.Elts {
+			if pair, ok := element.(*ast.KeyValueExpr); ok {
+				updates[pair.Colon] = true
+			}
+		}
+		return false
+	})
+	return updates
 }

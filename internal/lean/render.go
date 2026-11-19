@@ -89,12 +89,21 @@ func (r renderer) renderCountedLoop(out *strings.Builder, loop ir.CountedLoop) {
 	fmt.Fprintf(out, " : Nat → %s → %s\n", typ, typ)
 	fmt.Fprintf(out, "  | 0, %s => %s\n", state, state)
 	fmt.Fprintf(out, "  | fuel + 1, %s =>\n", state)
-	r.renderBindings(out, loop.Steps, "    ")
+	if loop.Body != nil {
+		fmt.Fprintln(out, "    let nextState :=")
+		r.renderBody(out, *loop.Body, "      ", false)
+	} else {
+		r.renderBindings(out, loop.Steps, "    ")
+	}
 	fmt.Fprintf(out, "    %s", name)
 	for _, param := range loop.Params {
 		fmt.Fprintf(out, " %s", binderName(param))
 	}
-	fmt.Fprintf(out, " fuel %s\n", r.renderExpr(loop.Next))
+	if loop.Body != nil {
+		fmt.Fprintln(out, " fuel nextState")
+	} else {
+		fmt.Fprintf(out, " fuel %s\n", r.renderExpr(loop.Next))
+	}
 	fmt.Fprintf(out, "\nend %s\n", ns)
 }
 
@@ -233,12 +242,41 @@ func (r renderer) renderBody(out *strings.Builder, body ir.Body, indent string, 
 		r.renderBindings(out, result.Steps, indent+"  ")
 		fmt.Fprintf(out, "%s%s) %s %s\n",
 			indent+"  ", r.renderExpr(result.Next), r.renderExpr(result.Initial), r.renderExpr(result.Sequence))
+	case ir.StructuredFold:
+		operator, fold := ":=", "List.foldl"
+		if result.Effectful {
+			operator, fold = "←", "List.foldlM"
+		}
+		fmt.Fprintf(out, "%slet %s %s %s (fun", indent, binderName(result.Final), operator, fold)
+		r.renderParams(out, []ir.Binder{result.State, result.Element})
+		out.WriteString(" =>")
+		if result.Effectful {
+			out.WriteString(" do")
+		}
+		out.WriteString("\n")
+		r.renderBody(out, result.Iteration, indent+"  ", result.Effectful)
+		fmt.Fprintf(out, "%s) %s %s\n", indent, r.renderExpr(result.Initial), r.renderExpr(result.Sequence))
+		r.renderBody(out, result.Continuation, indent, canPanic)
 	case ir.ListBuild:
-		fmt.Fprintf(out, "%sreturn List.map (fun", indent)
+		if result.Effectful {
+			fmt.Fprintf(out, "%sList.mapM (fun", indent)
+		} else {
+			fmt.Fprintf(out, "%sreturn List.map (fun", indent)
+		}
 		r.renderParams(out, []ir.Binder{result.Element})
-		out.WriteString(" =>\n")
-		r.renderBindings(out, result.Steps, indent+"  ")
-		fmt.Fprintf(out, "%s%s) %s\n", indent+"  ", r.renderExpr(result.Next), r.renderExpr(result.Sequence))
+		if result.Body != nil {
+			out.WriteString(" =>")
+			if result.Effectful {
+				out.WriteString(" do")
+			}
+			out.WriteString("\n")
+			r.renderBody(out, *result.Body, indent+"  ", result.Effectful)
+			fmt.Fprintf(out, "%s) %s\n", indent, r.renderExpr(result.Sequence))
+		} else {
+			out.WriteString(" =>\n")
+			r.renderBindings(out, result.Steps, indent+"  ")
+			fmt.Fprintf(out, "%s%s) %s\n", indent+"  ", r.renderExpr(result.Next), r.renderExpr(result.Sequence))
+		}
 	case ir.ListRecursion:
 		head := "_"
 		if result.Head != nil {
@@ -311,8 +349,19 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 		return fmt.Sprintf("(Float.ofBits 0x%016x)", uint64(expr))
 	case ir.ByteLen:
 		return fmt.Sprintf("(%s.ofNat (%s).size)", r.leanType(ir.IntWord), r.renderExpr(expr.Value))
-	case ir.ToNat:
-		return fmt.Sprintf("(%s).toNat", r.renderExpr(expr.Value))
+	case ir.LoopFuel:
+		bound := r.renderExpr(expr.Bound)
+		if expr.ZeroStart {
+			if expr.Signed {
+				return fmt.Sprintf("((%s).toInt.toNat)", bound)
+			}
+			return fmt.Sprintf("(%s).toNat", bound)
+		}
+		start := r.renderExpr(expr.Start)
+		if expr.Signed {
+			return fmt.Sprintf("(((%s).toInt - (%s).toInt).toNat)", bound, start)
+		}
+		return fmt.Sprintf("((%s).toNat - (%s).toNat)", bound, start)
 	case ir.RecordLiteral:
 		args := []string{r.leanType(expr.Type) + ".mk"}
 		for _, field := range expr.Values {
@@ -396,12 +445,18 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 			args = append(args, r.renderExpr(arg))
 		}
 		return "(" + strings.Join(args, " ") + ")"
+	case ir.LiftCallback:
+		return "(fun value => some (" + r.renderExpr(expr.Function) + " value))"
 	case ir.FunctionRef:
 		return "_root_.GoLean." + symbolName(ir.Symbol(expr))
 	case ir.Apply:
 		return "(" + r.renderExpr(expr.Function) + " " + r.renderExpr(expr.Argument) + ")"
 	case ir.SelfCall:
-		return "(" + quoted(expr.Name) + " " + r.renderExpr(expr.Argument) + ")"
+		args := []string{quoted(expr.Name)}
+		for _, arg := range expr.Args {
+			args = append(args, r.renderExpr(arg))
+		}
+		return "(" + strings.Join(args, " ") + ")"
 	default:
 		panic("unexpected IR expression")
 	}

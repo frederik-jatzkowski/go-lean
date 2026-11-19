@@ -6,7 +6,6 @@ set_option linter.unusedVariables false
 namespace GoLean
 
 def «github.com/frederik-jatzkowski/go-lean/examples/provable/slice_copy».«slice_copy».«Clone» («v0_values» : (List Int64)) : Option (List Int64) := do
-  return List.map (fun («v1_t7» : Int64) =>
-    «v1_t7») «v0_values»
+  return «v0_values»
 
 end GoLean

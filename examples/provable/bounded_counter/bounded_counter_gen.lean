@@ -5,6 +5,10 @@ set_option linter.unusedVariables false
 
 namespace GoLean
 
+abbrev «github.com/frederik-jatzkowski/go-lean/examples/provable/bounded_counter».«bounded_counter».GoTypes.Int := Int64
+abbrev «github.com/frederik-jatzkowski/go-lean/examples/provable/bounded_counter».«bounded_counter».GoTypes.UInt := UInt64
+abbrev «github.com/frederik-jatzkowski/go-lean/examples/provable/bounded_counter».«bounded_counter».GoTypes.WordBits : Nat := 64
+
 namespace «github.com/frederik-jatzkowski/go-lean/examples/provable/bounded_counter».«bounded_counter»
 
 def «RepeatAdd$loop» («v0_value» : Int64) : Nat → Int64 → Int64
@@ -15,7 +19,7 @@ def «RepeatAdd$loop» («v0_value» : Int64) : Nat → Int64 → Int64
 
 end «github.com/frederik-jatzkowski/go-lean/examples/provable/bounded_counter».«bounded_counter»
 
-def «github.com/frederik-jatzkowski/go-lean/examples/provable/bounded_counter».«bounded_counter».«RepeatAdd» («v0_value» : Int64) («v1_count» : UInt8) : Int64 :=
-  (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/bounded_counter».«bounded_counter».«RepeatAdd$loop» «v0_value» («v1_count»).toNat (Int64.ofInt (0)))
+def «github.com/frederik-jatzkowski/go-lean/examples/provable/bounded_counter».«bounded_counter».«RepeatAdd» («v0_value» : Int64) («v1_count» : Int64) : Int64 :=
+  (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/bounded_counter».«bounded_counter».«RepeatAdd$loop» «v0_value» ((«v1_count»).toInt.toNat) (Int64.ofInt (0)))
 
 end GoLean

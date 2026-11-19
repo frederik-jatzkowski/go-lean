@@ -6,11 +6,13 @@ import (
 	"golang.org/x/tools/go/ssa"
 )
 
-// RecordCell is a fresh allocation initialized by a whole-record store or by one
-// store per field. Initializers dominate all reads, and addresses stay local.
+// RecordCell is a fresh allocation whose addresses stay local. An allocation
+// with a dominating initializer can be lowered directly from its stored values.
+// A mutable cell instead starts at its Go zero value and carries updates.
 type RecordCell struct {
-	Whole  *ssa.Store
-	Fields []*ssa.Store
+	Mutable bool
+	Whole   *ssa.Store
+	Fields  []*ssa.Store
 }
 
 func supportedFields(record *types.Struct) bool {
@@ -129,4 +131,27 @@ func projectionReads(addr *ssa.FieldAddr) ([]ssa.Instruction, bool) {
 		reads = append(reads, more...)
 	}
 	return reads, true
+}
+
+// localRecordUses checks that a record address is used only for reads, stores,
+// and further field projections within this function.
+func localRecordUses(addr ssa.Value) bool {
+	typ := Type(addr.Type().Underlying().(*types.Pointer).Elem())
+	for _, use := range *addr.Referrers() {
+		switch use := use.(type) {
+		case *ssa.Store:
+			if use.Addr != addr || !hasType(use.Val, typ) {
+				return false
+			}
+		case *ssa.FieldAddr:
+			if use.X != addr || !localRecordUses(use) {
+				return false
+			}
+		default:
+			if !readsCell(use, addr) {
+				return false
+			}
+		}
+	}
+	return true
 }

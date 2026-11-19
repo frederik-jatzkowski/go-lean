@@ -14,6 +14,7 @@ type StatefulMethod struct {
 	Receiver *ssa.Parameter
 	Callback *ssa.Parameter
 	Loop     *IndexedLoop
+	writes   map[int]bool
 }
 
 type IndexedLoop struct {
@@ -101,7 +102,7 @@ func (c *checker) checkStateful(fn *ssa.Function) error {
 		sig.Results().Len() > 1 || sig.Results().Len() == 1 && !stateValueType(sig.Results().At(0).Type()) {
 		return diagnostic(fn, fn.Pos(), "stateful methods require a declared record pointer receiver and at most one supported result")
 	}
-	spec := &StatefulMethod{Receiver: receiver}
+	spec := &StatefulMethod{Receiver: receiver, writes: make(map[int]bool)}
 	for _, param := range fn.Params[1:] {
 		if stateValueType(param.Type()) {
 			continue
@@ -118,10 +119,22 @@ func (c *checker) checkStateful(fn *ssa.Function) error {
 			if !c.stateInstruction(fn, spec, ins) {
 				return diagnostic(fn, ins.Pos(), "unsupported receiver-state instruction or operand: %s", ins)
 			}
+			switch ins := ins.(type) {
+			case *ssa.Store:
+				if field := sameReceiverField(ins.Addr, receiver); field != nil {
+					spec.writes[field.Field] = true
+				}
+			case *ssa.Call:
+				if callee := c.stateful[ins.Call.StaticCallee()]; callee != nil {
+					for field := range callee.writes {
+						spec.writes[field] = true
+					}
+				}
+			}
 		}
 	}
 	if err := checkAcyclic(fn); err != nil {
-		spec.Loop = indexedLoop(fn, receiver)
+		spec.Loop = c.indexedLoop(fn, receiver)
 		if spec.Loop == nil {
 			return diagnostic(fn, fn.Pos(), "stateful loops require a slice-length bound and one cursor increment on every back edge")
 		}
@@ -247,10 +260,19 @@ func (c *checker) stateInstruction(fn *ssa.Function, spec *StatefulMethod, ins s
 	return false
 }
 
-func indexedLoop(fn *ssa.Function, receiver *ssa.Parameter) *IndexedLoop {
+func (c *checker) indexedLoop(fn *ssa.Function, receiver *ssa.Parameter) *IndexedLoop {
 	entry := fn.Blocks[0]
-	if len(entry.Instrs) != 1 || len(entry.Succs) != 1 {
+	if !endsInJump(entry) || len(entry.Succs) != 1 {
 		return nil
+	}
+	for _, ins := range entry.Instrs[:len(entry.Instrs)-1] {
+		if value, ok := ins.(ssa.Value); ok && value.Referrers() != nil {
+			for _, use := range *value.Referrers() {
+				if use.Block() != entry {
+					return nil
+				}
+			}
+		}
 	}
 	header := entry.Succs[0]
 	branch, ok := header.Instrs[len(header.Instrs)-1].(*ssa.If)
@@ -267,7 +289,7 @@ func indexedLoop(fn *ssa.Function, receiver *ssa.Parameter) *IndexedLoop {
 		return nil
 	}
 	sequence := fieldLoad(length.Call.Args[0], receiver)
-	if sequence == nil || len(header.Instrs) != 7 ||
+	if sequence == nil ||
 		compare.Block() != header || length.Block() != header ||
 		cursor.Block() != header || sequence.Block() != header {
 		return nil
@@ -279,14 +301,14 @@ func indexedLoop(fn *ssa.Function, receiver *ssa.Parameter) *IndexedLoop {
 		}
 	}
 	loop := &IndexedLoop{Header: header, Sequence: sequence, Cursor: cursor}
-	if !loop.checkPaths(header.Succs[0], receiver, false, 0, map[*ssa.BasicBlock]bool{header: true}) ||
-		!loop.checkPaths(header.Succs[1], receiver, true, 0, map[*ssa.BasicBlock]bool{header: true}) {
+	if !c.checkLoopPaths(loop, header.Succs[0], receiver, false, 0, map[*ssa.BasicBlock]bool{header: true}) ||
+		!c.checkLoopPaths(loop, header.Succs[1], receiver, true, 0, map[*ssa.BasicBlock]bool{header: true}) {
 		return nil
 	}
 	return loop
 }
 
-func (loop *IndexedLoop) checkPaths(block *ssa.BasicBlock, receiver *ssa.Parameter, invalid bool, increments int, active map[*ssa.BasicBlock]bool) bool {
+func (c *checker) checkLoopPaths(loop *IndexedLoop, block *ssa.BasicBlock, receiver *ssa.Parameter, invalid bool, increments int, active map[*ssa.BasicBlock]bool) bool {
 	if block == loop.Header {
 		return !invalid && increments == 1
 	}
@@ -299,7 +321,8 @@ func (loop *IndexedLoop) checkPaths(block *ssa.BasicBlock, receiver *ssa.Paramet
 		switch ins := ins.(type) {
 		case *ssa.Call:
 			if len(ins.Call.Args) > 0 && ins.Call.Args[0] == receiver {
-				invalid = true
+				callee := c.stateful[ins.Call.StaticCallee()]
+				invalid = invalid || callee == nil || callee.writes[loop.Cursor.Field] || callee.writes[loop.Sequence.Field]
 			}
 		case *ssa.Store:
 			if field := sameReceiverField(ins.Addr, receiver); field != nil {
@@ -324,7 +347,7 @@ func (loop *IndexedLoop) checkPaths(block *ssa.BasicBlock, receiver *ssa.Paramet
 		}
 	}
 	for _, successor := range block.Succs {
-		if !loop.checkPaths(successor, receiver, invalid, increments, active) {
+		if !c.checkLoopPaths(loop, successor, receiver, invalid, increments, active) {
 			return false
 		}
 	}

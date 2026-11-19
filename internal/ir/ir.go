@@ -52,6 +52,7 @@ type CountedLoop struct {
 	Symbol Symbol
 	Params []Binder
 	State  Binder
+	Body   *Body
 	Steps  []Binding
 	Next   Expr
 }
@@ -208,11 +209,20 @@ type ListFold struct {
 	Next     Expr
 }
 
+type StructuredFold struct {
+	Sequence, Initial       Expr
+	State, Element, Final   Binder
+	Iteration, Continuation Body
+	Effectful               bool
+}
+
 type ListBuild struct {
-	Sequence Expr
-	Element  Binder
-	Steps    []Binding
-	Next     Expr
+	Effectful bool
+	Body      *Body
+	Sequence  Expr
+	Element   Binder
+	Steps     []Binding
+	Next      Expr
 }
 
 // ListRecursion exposes the tail as the structurally smaller input.
@@ -224,11 +234,12 @@ type ListRecursion struct {
 	Step  Body
 }
 
-func (Return) result()        {}
-func (If) result()            {}
-func (ListFold) result()      {}
-func (ListBuild) result()     {}
-func (ListRecursion) result() {}
+func (Return) result()         {}
+func (If) result()             {}
+func (StructuredFold) result() {}
+func (ListFold) result()       {}
+func (ListBuild) result()      {}
+func (ListRecursion) result()  {}
 
 type Expr interface{ expr() }
 
@@ -245,7 +256,10 @@ type Ref Binder
 type Negate struct{ Value Expr }
 type Not struct{ Value Expr }
 type ByteLen struct{ Value Expr }
-type ToNat struct{ Value Expr }
+type LoopFuel struct {
+	Start, Bound      Expr
+	Signed, ZeroStart bool
+}
 
 type RecordLiteral struct {
 	Type   Type
@@ -311,14 +325,16 @@ type InterfaceCall struct {
 
 type FunctionRef Symbol
 
+type LiftCallback struct{ Function Expr }
+
 type Apply struct {
 	Function Expr
 	Argument Expr
 }
 
 type SelfCall struct {
-	Name     string
-	Argument Expr
+	Name string
+	Args []Expr
 }
 
 type Binary struct {
@@ -336,7 +352,7 @@ func (Ref) expr()                {}
 func (Negate) expr()             {}
 func (Not) expr()                {}
 func (ByteLen) expr()            {}
-func (ToNat) expr()              {}
+func (LoopFuel) expr()           {}
 func (RecordLiteral) expr()      {}
 func (RecordField) expr()        {}
 func (CheckedRecordField) expr() {}
@@ -353,6 +369,7 @@ func (Binary) expr()             {}
 
 func (InterfaceCall) expr() {}
 func (Call) expr()          {}
+func (LiftCallback) expr()  {}
 func (FunctionRef) expr()   {}
 func (Apply) expr()         {}
 func (SelfCall) expr()      {}

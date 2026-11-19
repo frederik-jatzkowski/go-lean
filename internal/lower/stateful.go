@@ -82,20 +82,15 @@ func (l *lowerer) lowerStateful(fn *ssa.Function, method *subset.StatefulMethod)
 	fuel := s.fresh("fuel", ir.Nat)
 	loop.Params = append(loop.Params, fuel)
 	loop.Fuel = &fuel
-	state := s.fresh("receiver", s.record)
-	receiver := ir.Ref(state)
-	sequence := ir.RecordField{Value: receiver, Name: fieldName(method.Loop.Sequence)}
-	cursor := ir.RecordField{Value: receiver, Name: fieldName(method.Loop.Cursor)}
-	loopArgs := append([]ir.Expr{ir.Some{Value: receiver}}, s.loopParams...)
-	loopArgs = append(loopArgs, ir.IndexFuel{Length: s.length(sequence), Cursor: cursor})
+	// Lower setup with the caller's state and trace before the recursive helper
+	// gets its own fuel and trace parameters.
+	result.Body = s.body(fn.Blocks[0], nil)
 	if s.traceType != "" {
 		trace := s.fresh("trace", s.traceType)
 		loop.Params = append(loop.Params, trace)
-		loopArgs = append(loopArgs, s.trace)
 		s.trace = ir.Ref(trace)
 	}
-	result.Body.Result = ir.WithReceiver{Receiver: s.state, State: state,
-		Body: ir.Body{Result: ir.TailCall{Call: ir.Call{Callee: loop.Symbol, Args: loopArgs}}}}
+	s.state = ir.Ref(binder)
 	s.fuel = ir.Ref(fuel)
 	loop.Body = s.body(method.Loop.Header, fn.Blocks[0])
 	return []ir.Function{loop, result}
@@ -140,6 +135,19 @@ func (s *statefulLowerer) length(sequence ir.Expr) ir.Expr {
 
 func (s *statefulLowerer) child(block, predecessor *ssa.BasicBlock) ir.Body {
 	if s.method.Loop != nil && block == s.method.Loop.Header {
+		if s.fuel == nil {
+			state := s.fresh("receiver", s.record)
+			receiver := ir.Ref(state)
+			sequence := ir.RecordField{Value: receiver, Name: fieldName(s.method.Loop.Sequence)}
+			cursor := ir.RecordField{Value: receiver, Name: fieldName(s.method.Loop.Cursor)}
+			args := append([]ir.Expr{ir.Some{Value: receiver}}, s.loopParams...)
+			args = append(args, ir.IndexFuel{Length: s.length(sequence), Cursor: cursor})
+			if s.traceType != "" {
+				args = append(args, s.trace)
+			}
+			return ir.Body{Result: ir.WithReceiver{Receiver: s.state, State: state,
+				Body: ir.Body{Result: ir.TailCall{Call: ir.Call{Callee: s.loop, Args: args}}}}}
+		}
 		args := append([]ir.Expr{s.state}, s.loopParams...)
 		args = append(args, s.fuel)
 		if s.traceType != "" {

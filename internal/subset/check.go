@@ -78,6 +78,12 @@ func Check(program gosource.Program) (Checked, error) {
 			return Checked{}, err
 		}
 	}
+	knownEffects := make(map[*ssa.Function]bool)
+	for _, build := range c.builds {
+		for _, callback := range build.Callbacks {
+			build.Effectful = build.Effectful || callbackMayPanic(callback, knownEffects)
+		}
+	}
 	return Checked{
 		contracts: c.contracts, root: program.Package, functions: c.ordered, records: c.records, arrays: c.arrays, loops: c.loops,
 		ranges: c.ranges, builds: c.builds, chains: c.chains, stateful: c.stateful,
@@ -154,12 +160,13 @@ func (c *checker) function(fn *ssa.Function) error {
 		}
 	}
 	if Type(sig.Results().At(0).Type()).SliceElem() != "" {
-		if blocks, ok := matchLoopBlocks(fn); ok {
+		build = checkSliceCopy(fn)
+		if blocks, ok := matchLoopBlocks(fn); build == nil && ok {
 			build = checkSliceBuild(blocks)
 		}
-	}
-	if instance && (build == nil || build.Callback == nil) {
-		return diagnostic(fn, fn.Pos(), "calls to generic functions are unsupported outside validated callback slice construction")
+		if build == nil {
+			build = matchSliceIteration(fn)
+		}
 	}
 	chain := checkChainRecursion(fn)
 	for _, param := range fn.Params {
@@ -169,8 +176,8 @@ func (c *checker) function(fn *ssa.Function) error {
 			}
 			continue
 		}
-		if Type(param.Type()) == "" && !(instance && param == build.Callback) && !(chain != nil && param == chain.Input) {
-			if _, _, linked := chainFields(param.Type()); linked {
+		if Type(param.Type()) == "" && !(instance && build != nil && param == build.Callback) && !(chain != nil && param == chain.Input) {
+			if _, linked := chainLink(param.Type()); linked {
 				return diagnostic(fn, param.Pos(), "linked-list inputs require nil-guarded read-only recursion on the direct next field")
 			}
 			return diagnostic(fn, param.Pos(), "parameter must have a supported scalar or record type")
@@ -178,6 +185,11 @@ func (c *checker) function(fn *ssa.Function) error {
 	}
 	c.visiting[fn] = true
 	if build != nil {
+		if build.Iteration != nil {
+			if err := c.checkIteration(fn, build.Iteration); err != nil {
+				return err
+			}
+		}
 		c.builds[fn] = build
 	} else if chain != nil {
 		c.chains[fn] = chain
@@ -195,7 +207,7 @@ func (c *checker) checkBody(fn *ssa.Function) error {
 	if key, _ := result.MapShape(); key != "" {
 		fresh := freshMapResult(fn)
 		if fresh == nil {
-			return diagnostic(fn, fn.Pos(), "map results require a fresh local allocation with straight-line uses before return")
+			return diagnostic(fn, fn.Pos(), "map results require a fresh local allocation with local uses before return")
 		}
 		c.freshMaps[fresh] = true
 	}
@@ -214,7 +226,21 @@ func (c *checker) checkBody(fn *ssa.Function) error {
 		c.loops[fn] = loop
 		return nil
 	}
+	if loop := matchStructuredCountedLoop(fn); loop != nil {
+		if err := c.checkLoopState(fn, loop.Structured); err != nil {
+			return err
+		}
+		c.loops[fn] = loop
+		return nil
+	}
 	if fold := checkRangeFold(fn); fold != nil {
+		c.ranges[fn] = fold
+		return nil
+	}
+	if fold := matchStructuredFold(fn); fold != nil {
+		if err := c.checkLoopState(fn, fold.Structured); err != nil {
+			return err
+		}
 		c.ranges[fn] = fold
 		return nil
 	}
@@ -309,10 +335,11 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 			return c.checkInvoke(fn, ins)
 		}
 		if IsLength(ins) {
-			if hasType(ins.Call.Args[0], ir.Bytes) {
+			arg := ins.Call.Args[0]
+			if hasType(arg, ir.Bytes) || Type(arg.Type()).SliceElem() != "" && supportedValue(arg) {
 				return nil
 			}
-			return diagnostic(fn, ins.Pos(), "len requires a supported Go string")
+			return diagnostic(fn, ins.Pos(), "len requires a supported Go string or slice")
 		}
 		callee := ins.Call.StaticCallee()
 		if callee == nil {
@@ -331,7 +358,7 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		build := c.builds[callee]
 		for i, arg := range ins.Call.Args {
 			if build != nil && callee.Params[i] == build.Callback {
-				if err := c.checkCallback(fn, ins, arg); err != nil {
+				if err := c.checkCallback(fn, ins, arg, build); err != nil {
 					return err
 				}
 				continue
@@ -371,10 +398,10 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		}
 		return diagnostic(fn, ins.Pos(), "index requires a supported array value and integer index")
 	case *ssa.Lookup:
-		if ins.CommaOk && supportedMapLookup(ins) {
+		if supportedMapLookup(ins) {
 			return nil
 		}
-		return diagnostic(fn, ins.Pos(), "map lookup requires comma-ok on a supported integer map")
+		return diagnostic(fn, ins.Pos(), "map lookup requires a supported integer map")
 	case *ssa.Extract:
 		if lookup, ok := ins.Tuple.(*ssa.Lookup); ok && lookup.CommaOk {
 			if ins.Index == 0 || ins.Index == 1 {
@@ -465,7 +492,7 @@ func supportedValue(value ssa.Value) bool {
 			typ == ir.Bytes && value.Value.Kind() == constant.String ||
 			(typ == ir.Float32 || typ == ir.Float64) &&
 				(value.Value.Kind() == constant.Float || value.Value.Kind() == constant.Int)
-	case *ssa.Parameter, *ssa.BinOp, *ssa.UnOp, *ssa.Call, *ssa.Phi, *ssa.Convert, *ssa.ChangeType, *ssa.Field, *ssa.Index, *ssa.Extract, *ssa.MakeMap:
+	case *ssa.Parameter, *ssa.BinOp, *ssa.UnOp, *ssa.Call, *ssa.Phi, *ssa.Convert, *ssa.ChangeType, *ssa.Field, *ssa.Index, *ssa.Extract, *ssa.Lookup, *ssa.MakeMap:
 		return true
 	default:
 		return false

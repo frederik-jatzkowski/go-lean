@@ -11,21 +11,23 @@ import (
 // ChainRecursion records a nil-guarded traversal of a finite acyclic chain.
 // Only the validated self-call may observe the next node pointer.
 type ChainRecursion struct {
-	Input  *ssa.Parameter
-	Head   *ssa.UnOp
-	Tail   *ssa.UnOp
-	Base   ssa.Value
-	Steps  []ssa.Value
-	Result ssa.Value
+	Input   *ssa.Parameter
+	Element ir.Type
+	Head    *ssa.UnOp
+	Tail    *ssa.UnOp
+	Base    ssa.Value
+	Steps   []ssa.Value
+	Result  ssa.Value
 }
 
 func checkChainRecursion(fn *ssa.Function) *ChainRecursion {
-	if fn.Parent() != nil || fn.Signature.TypeParams().Len() != 0 || len(fn.Params) != 1 ||
-		Type(fn.Signature.Results().At(0).Type()) != ir.Int64 || len(fn.Blocks) != 3 {
+	if fn.Parent() != nil || fn.Signature.TypeParams().Len() != 0 || len(fn.Params) == 0 ||
+		!Type(fn.Signature.Results().At(0).Type()).IsInteger() || len(fn.Blocks) != 3 {
 		return nil
 	}
 	input := fn.Params[0]
-	link, payload, ok := chainFields(input.Type())
+	link, ok := chainLink(input.Type())
+	resultType := Type(fn.Signature.Results().At(0).Type())
 	if !ok {
 		return nil
 	}
@@ -59,11 +61,11 @@ func checkChainRecursion(fn *ssa.Function) *ChainRecursion {
 	nilReturn, nilOK := base.Instrs[0].(*ssa.Return)
 	end := len(step.Instrs) - 1
 	stepReturn, stepOK := step.Instrs[end].(*ssa.Return)
-	if !nilOK || !stepOK || !invariant(nilReturn.Results[0], ir.Int64) {
+	if !nilOK || !stepOK || !invariant(nilReturn.Results[0], resultType) {
 		return nil
 	}
 
-	chain := &ChainRecursion{Input: input, Base: nilReturn.Results[0], Result: stepReturn.Results[0]}
+	chain := &ChainRecursion{Input: input, Element: ir.Int64, Base: nilReturn.Results[0], Result: stepReturn.Results[0]}
 	available := make(map[ssa.Value]bool)
 	called := false
 	for i := 0; i < end; i++ {
@@ -79,26 +81,31 @@ func checkChainRecursion(fn *ssa.Function) *ChainRecursion {
 					return nil
 				}
 				chain.Tail = load
-			case payload:
-				if chain.Head != nil {
+			default:
+				element := Type(load.Type())
+				if chain.Head != nil || !element.IsInteger() {
 					return nil
 				}
 				chain.Head = load
+				chain.Element = element
 				available[load] = true
-			default:
-				return nil
 			}
 			i++ // The following dereference was checked with its field address.
 		case *ssa.Call:
-			if called || chain.Tail == nil || ins.Call.Value != fn || len(ins.Call.Args) != 1 ||
+			if called || chain.Tail == nil || ins.Call.Value != fn || len(ins.Call.Args) != len(fn.Params) ||
 				ins.Call.Args[0] != chain.Tail {
 				return nil
+			}
+			for i, arg := range ins.Call.Args[1:] {
+				if arg != fn.Params[i+1] {
+					return nil
+				}
 			}
 			called = true
 			available[ins] = true
 			chain.Steps = append(chain.Steps, ins)
 		default:
-			arithmetic := pureInt64Step(ins, available)
+			arithmetic := integerStep(ins, available, resultType)
 			if arithmetic == nil {
 				return nil
 			}
@@ -106,31 +113,34 @@ func checkChainRecursion(fn *ssa.Function) *ChainRecursion {
 			chain.Steps = append(chain.Steps, arithmetic)
 		}
 	}
-	if !called || !loopValue(chain.Result, available) {
+	if !called || !(available[chain.Result] || invariant(chain.Result, resultType)) {
 		return nil
 	}
 	return chain
 }
 
-func chainFields(t types.Type) (link, payload int, ok bool) {
+func chainLink(t types.Type) (link int, ok bool) {
 	pointer, ok := types.Unalias(t).(*types.Pointer)
 	if !ok {
-		return 0, 0, false
+		return 0, false
 	}
 	named, ok := types.Unalias(pointer.Elem()).(*types.Named)
 	if !ok {
-		return 0, 0, false
+		return 0, false
 	}
 	record, ok := named.Underlying().(*types.Struct)
-	if !ok || record.NumFields() != 2 {
-		return 0, 0, false
+	if !ok {
+		return 0, false
 	}
+	link = -1
 	for i := range record.NumFields() {
-		next, value := record.Field(i), record.Field(1-i)
-		if !next.Embedded() && !value.Embedded() && next.Name() != "_" && value.Name() != "_" &&
-			types.Identical(next.Type(), t) && Type(value.Type()) == ir.Int64 {
-			return i, 1 - i, true
+		field := record.Field(i)
+		if !field.Embedded() && field.Name() != "_" && types.Identical(field.Type(), t) {
+			if link >= 0 {
+				return 0, false
+			}
+			link = i
 		}
 	}
-	return 0, 0, false
+	return link, link >= 0
 }

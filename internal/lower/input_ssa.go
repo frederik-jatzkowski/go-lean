@@ -346,8 +346,12 @@ func (b *ssaInputBuilder) instruction(ins ssa.Instruction) *sourceValue {
 		v.RecordType, v.ReadOnly = b.typ(t), subset.IsReadOnlyRecordField(i)
 	case *ssa.IndexAddr:
 		v.Kind, v.X, v.IndexValue = indexAddress, b.value(i.X), b.value(i.Index)
+		v.IndexInBounds = subset.ArrayIndexInBounds(i.X, i.Index, i)
 	case *ssa.Index:
 		v.Kind, v.X, v.IndexValue = indexValue, b.value(i.X), b.value(i.Index)
+		v.IndexInBounds = subset.ArrayIndexInBounds(i.X, i.Index, i)
+	case *ssa.Slice:
+		v.Kind = emptySliceValue
 	case *ssa.MakeMap:
 		v.Kind = makeMap
 	case *ssa.MapUpdate:

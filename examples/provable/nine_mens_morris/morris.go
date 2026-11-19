@@ -1,4 +1,10 @@
 // Package morris implements the rules of a two-player Nine Men's Morris game.
+//
+//golean:verify:import nine_mens_morris.morris_rules
+//golean:verify fromStartMatchesRules : ∀ (actions : List Rules.Action),
+//golean:verify+   (Start, «Game$Outcome» Start, Rules.history act «Game$Outcome» Start actions) =
+//golean:verify+     (Rules.initial, Rules.outcome Rules.initial,
+//golean:verify+       Rules.history Rules.step Rules.outcome Rules.initial actions)
 package morris
 
 type Result uint8
@@ -26,8 +32,17 @@ type Game struct {
 //golean:verify startRules : Start.«field:turn» = 1 ∧ Start.«field:whiteReserve» = 9 ∧ Start.«field:blackReserve» = 9 ∧
 //golean:verify+   Start.«field:pending» = false ∧ Start.«field:quiet» = 0 ∧
 //golean:verify+   ∀ p, «Board$At» Start.«field:board» p = 0
+//golean:verify startIsValid : «Game$IsValid» Start = true
 func Start() Game {
 	return Game{whiteReserve: 9, blackReserve: 9, turn: White}
+}
+
+// IsValid reports whether the game has an initialized active player.
+// Start creates a game that passes this check.
+//
+//golean:verify validTurn : ∀ s, «Game$IsValid» s = true ↔ s.«field:turn» = 1 ∨ s.«field:turn» = 2
+func (state Game) IsValid() bool {
+	return state.turn == White || state.turn == Black
 }
 
 //golean:verify boardSnapshot : ∀ s, «Game$Board» s = s.«field:board»
@@ -100,31 +115,31 @@ func (state Game) Outcome() Result {
 }
 
 //golean:verify placementLegality : ∀ s p, «Game$CanPlace» s p = true ↔
-//golean:verify+   s.«field:pending» = false ∧ (if s.«field:turn» = 1 then s.«field:whiteReserve» else s.«field:blackReserve») ≠ 0 ∧
+//golean:verify+   «Game$IsValid» s = true ∧ s.«field:pending» = false ∧ (if s.«field:turn» = 1 then s.«field:whiteReserve» else s.«field:blackReserve») ≠ 0 ∧
 //golean:verify+   p < 24 ∧ «Board$At» s.«field:board» p = 0
 func (state Game) CanPlace(to Point) bool {
-	return !state.pending && state.reserve() != 0 &&
+	return state.IsValid() && !state.pending && state.reserve() != 0 &&
 		to < Points && state.board.At(to) == Empty
 }
 
 //golean:verify movementLegality : ∀ s f t, «Game$CanMove» s f t = true ↔
-//golean:verify+   s.«field:pending» = false ∧ s.«field:whiteReserve» = 0 ∧ s.«field:blackReserve» = 0 ∧  s.«field:quiet» < 50 ∧
+//golean:verify+   «Game$IsValid» s = true ∧ s.«field:pending» = false ∧ s.«field:whiteReserve» = 0 ∧ s.«field:blackReserve» = 0 ∧ s.«field:quiet» < 50 ∧
 //golean:verify+   hasMove s.«field:board» s.«field:turn» = true ∧ f < 24 ∧ t < 24 ∧
 //golean:verify+   «Board$At» s.«field:board» f = s.«field:turn» ∧ «Board$At» s.«field:board» t = 0 ∧
 //golean:verify+   (count s.«field:board» s.«field:turn» = 3 ∨ adjacent f t = true)
 func (state Game) CanMove(from, to Point) bool {
-	return !state.pending && !state.Placing() && state.Outcome() == Ongoing &&
+	return state.IsValid() && !state.pending && !state.Placing() && state.Outcome() == Ongoing &&
 		from < Points && to < Points &&
 		state.board.At(from) == state.turn && state.board.At(to) == Empty &&
 		(count(state.board, state.turn) == 3 || adjacent(from, to))
 }
 
 //golean:verify captureLegality : ∀ s p, let other : UInt8 := if s.«field:turn» = 1 then 2 else 1
-//golean:verify+   «Game$CanCapture» s p = true ↔ s.«field:pending» = true ∧ p < 24 ∧ «Board$At» s.«field:board» p = other ∧
+//golean:verify+   «Game$CanCapture» s p = true ↔ «Game$IsValid» s = true ∧ s.«field:pending» = true ∧ p < 24 ∧ «Board$At» s.«field:board» p = other ∧
 //golean:verify+   (inMill s.«field:board» p other = false ∨ hasUnprotected s.«field:board» other = false)
 func (state Game) CanCapture(at Point) bool {
 	other := opponent(state.turn)
-	return state.pending && at < Points && state.board.At(at) == other &&
+	return state.IsValid() && state.pending && at < Points && state.board.At(at) == other &&
 		(!inMill(state.board, at, other) || !hasUnprotected(state.board, other))
 }
 
@@ -149,6 +164,7 @@ func (state Game) finishAction(to Point) Game {
 //golean:verify+   («Game$finishAction» (if s.«field:turn» = 1 then {placed with «field:whiteReserve» := s.«field:whiteReserve» - 1}
 //golean:verify+   else {placed with «field:blackReserve» := s.«field:blackReserve» - 1}) p, true)
 //golean:verify+   else (s, false)
+//golean:verify placePreservesValidity : ∀ s p, «Game$IsValid» s = true → «Game$IsValid» («Game$Place» s p).1 = true
 func (state Game) Place(to Point) (Game, bool) {
 	if !state.CanPlace(to) {
 		return state, false
@@ -177,6 +193,7 @@ func (state Game) Place(to Point) (Game, bool) {
 //golean:verify+   «Game$Pending» next = true ↔
 //golean:verify+   inMill («Game$Board» next) t s.«field:turn» = true ∧
 //golean:verify+   count («Game$Board» next) (opponent s.«field:turn») ≠ 0
+//golean:verify movePreservesValidity : ∀ s f t, «Game$IsValid» s = true → «Game$IsValid» («Game$Move» s f t).1 = true
 func (state Game) Move(from, to Point) (Game, bool) {
 	if !state.CanMove(from, to) {
 		return state, false
@@ -192,6 +209,7 @@ func (state Game) Move(from, to Point) (Game, bool) {
 //golean:verify+   let turn := if s.«field:turn» = 1 then 2 else 1
 //golean:verify+   ({s with «field:board» := setPoint s.«field:board» p 0, «field:pending» := false, «field:quiet» := 0, «field:turn» := turn}, true)
 //golean:verify+   else (s, false)
+//golean:verify capturePreservesValidity : ∀ s p, «Game$IsValid» s = true → «Game$IsValid» («Game$Capture» s p).1 = true
 func (state Game) Capture(at Point) (Game, bool) {
 	if !state.CanCapture(at) {
 		return state, false
@@ -214,124 +232,26 @@ const (
 
 const Points = 24
 
-// Board stores three rings outermost first, clockwise from each top-left
-// corner. Scalar fields allow checked value updates through setPoint.
+// Board stores three rings outermost first, clockwise from each top-left corner.
 type Board struct {
-	p00, p01, p02, p03, p04, p05, p06, p07 Player
-	p08, p09, p10, p11, p12, p13, p14, p15 Player
-	p16, p17, p18, p19, p20, p21, p22, p23 Player
+	points [Points]Player
 }
 
 // At returns the stone at point, or Empty for a vacant or out-of-range point.
 //
 //golean:verify outsideBoardIsEmpty : ∀ b p, 24 ≤ p → «Board$At» b p = 0
 func (board Board) At(point Point) Player {
-	switch point {
-	case 0:
-		return board.p00
-	case 1:
-		return board.p01
-	case 2:
-		return board.p02
-	case 3:
-		return board.p03
-	case 4:
-		return board.p04
-	case 5:
-		return board.p05
-	case 6:
-		return board.p06
-	case 7:
-		return board.p07
-	case 8:
-		return board.p08
-	case 9:
-		return board.p09
-	case 10:
-		return board.p10
-	case 11:
-		return board.p11
-	case 12:
-		return board.p12
-	case 13:
-		return board.p13
-	case 14:
-		return board.p14
-	case 15:
-		return board.p15
-	case 16:
-		return board.p16
-	case 17:
-		return board.p17
-	case 18:
-		return board.p18
-	case 19:
-		return board.p19
-	case 20:
-		return board.p20
-	case 21:
-		return board.p21
-	case 22:
-		return board.p22
-	case 23:
-		return board.p23
-	default:
+	if point >= Points {
 		return Empty
 	}
+	return board.points[point]
 }
 
 //golean:verify boardUpdate : ∀ b p q player, p < 24 → q < 24 →
 //golean:verify+   «Board$At» (setPoint b p player) q = if q = p then player else «Board$At» b q
 func setPoint(board Board, point Point, player Player) Board {
-	switch point {
-	case 0:
-		board.p00 = player
-	case 1:
-		board.p01 = player
-	case 2:
-		board.p02 = player
-	case 3:
-		board.p03 = player
-	case 4:
-		board.p04 = player
-	case 5:
-		board.p05 = player
-	case 6:
-		board.p06 = player
-	case 7:
-		board.p07 = player
-	case 8:
-		board.p08 = player
-	case 9:
-		board.p09 = player
-	case 10:
-		board.p10 = player
-	case 11:
-		board.p11 = player
-	case 12:
-		board.p12 = player
-	case 13:
-		board.p13 = player
-	case 14:
-		board.p14 = player
-	case 15:
-		board.p15 = player
-	case 16:
-		board.p16 = player
-	case 17:
-		board.p17 = player
-	case 18:
-		board.p18 = player
-	case 19:
-		board.p19 = player
-	case 20:
-		board.p20 = player
-	case 21:
-		board.p21 = player
-	case 22:
-		board.p22 = player
-	case 23:
-		board.p23 = player
+	if point < Points {
+		board.points[point] = player
 	}
 	return board
 }
@@ -410,77 +330,77 @@ func inMill(board Board, point Point, player Player) bool {
 	}
 	switch point {
 	case 0:
-		return board.p01 == player && board.p02 == player ||
-			board.p06 == player && board.p07 == player
+		return board.points[1] == player && board.points[2] == player ||
+			board.points[6] == player && board.points[7] == player
 	case 1:
-		return board.p00 == player && board.p02 == player ||
-			board.p09 == player && board.p17 == player
+		return board.points[0] == player && board.points[2] == player ||
+			board.points[9] == player && board.points[17] == player
 	case 2:
-		return board.p00 == player && board.p01 == player ||
-			board.p03 == player && board.p04 == player
+		return board.points[0] == player && board.points[1] == player ||
+			board.points[3] == player && board.points[4] == player
 	case 3:
-		return board.p02 == player && board.p04 == player ||
-			board.p11 == player && board.p19 == player
+		return board.points[2] == player && board.points[4] == player ||
+			board.points[11] == player && board.points[19] == player
 	case 4:
-		return board.p02 == player && board.p03 == player ||
-			board.p05 == player && board.p06 == player
+		return board.points[2] == player && board.points[3] == player ||
+			board.points[5] == player && board.points[6] == player
 	case 5:
-		return board.p04 == player && board.p06 == player ||
-			board.p13 == player && board.p21 == player
+		return board.points[4] == player && board.points[6] == player ||
+			board.points[13] == player && board.points[21] == player
 	case 6:
-		return board.p04 == player && board.p05 == player ||
-			board.p07 == player && board.p00 == player
+		return board.points[4] == player && board.points[5] == player ||
+			board.points[7] == player && board.points[0] == player
 	case 7:
-		return board.p06 == player && board.p00 == player ||
-			board.p15 == player && board.p23 == player
+		return board.points[6] == player && board.points[0] == player ||
+			board.points[15] == player && board.points[23] == player
 	case 8:
-		return board.p09 == player && board.p10 == player ||
-			board.p14 == player && board.p15 == player
+		return board.points[9] == player && board.points[10] == player ||
+			board.points[14] == player && board.points[15] == player
 	case 9:
-		return board.p08 == player && board.p10 == player ||
-			board.p01 == player && board.p17 == player
+		return board.points[8] == player && board.points[10] == player ||
+			board.points[1] == player && board.points[17] == player
 	case 10:
-		return board.p08 == player && board.p09 == player ||
-			board.p11 == player && board.p12 == player
+		return board.points[8] == player && board.points[9] == player ||
+			board.points[11] == player && board.points[12] == player
 	case 11:
-		return board.p10 == player && board.p12 == player ||
-			board.p03 == player && board.p19 == player
+		return board.points[10] == player && board.points[12] == player ||
+			board.points[3] == player && board.points[19] == player
 	case 12:
-		return board.p10 == player && board.p11 == player ||
-			board.p13 == player && board.p14 == player
+		return board.points[10] == player && board.points[11] == player ||
+			board.points[13] == player && board.points[14] == player
 	case 13:
-		return board.p12 == player && board.p14 == player ||
-			board.p05 == player && board.p21 == player
+		return board.points[12] == player && board.points[14] == player ||
+			board.points[5] == player && board.points[21] == player
 	case 14:
-		return board.p12 == player && board.p13 == player ||
-			board.p15 == player && board.p08 == player
+		return board.points[12] == player && board.points[13] == player ||
+			board.points[15] == player && board.points[8] == player
 	case 15:
-		return board.p14 == player && board.p08 == player ||
-			board.p07 == player && board.p23 == player
+		return board.points[14] == player && board.points[8] == player ||
+			board.points[7] == player && board.points[23] == player
 	case 16:
-		return board.p17 == player && board.p18 == player ||
-			board.p22 == player && board.p23 == player
+		return board.points[17] == player && board.points[18] == player ||
+			board.points[22] == player && board.points[23] == player
 	case 17:
-		return board.p16 == player && board.p18 == player ||
-			board.p01 == player && board.p09 == player
+		return board.points[16] == player && board.points[18] == player ||
+			board.points[1] == player && board.points[9] == player
 	case 18:
-		return board.p16 == player && board.p17 == player ||
-			board.p19 == player && board.p20 == player
+		return board.points[16] == player && board.points[17] == player ||
+			board.points[19] == player && board.points[20] == player
 	case 19:
-		return board.p18 == player && board.p20 == player ||
-			board.p03 == player && board.p11 == player
+		return board.points[18] == player && board.points[20] == player ||
+			board.points[3] == player && board.points[11] == player
 	case 20:
-		return board.p18 == player && board.p19 == player ||
-			board.p21 == player && board.p22 == player
+		return board.points[18] == player && board.points[19] == player ||
+			board.points[21] == player && board.points[22] == player
 	case 21:
-		return board.p20 == player && board.p22 == player ||
-			board.p05 == player && board.p13 == player
+		return board.points[20] == player && board.points[22] == player ||
+			board.points[5] == player && board.points[13] == player
 	case 22:
-		return board.p20 == player && board.p21 == player ||
-			board.p23 == player && board.p16 == player
+		return board.points[20] == player && board.points[21] == player ||
+			board.points[23] == player && board.points[16] == player
 	case 23:
-		return board.p22 == player && board.p16 == player ||
-			board.p07 == player && board.p15 == player
+		return board.points[22] == player && board.points[16] == player ||
+			board.points[7] == player && board.points[15] == player
 	default:
 		return false
 	}
@@ -493,30 +413,30 @@ func inMill(board Board, point Point, player Player) bool {
 //golean:verify+   let points := (List.range 24).map UInt8.ofNat
 //golean:verify+   count b player = (points.map (fun p => if «Board$At» b p = player then 1 else 0)).foldl (· + ·) 0
 func count(board Board, player Player) uint8 {
-	return matches(board.p00, player) +
-		matches(board.p01, player) +
-		matches(board.p02, player) +
-		matches(board.p03, player) +
-		matches(board.p04, player) +
-		matches(board.p05, player) +
-		matches(board.p06, player) +
-		matches(board.p07, player) +
-		matches(board.p08, player) +
-		matches(board.p09, player) +
-		matches(board.p10, player) +
-		matches(board.p11, player) +
-		matches(board.p12, player) +
-		matches(board.p13, player) +
-		matches(board.p14, player) +
-		matches(board.p15, player) +
-		matches(board.p16, player) +
-		matches(board.p17, player) +
-		matches(board.p18, player) +
-		matches(board.p19, player) +
-		matches(board.p20, player) +
-		matches(board.p21, player) +
-		matches(board.p22, player) +
-		matches(board.p23, player)
+	return matches(board.points[0], player) +
+		matches(board.points[1], player) +
+		matches(board.points[2], player) +
+		matches(board.points[3], player) +
+		matches(board.points[4], player) +
+		matches(board.points[5], player) +
+		matches(board.points[6], player) +
+		matches(board.points[7], player) +
+		matches(board.points[8], player) +
+		matches(board.points[9], player) +
+		matches(board.points[10], player) +
+		matches(board.points[11], player) +
+		matches(board.points[12], player) +
+		matches(board.points[13], player) +
+		matches(board.points[14], player) +
+		matches(board.points[15], player) +
+		matches(board.points[16], player) +
+		matches(board.points[17], player) +
+		matches(board.points[18], player) +
+		matches(board.points[19], player) +
+		matches(board.points[20], player) +
+		matches(board.points[21], player) +
+		matches(board.points[22], player) +
+		matches(board.points[23], player)
 }
 
 func matches(cell, player Player) uint8 {
@@ -598,53 +518,53 @@ func hasSlideFrom(board Board, point Point, player Player) bool {
 func hasExit(board Board, point Point) bool {
 	switch point {
 	case 0:
-		return board.p07 == Empty || board.p01 == Empty
+		return board.points[7] == Empty || board.points[1] == Empty
 	case 1:
-		return board.p00 == Empty || board.p02 == Empty || board.p09 == Empty
+		return board.points[0] == Empty || board.points[2] == Empty || board.points[9] == Empty
 	case 2:
-		return board.p01 == Empty || board.p03 == Empty
+		return board.points[1] == Empty || board.points[3] == Empty
 	case 3:
-		return board.p02 == Empty || board.p04 == Empty || board.p11 == Empty
+		return board.points[2] == Empty || board.points[4] == Empty || board.points[11] == Empty
 	case 4:
-		return board.p03 == Empty || board.p05 == Empty
+		return board.points[3] == Empty || board.points[5] == Empty
 	case 5:
-		return board.p04 == Empty || board.p06 == Empty || board.p13 == Empty
+		return board.points[4] == Empty || board.points[6] == Empty || board.points[13] == Empty
 	case 6:
-		return board.p05 == Empty || board.p07 == Empty
+		return board.points[5] == Empty || board.points[7] == Empty
 	case 7:
-		return board.p06 == Empty || board.p00 == Empty || board.p15 == Empty
+		return board.points[6] == Empty || board.points[0] == Empty || board.points[15] == Empty
 	case 8:
-		return board.p15 == Empty || board.p09 == Empty
+		return board.points[15] == Empty || board.points[9] == Empty
 	case 9:
-		return board.p08 == Empty || board.p10 == Empty || board.p01 == Empty || board.p17 == Empty
+		return board.points[8] == Empty || board.points[10] == Empty || board.points[1] == Empty || board.points[17] == Empty
 	case 10:
-		return board.p09 == Empty || board.p11 == Empty
+		return board.points[9] == Empty || board.points[11] == Empty
 	case 11:
-		return board.p10 == Empty || board.p12 == Empty || board.p03 == Empty || board.p19 == Empty
+		return board.points[10] == Empty || board.points[12] == Empty || board.points[3] == Empty || board.points[19] == Empty
 	case 12:
-		return board.p11 == Empty || board.p13 == Empty
+		return board.points[11] == Empty || board.points[13] == Empty
 	case 13:
-		return board.p12 == Empty || board.p14 == Empty || board.p05 == Empty || board.p21 == Empty
+		return board.points[12] == Empty || board.points[14] == Empty || board.points[5] == Empty || board.points[21] == Empty
 	case 14:
-		return board.p13 == Empty || board.p15 == Empty
+		return board.points[13] == Empty || board.points[15] == Empty
 	case 15:
-		return board.p14 == Empty || board.p08 == Empty || board.p07 == Empty || board.p23 == Empty
+		return board.points[14] == Empty || board.points[8] == Empty || board.points[7] == Empty || board.points[23] == Empty
 	case 16:
-		return board.p23 == Empty || board.p17 == Empty
+		return board.points[23] == Empty || board.points[17] == Empty
 	case 17:
-		return board.p16 == Empty || board.p18 == Empty || board.p09 == Empty
+		return board.points[16] == Empty || board.points[18] == Empty || board.points[9] == Empty
 	case 18:
-		return board.p17 == Empty || board.p19 == Empty
+		return board.points[17] == Empty || board.points[19] == Empty
 	case 19:
-		return board.p18 == Empty || board.p20 == Empty || board.p11 == Empty
+		return board.points[18] == Empty || board.points[20] == Empty || board.points[11] == Empty
 	case 20:
-		return board.p19 == Empty || board.p21 == Empty
+		return board.points[19] == Empty || board.points[21] == Empty
 	case 21:
-		return board.p20 == Empty || board.p22 == Empty || board.p13 == Empty
+		return board.points[20] == Empty || board.points[22] == Empty || board.points[13] == Empty
 	case 22:
-		return board.p21 == Empty || board.p23 == Empty
+		return board.points[21] == Empty || board.points[23] == Empty
 	case 23:
-		return board.p22 == Empty || board.p16 == Empty || board.p15 == Empty
+		return board.points[22] == Empty || board.points[16] == Empty || board.points[15] == Empty
 	default:
 		return false
 	}

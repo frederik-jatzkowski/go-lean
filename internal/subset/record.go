@@ -4,6 +4,7 @@ import (
 	"go/token"
 	"go/types"
 
+	"github.com/frederik-jatzkowski/go-lean/internal/ir"
 	"golang.org/x/tools/go/ssa"
 )
 
@@ -16,11 +17,11 @@ type RecordCell struct {
 	Fields  []*ssa.Store
 }
 
-func supportedFields(record *types.Struct) bool {
+func supportedFields(record *types.Struct, classify func(types.Type) ir.Type) bool {
 	for field := range record.Fields() {
 		// Pointer-containing records would need a separate recursive model.
 		switch field.Type().Underlying().(type) {
-		case *types.Pointer, *types.Slice, *types.Array, *types.Map:
+		case *types.Pointer, *types.Map:
 			return false
 		case *types.Interface:
 			if field.Name() == "_" || InterfaceHandle(field.Type()) == "" {
@@ -28,7 +29,7 @@ func supportedFields(record *types.Struct) bool {
 			}
 			continue
 		}
-		if field.Name() == "_" || Type(field.Type()) == "" {
+		if field.Name() == "_" || classify(field.Type()) == "" {
 			return false
 		}
 	}
@@ -178,6 +179,14 @@ func projectionReads(addr *ssa.FieldAddr) ([]ssa.Instruction, bool) {
 			reads = append(reads, use)
 			continue
 		}
+		if index, ok := use.(*ssa.IndexAddr); ok && index.X == addr && arrayType(addr.Type()) != nil {
+			for _, access := range *index.Referrers() {
+				if !readsCell(access, index) {
+					return nil, false
+				}
+			}
+			continue
+		}
 		nested, ok := use.(*ssa.FieldAddr)
 		if !ok || nested.X != addr {
 			return nil, false
@@ -203,6 +212,14 @@ func localRecordUses(addr ssa.Value) bool {
 			}
 		case *ssa.FieldAddr:
 			if use.X != addr || !localRecordUses(use) {
+				return false
+			}
+		case *ssa.IndexAddr:
+			if elem, _ := typ.ArrayShape(); elem == "" || use.X != addr {
+				return false
+			}
+		case *ssa.Slice:
+			if !IsEmptySliceLiteral(use) {
 				return false
 			}
 		default:

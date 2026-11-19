@@ -389,6 +389,10 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 	case *ssa.BinOp:
 		op, supported := Binary(ins.Op)
 		typ := Type(ins.X.Type())
+		if typ.SliceElem() != "" && (ins.Op == token.EQL || ins.Op == token.NEQ) &&
+			(isNilSlice(ins.X) && supportedValue(ins.Y) || isNilSlice(ins.Y) && supportedValue(ins.X)) {
+			return nil
+		}
 		if supported && supportedValue(ins.X) && hasType(ins.Y, typ) &&
 			(typ.IsInteger() ||
 				typ == ir.Bool && (ins.Op == token.EQL || ins.Op == token.NEQ) ||
@@ -406,7 +410,7 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 			if addr, ok := ins.X.(*ssa.FieldAddr); ok && IsReadOnlyRecordField(addr) {
 				return nil
 			}
-			if addr, ok := ins.X.(*ssa.IndexAddr); ok && c.isReadOnlyIndexAddr(addr) {
+			if addr, ok := ins.X.(*ssa.IndexAddr); ok && c.isSupportedIndexAddress(addr) {
 				return nil
 			}
 		}
@@ -495,13 +499,8 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		}
 		return diagnostic(fn, ins.Pos(), "field address requires a supported record")
 	case *ssa.IndexAddr:
-		if !c.isReadOnlyIndexAddr(ins) {
+		if !c.isSupportedIndexAddress(ins) {
 			return diagnostic(fn, ins.Pos(), "index address requires a supported sequence and integer index")
-		}
-		for _, use := range *ins.Referrers() {
-			if !readsCell(use, ins) {
-				return diagnostic(fn, use.Pos(), "element addresses may only be read")
-			}
 		}
 		return nil
 	case *ssa.Index:
@@ -509,6 +508,11 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 			return nil
 		}
 		return diagnostic(fn, ins.Pos(), "index requires a supported array value and integer index")
+	case *ssa.Slice:
+		if IsEmptySliceLiteral(ins) {
+			return nil
+		}
+		return diagnostic(fn, ins.Pos(), "reslicing is unsupported")
 	case *ssa.Lookup:
 		if supportedMapLookup(ins) {
 			return nil
@@ -604,10 +608,15 @@ func supportedValue(value ssa.Value) bool {
 		return false
 	}
 	switch value := value.(type) {
+	case *ssa.Slice:
+		return IsEmptySliceLiteral(value)
 	case *ssa.Const:
 		if value.Value == nil {
 			key, _ := typ.MapShape()
-			return typ.Pointee() != "" || typ.SliceElem() != "" || key != ""
+			array, _ := typ.ArrayShape()
+			return typ.Pointee() != "" || typ.SliceElem() != "" || key != "" ||
+				array != "" && concreteArrayElement(arrayType(value.Type())) ||
+				typ.IsRecord() && !interfaceRecord(value.Type())
 		}
 		return typ.IsInteger() && value.Value.Kind() == constant.Int ||
 			typ == ir.Bool && value.Value.Kind() == constant.Bool ||
@@ -622,18 +631,22 @@ func supportedValue(value ssa.Value) bool {
 }
 
 func Type(t types.Type) ir.Type {
+	return typeWithRecords(t, nil)
+}
+
+func typeWithRecords(t types.Type, active map[*types.Named]bool) ir.Type {
 	t = types.Unalias(t)
 	if m, ok := t.(*types.Map); ok {
 		return mapType(m)
 	}
 	if slice, ok := t.(*types.Slice); ok {
-		if elem := sequenceElement(slice.Elem()); elem != "" {
+		if elem := sequenceElement(slice.Elem(), active); elem != "" {
 			return ir.SliceType(elem)
 		}
 		return ""
 	}
 	if array, ok := t.(*types.Array); ok {
-		if elem := sequenceElement(array.Elem()); elem != "" {
+		if elem := sequenceElement(array.Elem(), active); elem != "" {
 			return ir.ArrayType(elem, array.Len())
 		}
 		return ""
@@ -642,7 +655,7 @@ func Type(t types.Type) ir.Type {
 		if interfaceRecord(pointer.Elem()) {
 			return ""
 		}
-		if pointee := Type(pointer.Elem()); pointee.IsRecord() {
+		if pointee := typeWithRecords(pointer.Elem(), active); pointee.IsRecord() {
 			return ir.RecordPointer(pointee)
 		}
 		return ""
@@ -651,8 +664,18 @@ func Type(t types.Type) ir.Type {
 		return ir.TypeParameter(param.Index())
 	}
 	if named, ok := t.(*types.Named); ok {
-		if fields, ok := named.Underlying().(*types.Struct); ok && supportedFields(fields) {
-			if obj := named.Obj(); obj.Pkg() != nil && obj.Parent() == obj.Pkg().Scope() && named.TypeParams().Len() == 0 {
+		if fields, ok := named.Underlying().(*types.Struct); ok {
+			obj := named.Obj()
+			if active[named] || obj.Pkg() == nil || obj.Parent() != obj.Pkg().Scope() || named.TypeParams().Len() != 0 {
+				return ""
+			}
+			if active == nil {
+				active = make(map[*types.Named]bool)
+			}
+			active[named] = true
+			valid := supportedFields(fields, func(field types.Type) ir.Type { return typeWithRecords(field, active) })
+			delete(active, named)
+			if valid {
 				return ir.RecordType(obj.Pkg().Path(), obj.Name())
 			}
 		}
@@ -698,11 +721,11 @@ func Type(t types.Type) ir.Type {
 	return ""
 }
 
-func sequenceElement(t types.Type) ir.Type {
+func sequenceElement(t types.Type, active map[*types.Named]bool) ir.Type {
 	if interfaceRecord(t) {
 		return ""
 	}
-	elem := Type(t)
+	elem := typeWithRecords(t, active)
 	key, _ := elem.MapShape()
 	if nested, _ := elem.ArrayShape(); nested != "" || elem.SliceElem() != "" || elem.Pointee() != "" || key != "" {
 		return ""
@@ -710,10 +733,18 @@ func sequenceElement(t types.Type) ir.Type {
 	return elem
 }
 
-func (c *checker) isReadOnlyIndexAddr(addr *ssa.IndexAddr) bool {
+func (c *checker) isSupportedIndexAddress(addr *ssa.IndexAddr) bool {
 	cell, _ := addr.X.(*ssa.Alloc)
+	field, isField := addr.X.(*ssa.FieldAddr)
 	return supportedIndex(addr.Index) &&
-		(c.arrays[cell] != nil || Type(addr.X.Type()).SliceElem() != "" && supportedValue(addr.X))
+		(c.arrays[cell] != nil || c.isLocalArrayIndex(addr) ||
+			isField && arrayType(addr.X.Type()) != nil && IsReadOnlyRecordField(field) ||
+			Type(addr.X.Type()).SliceElem() != "" && supportedValue(addr.X))
+}
+
+func isNilSlice(value ssa.Value) bool {
+	c, ok := value.(*ssa.Const)
+	return ok && c.IsNil() && Type(value.Type()).SliceElem() != ""
 }
 
 func supportedIndex(index ssa.Value) bool {

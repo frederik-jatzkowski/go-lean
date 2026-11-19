@@ -27,10 +27,15 @@ history. See Ralph Gasser's [rules and variant discussion](https://library.slmat
 
 ## Checked behavior
 
-`Game` owns the board and the rules. Its public `Place`, `Move`, and `Capture`
+`Game` owns the rules and a board backed by a 24-element array. Its public `Place`, `Move`, and `Capture`
 methods return a complete next game value on acceptance and the original value
 on rejection. The CLI keeps the returned game. Callers can also retain earlier
 values or persist the returned state separately.
+
+`IsValid` checks that the current player is White or Black. Start a new game
+with `Start()`. A zero-value `Game` fails the check and rejects all actions.
+The validity check certifies initialization. Reachability from the opening
+position is a property of the game history.
 
 Regenerate with `go tool task generate`. Run
 `lake build nine_mens_morris.morris_verify` to check the companion proofs.
@@ -47,7 +52,21 @@ The action, legality, and outcome laws are attached to the public game methods.
 The public `Move` laws also prove that an accepted move preserves every opposing
 stone and leaves a capture pending exactly when it closes a mill and the
 opponent has a stone to take.
-The model assumes normal go-lean translation correctness. Go tests exercise the
-public API, including double-mill capture, flying, a blocked loss, and a draw.
-Whole-game reachability, persistence, terminal input, and rendering are outside
-the Lean laws.
+`morris_rules.lean` defines the rules using the game state fields, board
+geometry, and the variant described above. `morrisCorrect` proves that for
+every game that passes `IsValid`, the translated Go methods agree with those
+rules on legality, the entire next state, and the outcome. All three actions
+preserve `IsValid`, including on rejection.
+
+`fromStartMatchesRules` proves by induction that the initial state and outcome
+agree and that every finite sequence of attempted actions produces the same
+acceptance decisions, states, and outcomes. `reachableIsValid` proves that
+every state reached by legal play passes `IsValid`.
+
+The package doc comment declares `fromStartMatchesRules` and imports the
+reference rules with `//golean:verify:import nine_mens_morris.morris_rules`. The
+rules module imports the generated model for its state types. The generated
+`morris_laws.lean` imports both, and the proof companion imports that law module.
+
+Applying these theorems to Go assumes that go-lean preserves Go semantics.
+Persistence, terminal input, and rendering are outside the Lean laws.

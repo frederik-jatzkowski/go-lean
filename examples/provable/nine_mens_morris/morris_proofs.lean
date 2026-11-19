@@ -1,11 +1,19 @@
-import nine_mens_morris.morris_gen
+import nine_mens_morris.morris_laws
+import Lean.Util.CollectAxioms
 
 namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/nine_mens_morris».morris.Proofs
 
 theorem startRules : Laws.startRules := by
   refine ⟨rfl, rfl, rfl, rfl, rfl, ?_⟩
   intro p
-  simp [Start, «Board$At»]
+  simp [Start, «Board$At», Vector.getD, Array.getElem?_replicate] <;> split <;> simp
+
+theorem startIsValid : Laws.startIsValid := by
+  rfl
+
+theorem validTurn : Laws.validTurn := by
+  intro s
+  by_cases white : s.«field:turn» = 1 <;> simp [«Game$IsValid», white]
 
 theorem boardSnapshot : Laws.boardSnapshot := by
   intro s
@@ -25,19 +33,7 @@ theorem placementPhase : Laws.placementPhase := by
 
 theorem outsideBoardIsEmpty : Laws.outsideBoardIsEmpty := by
   intro b p outside
-  have different : ∀ n : UInt8, n < 24 → p ≠ n := by
-    intro n h equal
-    subst p
-    simp only [UInt8.lt_iff_toNat_lt, UInt8.le_iff_toNat_le] at *
-    omega
-  simp [«Board$At», different 0 (by decide), different 1 (by decide), different 2 (by decide),
-    different 3 (by decide), different 4 (by decide), different 5 (by decide),
-    different 6 (by decide), different 7 (by decide), different 8 (by decide),
-    different 9 (by decide), different 10 (by decide), different 11 (by decide),
-    different 12 (by decide), different 13 (by decide), different 14 (by decide),
-    different 15 (by decide), different 16 (by decide), different 17 (by decide),
-    different 18 (by decide), different 19 (by decide), different 20 (by decide),
-    different 21 (by decide), different 22 (by decide), different 23 (by decide)]
+  simp [«Board$At», outside]
 
 theorem movementAvailability : Laws.movementAvailability := by
   intro b player
@@ -81,12 +77,12 @@ private theorem ongoingAfterOpening (s : Game)
 theorem placementLegality : Laws.placementLegality := by
   intro s p
   unfold «Game$CanPlace» «Game$reserve»
-  by_cases white : s.«field:turn» = 1 <;>
-    by_cases pending : s.«field:pending» = true <;> simp [white, pending]
+  by_cases valid : «Game$IsValid» s = true <;> simp [valid]
 
 theorem movementLegality : Laws.movementLegality := by
   intro s f t
   unfold «Game$CanMove» «Game$Placing»
+  by_cases valid : «Game$IsValid» s = true <;> simp [valid]
   by_cases pending : s.«field:pending» = false <;>
     by_cases rw : s.«field:whiteReserve» = 0 <;>
     by_cases rb : s.«field:blackReserve» = 0 <;>
@@ -99,10 +95,7 @@ theorem movementLegality : Laws.movementLegality := by
 theorem captureLegality : Laws.captureLegality := by
   intro s p
   unfold «Game$CanCapture» opponent
-  split <;> simp_all
-  all_goals split <;> simp_all
-  all_goals split <;> simp_all
-  all_goals split <;> simp_all
+  by_cases valid : «Game$IsValid» s = true <;> simp [valid]
 
 theorem finishingTurn : Laws.finishingTurn := by
   intro s p
@@ -124,16 +117,49 @@ theorem captureTransition : Laws.captureTransition := by
   intro s p
   simp [«Game$Capture», opponent]
 
+private theorem finishPreservesValidity (s : Game) (p : UInt8)
+    (valid : «Game$IsValid» s = true) :
+    «Game$IsValid» («Game$finishAction» s p) = true := by
+  rw [show «Game$finishAction» s p = _ from finishingTurn s p]
+  rw [validTurn] at valid
+  split <;> dsimp only <;> split <;> rw [validTurn] <;> simp_all
+
+theorem placePreservesValidity : Laws.placePreservesValidity := by
+  intro s p valid
+  rw [show «Game$Place» s p = _ from placeTransition s p]
+  split
+  · dsimp only
+    split <;> apply finishPreservesValidity <;> exact valid
+  · exact valid
+
+theorem movePreservesValidity : Laws.movePreservesValidity := by
+  intro s f t valid
+  rw [show «Game$Move» s f t = _ from moveTransition s f t]
+  split
+  · exact finishPreservesValidity _ _ valid
+  · exact valid
+
+theorem capturePreservesValidity : Laws.capturePreservesValidity := by
+  intro s p valid
+  rw [show «Game$Capture» s p = _ from captureTransition s p]
+  split
+  · rw [validTurn]
+    split <;> simp
+  · exact valid
+
 private theorem pointCases (p : UInt8) (valid : p < 24) :
     p = 0 ∨ p = 1 ∨ p = 2 ∨ p = 3 ∨ p = 4 ∨ p = 5 ∨ p = 6 ∨ p = 7 ∨ p = 8 ∨ p = 9 ∨ p = 10 ∨ p = 11 ∨ p = 12 ∨ p = 13 ∨ p = 14 ∨ p = 15 ∨ p = 16 ∨ p = 17 ∨ p = 18 ∨ p = 19 ∨ p = 20 ∨ p = 21 ∨ p = 22 ∨ p = 23 := by
   simp only [UInt8.lt_iff_toNat_lt, ← UInt8.toNat_inj, UInt8.toNat_ofNat, Nat.reducePow, Nat.reduceMod] at *
   omega
 
-set_option maxHeartbeats 3000000 in
 theorem boardUpdate : Laws.boardUpdate := by
   intro b p q player validP validQ
-  rcases pointCases p validP with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;>
-    rcases pointCases q validQ with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;> rfl
+  have bound : q.toNat < 24 := UInt8.lt_iff_toNat_lt.mp validQ
+  by_cases same : q = p
+  · subst p
+    simp [«Board$At», setPoint, UInt8.not_le.mpr validQ, validQ, Vector.getD, bound]
+  · have different : p.toNat ≠ q.toNat := fun eq => same (UInt8.toNat_inj.mp eq).symm
+    simp [«Board$At», setPoint, UInt8.not_le.mpr validQ, validP, Vector.getD, same, different]
 
 private theorem acceptedMove (s : Game) (f t : UInt8)
     (accepted : («Game$Move» s f t).2 = true) :
@@ -157,7 +183,7 @@ private theorem finishedBoard (s : Game) (t : UInt8) :
 theorem movePreservesOpposingStones : Laws.movePreservesOpposingStones := by
   intro s f t p player accepted hp stone
   obtain ⟨legal, result⟩ := acceptedMove s f t accepted
-  obtain ⟨_, _, _, _, _, hf, ht, source, target, _⟩ := (movementLegality s f t).mp legal
+  obtain ⟨_, _, _, _, _, _, hf, ht, source, target, _⟩ := (movementLegality s f t).mp legal
   change «Board$At» s.«field:board» p = opponent s.«field:turn» at stone
   have opponentsDiffer : s.«field:turn» ≠ opponent s.«field:turn» := by
     rcases player with color | color <;> simp [opponent, color]
@@ -178,7 +204,7 @@ theorem movePreservesOpposingStones : Laws.movePreservesOpposingStones := by
 theorem moveGrantsCaptureExactlyOnMill : Laws.moveGrantsCaptureExactlyOnMill := by
   intro s f t accepted
   obtain ⟨legal, result⟩ := acceptedMove s f t accepted
-  have pending := ((movementLegality s f t).mp legal).1
+  have pending := ((movementLegality s f t).mp legal).2.1
   dsimp only
   rw [result]
   simp only [«Game$Pending», «Game$Board», finishedBoard]
@@ -225,5 +251,200 @@ theorem slideAvailability : Laws.slideAvailability := by
   intro b player
   change hasSlide b player = points.any (fun f => decide («Board$At» b f = player) && adjacentVacancy b f)
   simp [hasSlide, hasSlideFrom, points, ← exitAvailability]
+
+private theorem cellAgrees (b : Board) (p : UInt8) : «Board$At» b p = Rules.cell b p := by
+  by_cases h : p < 24
+  · simp [«Board$At», Rules.cell, h, UInt8.not_le.mpr h]
+  · simp [«Board$At», Rules.cell, h, UInt8.not_lt.mp h]
+
+private theorem writeAgrees (b : Board) (p color : UInt8) (h : p < 24) :
+    setPoint b p color = Rules.write b p color := by
+  cases b
+  simp [setPoint, Rules.write, h]
+
+private theorem pointBound {p : UInt8} (h : p ∈ Rules.points) : p < 24 := by
+  obtain ⟨n, hn, rfl⟩ := List.mem_map.mp h
+  have bound := List.mem_range.mp hn
+  simpa [UInt8.lt_iff_toNat_lt, UInt8.toNat_ofNat, Nat.mod_eq_of_lt (show n < 256 by omega)] using bound
+
+private theorem anyAgrees {α : Type} (xs : List α) {p q : α → Bool}
+    (h : ∀ x ∈ xs, p x = q x) : xs.any p = xs.any q := by
+  apply Bool.eq_iff_iff.mpr
+  simp only [List.any_eq_true]
+  constructor <;> rintro ⟨x, hx, accepted⟩ <;> refine ⟨x, hx, ?_⟩
+  · rwa [← h x hx]
+  · rwa [h x hx]
+
+private theorem edgeAgrees (f t : UInt8) (hf : f < 24) (ht : t < 24) :
+    adjacent f t = Rules.edge f t := by
+  simpa [Rules.edge, Nat.mod_eq_of_lt (show f.toNat < 256 from f.toNat_lt),
+    Nat.mod_eq_of_lt (show t.toNat < 256 from t.toNat_lt)] using
+    boardEdges ⟨f.toNat, UInt8.lt_iff_toNat_lt.mp hf⟩ ⟨t.toNat, UInt8.lt_iff_toNat_lt.mp ht⟩
+
+private theorem millAgrees (b : Board) (p color : UInt8) (hp : p < 24) (hc : color ≠ 0) :
+    inMill b p color = Rules.mill b p color := by
+  simpa only [Rules.mill, Rules.lines, ← cellAgrees] using millGeometry b p color hp hc
+
+private theorem tallyAgrees (b : Board) (color : UInt8) : count b color = Rules.tally b color := by
+  simpa only [Rules.tally, Rules.points, ← cellAgrees] using countedStones b color
+
+private theorem exposedAgrees (b : Board) (color : UInt8) (hc : color ≠ 0) :
+    hasUnprotected b color = Rules.exposed b color := by
+  rw [show hasUnprotected b color = _ from unprotectedStones b color]
+  unfold Rules.exposed
+  apply anyAgrees Rules.points
+  intro p hp
+  rw [cellAgrees, millAgrees b p color (pointBound hp) hc]
+
+private theorem travelAgrees (b : Board) (color : UInt8) :
+    hasMove b color = true ↔ Rules.canTravel b color := by
+  have slides : hasSlide b color = (Rules.points.any fun f => decide (Rules.cell b f = color) &&
+      Rules.points.any (fun t => decide (Rules.cell b t = 0) && Rules.edge f t)) := by
+    rw [show hasSlide b color = _ from slideAvailability b color]
+    apply anyAgrees Rules.points
+    intro f hf
+    rw [cellAgrees]
+    congr 1
+    apply anyAgrees Rules.points
+    intro t ht
+    rw [cellAgrees, edgeAgrees f t (pointBound hf) (pointBound ht)]
+  rw [show hasMove b color = true ↔ _ from movementAvailability b color]
+  simp only [Rules.canTravel, tallyAgrees, slides]
+
+private theorem otherNotEmpty (color : UInt8) : Rules.other color ≠ 0 := by
+  unfold Rules.other
+  split <;> decide
+
+theorem outcomeMatchesRules (s : Game) : «Game$Outcome» s = Rules.outcome s := by
+  rw [show «Game$Outcome» s = _ from outcomeRules s]
+  have blocked : hasMove s.«field:board» s.«field:turn» = false ↔
+      ¬ Rules.canTravel s.«field:board» s.«field:turn» := by
+    rw [← travelAgrees]
+    cases hasMove s.«field:board» s.«field:turn» <;> simp
+  simp only [Rules.outcome, Rules.opening, Rules.other, blocked]
+  split <;> simp_all
+
+def canAct (s : Game) : Rules.Action → Bool
+  | .place p => «Game$CanPlace» s p
+  | .move f t => «Game$CanMove» s f t
+  | .capture p => «Game$CanCapture» s p
+
+theorem legalityMatchesRules (s : Game) (a : Rules.Action) :
+    canAct s a = true ↔ Rules.legal s a := by
+  cases a with
+  | place p =>
+    unfold canAct
+    rw [show «Game$CanPlace» s p = true ↔ _ from placementLegality s p]
+    rw [validTurn, cellAgrees]
+    rfl
+  | move f t =>
+    unfold canAct
+    rw [show «Game$CanMove» s f t = true ↔ _ from movementLegality s f t]
+    unfold Rules.legal Rules.valid
+    by_cases hf : f < 24
+    · by_cases ht : t < 24
+      · rw [validTurn, travelAgrees, edgeAgrees f t hf ht]
+        simp only [cellAgrees, tallyAgrees]
+      · simp [ht]
+    · simp [hf]
+  | capture p =>
+    unfold canAct
+    rw [show «Game$CanCapture» s p = true ↔ _ from captureLegality s p]
+    unfold Rules.legal Rules.valid
+    by_cases hp : p < 24
+    · change (_ ∧ _ ∧ _ ∧ _ ∧ _) ↔ (_ ∧ _ ∧ _ ∧ _ ∧ _)
+      have hc : (if s.«field:turn» = 1 then (2 : UInt8) else 1) ≠ 0 :=
+        otherNotEmpty s.«field:turn»
+      rw [validTurn, cellAgrees, millAgrees _ p _ hp hc, exposedAgrees _ _ hc]
+      rfl
+    · simp [hp]
+
+private theorem completeAgrees (s : Game) (p : UInt8) (hp : p < 24) (valid : Rules.valid s) :
+    «Game$finishAction» s p = Rules.complete s p := by
+  have nonempty : s.«field:turn» ≠ 0 := by
+    rcases valid with h | h <;> simp [h]
+  rw [show «Game$finishAction» s p = _ from finishingTurn s p]
+  simp only [Rules.complete, tallyAgrees, millAgrees _ p _ hp nonempty, Rules.other]
+  split <;> simp_all
+
+theorem stepMatchesRules (s : Game) (a : Rules.Action) : act s a = Rules.step s a := by
+  have legality := legalityMatchesRules s a
+  unfold Rules.step
+  cases a with
+  | place p =>
+    change «Game$Place» s p = _
+    rw [show «Game$Place» s p = _ from placeTransition s p]
+    change («Game$CanPlace» s p = true ↔ _) at legality
+    by_cases h : Rules.legal s (.place p)
+    · simp only [ite_eq_left h, ite_eq_left (legality.mpr h)]
+      obtain ⟨valid, _, _, hp, _⟩ := h
+      simp only [Rules.advance, writeAgrees _ p _ hp]
+      split <;> apply congrArg (fun next => (next, true)) <;>
+        apply completeAgrees <;> assumption
+    · simp only [ite_eq_right h, ite_eq_right (fun accepted => h (legality.mp accepted))]
+  | move f t =>
+    change «Game$Move» s f t = _
+    rw [show «Game$Move» s f t = _ from moveTransition s f t]
+    change («Game$CanMove» s f t = true ↔ _) at legality
+    by_cases h : Rules.legal s (.move f t)
+    · simp only [ite_eq_left h, ite_eq_left (legality.mpr h)]
+      obtain ⟨valid, _, _, _, _, _, hf, ht, _, _, _⟩ := h
+      simp only [Rules.advance, writeAgrees _ f _ hf, writeAgrees _ t _ ht]
+      apply congrArg (fun next => (next, true))
+      apply completeAgrees <;> assumption
+    · simp only [ite_eq_right h, ite_eq_right (fun accepted => h (legality.mp accepted))]
+  | capture p =>
+    change «Game$Capture» s p = _
+    rw [show «Game$Capture» s p = _ from captureTransition s p]
+    change («Game$CanCapture» s p = true ↔ _) at legality
+    by_cases h : Rules.legal s (.capture p)
+    · simp only [ite_eq_left h, ite_eq_left (legality.mpr h)]
+      obtain ⟨_, _, hp, _, _⟩ := h
+      simp only [Rules.advance, writeAgrees _ p _ hp, Rules.other]
+    · simp only [ite_eq_right h, ite_eq_right (fun accepted => h (legality.mp accepted))]
+
+theorem startMatchesRules : Start = Rules.initial := by
+  rfl
+
+theorem actionPreservesValidity (s : Game) (a : Rules.Action)
+    (valid : «Game$IsValid» s = true) : «Game$IsValid» (act s a).1 = true := by
+  cases a with
+  | place p => exact placePreservesValidity s p valid
+  | move f t => exact movePreservesValidity s f t valid
+  | capture p => exact capturePreservesValidity s p valid
+
+theorem reachableIsValid (s : Game) (reachable : Rules.Reachable s) :
+    «Game$IsValid» s = true := by
+  induction reachable with
+  | initial => exact startIsValid
+  | @next prev a _ legal ih =>
+    have preserves := actionPreservesValidity prev a ih
+    simpa [stepMatchesRules, Rules.step, legal] using preserves
+
+theorem morrisCorrect (s : Game) (valid : «Game$IsValid» s = true) :
+    «Game$Outcome» s = Rules.outcome s ∧
+      ∀ a, (canAct s a = true ↔ Rules.legal s a) ∧
+        act s a = Rules.step s a ∧ «Game$IsValid» (act s a).1 = true :=
+  ⟨outcomeMatchesRules s, fun a =>
+    ⟨legalityMatchesRules s a, stepMatchesRules s a, actionPreservesValidity s a valid⟩⟩
+
+theorem historyMatchesRules (s : Game) (actions : List Rules.Action) :
+    Rules.history act «Game$Outcome» s actions =
+      Rules.history Rules.step Rules.outcome s actions := by
+  induction actions generalizing s with
+  | nil => rfl
+  | cons a rest ih =>
+    simp only [Rules.history, stepMatchesRules, outcomeMatchesRules]
+    rw [ih]
+
+theorem fromStartMatchesRules : Laws.fromStartMatchesRules := by
+  intro actions
+  rw [historyMatchesRules, outcomeMatchesRules, startMatchesRules]
+
+run_cmd
+  for theoremName in [``morrisCorrect, ``reachableIsValid] do
+    for axiomName in ← Lean.collectAxioms theoremName do
+      unless [`propext, `Quot.sound, `Classical.choice].contains axiomName do
+        throwError "Morris proof {theoremName} depends on unapproved axiom {axiomName}"
 
 end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/nine_mens_morris».morris.Proofs

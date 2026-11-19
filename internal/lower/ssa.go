@@ -22,8 +22,12 @@ func FromSSAWithAbstractCalls(input Input, sourceStem string, wordBits int64, ab
 	// The checker orders callees before callers, so their effects are already known.
 	facts := &functionFacts{store: stateSnapshot{}}
 	instances := make(map[*sourceFunction]string)
+	var functions []*sourceFunction
 	for i := int64(0); i < input.FunctionCount(); i++ {
-		fn := reader.decodeFunction(input.FunctionAt(i))
+		functions = append(functions, reader.decodeFunction(input.FunctionAt(i)))
+	}
+	nullableSlices := usesNullableSlices(functions)
+	for _, fn := range functions {
 		if fn.Origin != "" {
 			instances[fn] = fn.Origin + "$instance" + strconv.Itoa(len(instances))
 		}
@@ -31,6 +35,7 @@ func FromSSAWithAbstractCalls(input Input, sourceStem string, wordBits int64, ab
 			root: input.PackagePath(), input: input, file: file, state: stateSnapshot{}, binders: new([]ir.Binder), facts: facts,
 			records: program.Records, instances: instances,
 			contracts: program.Contracts, usedContracts: make(map[ir.Type]bool),
+			nullableSlices: nullableSlices && fn.Stateful == nil,
 		}
 		if method := fn.Stateful; method != nil {
 			program.Functions = append(program.Functions, l.lowerStateful(fn, method)...)
@@ -39,7 +44,7 @@ func FromSSAWithAbstractCalls(input Input, sourceStem string, wordBits int64, ab
 			}
 			continue
 		}
-		result := ir.Function{Symbol: l.symbol(fn), Result: productType(fn.Results, l.valueType)}
+		result := ir.Function{Symbol: l.symbol(fn), Result: productType(fn.Results, l.ordinaryType)}
 		l.abstract = abstract[result.Symbol]
 		for i := 0; i < fn.TypeParameters; i++ {
 			result.TypeParams = append(result.TypeParams, ir.TypeParameter(i))
@@ -74,9 +79,19 @@ func FromSSAWithAbstractCalls(input Input, sourceStem string, wordBits int64, ab
 				result.Body = l.lowerSliceResults(build)
 			} else if build.Element == nil {
 				l.canPanic = true
-				result.Body.Result = ir.Return{Value: l.value(build.Source)}
+				value := l.sliceList(build.Source)
+				if l.nullableSlices {
+					value = ir.Some{Value: value}
+				}
+				result.Body.Result = ir.Return{Value: value}
 			} else {
-				result.Body.Result = l.lowerSliceBuild(build)
+				traversal := l.lowerSliceBuild(build)
+				if l.nullableSlices {
+					destination := l.freshBinder("slice", l.valueType(fn.Results[0]))
+					traversal.Destination = &destination
+					traversal.Continuation = &ir.Body{Result: ir.Return{Value: ir.Some{Value: ir.Ref(destination)}}}
+				}
+				result.Body.Result = traversal
 			}
 		} else if chain != nil {
 			result.Body.Result = l.lowerChainRecursion(chain)
@@ -167,7 +182,7 @@ func (l *lowerer) lowerCountedLoop(fn *ir.Function, loop *sourceCounted) {
 
 func (l *lowerer) lowerRangeFold(fold *sourceRange) ir.ListFold {
 	result := ir.ListFold{
-		Sequence: l.value(fold.Source), Initial: l.value(fold.Initial),
+		Sequence: l.sliceList(fold.Source), Initial: l.value(fold.Initial),
 		State: l.bind(fold.State), Element: l.bind(fold.Element),
 	}
 	result.Steps = l.lowerPureSteps(fold.Steps)
@@ -179,16 +194,20 @@ func (l *lowerer) lowerSliceResults(build *sourceBuild) ir.Body {
 	var body ir.Body
 	for _, length := range build.Lengths {
 		body.Bindings = append(body.Bindings, ir.Binding{Binder: l.bind(length),
-			Value: ir.SliceLength{List: l.value(build.Source)}})
+			Value: ir.SliceLength{List: l.sliceList(build.Source)}})
 	}
 	if build.Copy != nil {
 		body.Bindings = append(body.Bindings, ir.Binding{Binder: l.bind(build.Copy),
-			Value: ir.SliceLength{List: l.value(build.Source)}})
+			Value: ir.SliceLength{List: l.sliceList(build.Source)}})
 	}
 	destination := l.bind(build.Destination)
 	if build.Element == nil {
 		l.canPanic = true
-		body.Bindings = append(body.Bindings, ir.Binding{Binder: destination, Value: l.value(build.Source)})
+		value := l.sliceList(build.Source)
+		if l.nullableSlices {
+			value = ir.Some{Value: value}
+		}
+		body.Bindings = append(body.Bindings, ir.Binding{Binder: destination, Value: value})
 		exit := l.instructions(build.Exit, nil, build.ExitStart)
 		body.Bindings = append(body.Bindings, exit.Bindings...)
 		body.Result = exit.Result
@@ -196,13 +215,18 @@ func (l *lowerer) lowerSliceResults(build *sourceBuild) ir.Body {
 		result := l.lowerSliceBuild(build)
 		exit := l.instructions(build.Exit, nil, build.ExitStart)
 		result.Destination, result.Continuation = &destination, &exit
+		if l.nullableSlices {
+			raw := l.freshBinder("slice", l.valueType(build.Destination.Type))
+			result.Destination = &raw
+			exit.Bindings = append([]ir.Binding{{Binder: destination, Value: ir.Some{Value: ir.Ref(raw)}}}, exit.Bindings...)
+		}
 		body.Result = result
 	}
 	return body
 }
 
 func (l *lowerer) lowerSliceBuild(build *sourceBuild) ir.ListBuild {
-	result := ir.ListBuild{Sequence: l.value(build.Source), Element: l.bind(build.Element), Effectful: build.Effectful}
+	result := ir.ListBuild{Sequence: l.sliceList(build.Source), Element: l.bind(build.Element), Effectful: build.Effectful}
 	if iter := build.Iteration; iter != nil {
 		l.iteration = &iteration{header: iter.Header, skip: iter.Skip, stores: iter.Stores}
 		body := l.body(iter.Entry, iter.Header)
@@ -271,20 +295,21 @@ type iteration struct {
 }
 
 type lowerer struct {
-	abstract      map[ir.Symbol]bool
-	iteration     *iteration
-	root          string
-	input         Input
-	file          string
-	state         StateStore
-	binders       *[]ir.Binder
-	facts         *functionFacts
-	canPanic      bool
-	usesWord      bool
-	records       map[ir.Type]ir.Record
-	instances     map[*sourceFunction]string
-	contracts     map[ir.Type]ir.Contract
-	usedContracts map[ir.Type]bool
+	abstract       map[ir.Symbol]bool
+	iteration      *iteration
+	root           string
+	input          Input
+	file           string
+	state          StateStore
+	binders        *[]ir.Binder
+	facts          *functionFacts
+	canPanic       bool
+	usesWord       bool
+	nullableSlices bool
+	records        map[ir.Type]ir.Record
+	instances      map[*sourceFunction]string
+	contracts      map[ir.Type]ir.Contract
+	usedContracts  map[ir.Type]bool
 }
 
 func (l *lowerer) symbol(fn *sourceFunction) ir.Symbol {
@@ -302,7 +327,7 @@ func (l *lowerer) symbol(fn *sourceFunction) ir.Symbol {
 }
 
 func (l *lowerer) bind(value *sourceValue) ir.Binder {
-	return l.bindAs(value, l.valueType(value.Type))
+	return l.bindAs(value, l.ordinaryType(value.Type))
 }
 
 func (l *lowerer) bindAs(value *sourceValue, typ ir.Type) ir.Binder {
@@ -334,6 +359,18 @@ func (l *lowerer) instructions(block, predecessor *sourceBlock, start int) ir.Bo
 		}
 		switch ins.Kind {
 		case binaryValue:
+			if ins.X.Type.Model.SliceElem() != "" {
+				slice := ins.X
+				if ins.X.IsNil {
+					slice = ins.Y
+				}
+				var value ir.Expr = ir.OptionIsSome{Value: l.value(slice)}
+				if ins.Op == ir.Equal {
+					value = ir.Not{Value: value}
+				}
+				result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: value})
+				continue
+			}
 			value := l.binary(ins)
 			canPanic := value.Op.PanicsOnZeroDivisor()
 			result.Bindings = append(result.Bindings, ir.Binding{
@@ -379,10 +416,20 @@ func (l *lowerer) instructions(block, predecessor *sourceBlock, start int) ir.Bo
 					Binder: binder, Value: value, CanPanic: !nested,
 				})
 			}
-		case indexAddress:
+		case indexAddress, indexValue:
+			if ins.Kind == indexAddress && ins.X.ArrayInitial == nil && ins.X.Type.Elem != nil {
+				if elem, _ := ins.X.Type.Elem.Model.ArrayShape(); elem != "" && ins.IndexInBounds {
+					// A local array address has no remaining check in this branch.
+					continue
+				}
+			}
 			result.Bindings = append(result.Bindings, l.checkedIndex(ins, ins.X, ins.IndexValue))
-		case indexValue:
-			result.Bindings = append(result.Bindings, l.checkedIndex(ins, ins.X, ins.IndexValue))
+		case emptySliceValue:
+			var value ir.Expr = ir.EmptySlice{}
+			if l.nullableSlices {
+				value = ir.Some{Value: value}
+			}
+			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: value})
 		case makeMap:
 			l.canPanic = true // Keep the fresh map result in the panic-result model.
 			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: ir.EmptyMap{}})
@@ -430,7 +477,7 @@ func (l *lowerer) instructions(block, predecessor *sourceBlock, start int) ir.Bo
 				value := l.value(arg)
 				var length ir.Expr = ir.ByteLen{Value: value}
 				if arg.Type.Model.SliceElem() != "" {
-					length = ir.SliceLength{List: value}
+					length = ir.SliceLength{List: l.sliceList(arg)}
 				}
 				result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: length})
 				continue
@@ -482,7 +529,7 @@ func (l *lowerer) instructions(block, predecessor *sourceBlock, start int) ir.Bo
 			}
 		case storeValue:
 			root := ins.X
-			for root.Kind == fieldAddress {
+			for root.Kind == fieldAddress || root.Kind == indexAddress {
 				root = root.X
 			}
 			if root.HasCell {
@@ -529,19 +576,37 @@ func (l *lowerer) instructions(block, predecessor *sourceBlock, start int) ir.Bo
 }
 
 func (l *lowerer) checkedIndex(value, sequence, index *sourceValue) ir.Binding {
+	var input ir.Expr
+	sequenceType := sequence.Type
 	if init := sequence.ArrayInitial; init != nil {
 		sequence = init
+		sequenceType = init.Type
+	} else if value.Kind == indexAddress && sequence.Type.Elem != nil {
+		if elem, _ := sequence.Type.Elem.Model.ArrayShape(); elem != "" {
+			sequenceType = sequence.Type.Elem
+			input = l.load(sequence)
+		}
 	}
-	typ := l.valueType(sequence.Type)
+	if input == nil {
+		input = l.value(sequence)
+	}
+	typ := l.valueType(sequenceType)
 	elem := typ.SliceElem()
 	if elem == "" {
 		elem, _ = typ.ArrayShape()
+	} else if l.nullableSlices {
+		input = l.sliceList(sequence)
+	}
+	if value.IndexInBounds && value.Kind == indexValue {
+		return ir.Binding{Binder: l.bindAs(value, elem), Value: ir.ArrayGet{
+			Sequence: input, Index: l.value(index), IndexType: l.valueType(index.Type), Default: l.zeroValue(sequenceType.Elem),
+		}}
 	}
 	l.canPanic = true
 	return ir.Binding{
 		Binder: l.bindAs(value, elem),
 		Value: ir.CheckedIndex{
-			Sequence: l.value(sequence), SequenceType: typ, Index: l.value(index), IndexType: l.valueType(index.Type),
+			Sequence: input, SequenceType: typ, Index: l.value(index), IndexType: l.valueType(index.Type),
 		},
 		CanPanic: true,
 	}
@@ -557,6 +622,9 @@ func (l *lowerer) value(value *sourceValue) ir.Expr {
 			return ir.NilPointer{}
 		}
 		if typ.SliceElem() != "" {
+			if l.nullableSlices {
+				return ir.NilPointer{}
+			}
 			return ir.EmptySlice{}
 		}
 		if key, _ := typ.MapShape(); key != "" {
@@ -644,7 +712,7 @@ func (l *lowerer) valueType(t *sourceType) ir.Type {
 			record := ir.Record{Symbol: l.typeSymbol(t, "")}
 			handles := make(map[ir.Type]bool)
 			for _, field := range t.Fields {
-				fieldType := l.valueType(field.Type)
+				fieldType := stateType(l.valueType(field.Type))
 				record.Fields = append(record.Fields, ir.Field{Name: field.Name, Type: fieldType})
 				if field.Type.IsInterface {
 					handles[fieldType] = true
@@ -664,6 +732,24 @@ func (l *lowerer) valueType(t *sourceType) ir.Type {
 	return typ
 }
 
+func (l *lowerer) ordinaryType(t *sourceType) ir.Type {
+	if !l.nullableSlices {
+		return l.valueType(t)
+	}
+	if t.IsTuple {
+		return productType(t.Tuple, l.ordinaryType)
+	}
+	return stateType(l.valueType(t))
+}
+
+func (l *lowerer) sliceList(value *sourceValue) ir.Expr {
+	expr := l.value(value)
+	if l.nullableSlices {
+		return ir.OptionGetD{Value: expr, Default: ir.EmptySlice{}}
+	}
+	return expr
+}
+
 func (l *lowerer) typeSymbol(t *sourceType, suffix string) ir.Symbol {
 	symbol := ir.Symbol{Package: l.root, File: l.file, Name: t.Name + suffix}
 	if t.Package != l.root {
@@ -681,12 +767,12 @@ func (l *lowerer) useContract(t *sourceType, handle ir.Type) {
 	for _, method := range t.Methods {
 		field := ir.Method{Name: method.Name}
 		for _, param := range method.Params {
-			field.Params = append(field.Params, l.valueType(param))
+			field.Params = append(field.Params, l.ordinaryType(param))
 		}
 		if method.Result == t {
 			field.Result = handle
 		} else {
-			field.Result = l.valueType(method.Result)
+			field.Result = l.ordinaryType(method.Result)
 		}
 		contract.Methods = append(contract.Methods, field)
 	}
@@ -694,6 +780,12 @@ func (l *lowerer) useContract(t *sourceType, handle ir.Type) {
 }
 
 func (l *lowerer) load(addr *sourceValue) ir.Expr {
+	if addr.Kind == indexAddress && addr.X.ArrayInitial == nil && addr.X.Type.Elem != nil {
+		if elem, _ := addr.X.Type.Elem.Model.ArrayShape(); elem != "" {
+			return ir.ArrayGet{Sequence: l.load(addr.X), Index: l.value(addr.IndexValue),
+				IndexType: l.valueType(addr.IndexValue.Type), Default: l.zeroValue(addr.Type.Elem)}
+		}
+	}
 	if addr.ArrayInitial != nil {
 		return l.value(addr.ArrayInitial)
 	}
@@ -726,6 +818,11 @@ func (l *lowerer) captureType(value *sourceValue) ir.Type {
 }
 
 func (l *lowerer) recordStore(addr *sourceValue, value ir.Expr) ir.Expr {
+	if addr.Kind == indexAddress {
+		update := ir.ArraySet{Sequence: l.load(addr.X), Index: l.value(addr.IndexValue),
+			IndexType: l.valueType(addr.IndexValue.Type), Value: value}
+		return l.recordStore(addr.X, update)
+	}
 	if addr.Kind != fieldAddress {
 		return value
 	}
@@ -735,6 +832,12 @@ func (l *lowerer) recordStore(addr *sourceValue, value ir.Expr) ir.Expr {
 
 func (l *lowerer) zeroValue(t *sourceType) ir.Expr {
 	typ := l.valueType(t)
+	if elem, length := typ.ArrayShape(); elem != "" {
+		return ir.ArrayReplicate{Length: length, Value: l.zeroValue(t.Elem)}
+	}
+	if typ.SliceElem() != "" {
+		return ir.NilPointer{}
+	}
 	switch typ {
 	case ir.Bool:
 		return ir.BoolLiteral(false)
@@ -777,7 +880,7 @@ func (l *lowerer) sliceCallback(value *sourceValue, effectful bool) ir.Expr {
 func (l *lowerer) lowerStructuredFold(fold *sourceRange) ir.StructuredFold {
 	spec := fold.Structured
 	iter := spec.Iteration
-	result := ir.StructuredFold{Sequence: l.value(fold.Source), Initial: packResults(spec.Initial, l.value),
+	result := ir.StructuredFold{Sequence: l.sliceList(fold.Source), Initial: packResults(spec.Initial, l.value),
 		Element: l.bind(fold.Element)}
 	typ := l.loopStateType(spec.States)
 	result.State = l.freshBinder("state", typ)

@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/frederik-jatzkowski/go-lean/internal/gosource"
@@ -139,7 +140,25 @@ func findModel(program ir.Program, symbol ir.Symbol) (ir.Function, bool) {
 }
 
 func makeVerification(dir string, program gosource.Program, owners map[*ssa.Function]gosource.Program, lowered map[string]ir.Program) (lean.Verification, error) {
-	verification := lean.Verification{Constructors: make(map[ir.Symbol]bool)}
+	packagePath := program.Package.Pkg.Path()
+	imports := program.LeanImports[packagePath]
+	verification := lean.Verification{
+		Constructors: make(map[ir.Symbol]bool),
+		Scope:        ir.Symbol{Package: packagePath, File: url.PathEscape(sourceStem(program.Path))},
+		ScopedLaws:   program.ScopedLaws,
+		SeparateLaws: len(imports.Verify) != 0 || len(program.ScopedLaws) != 0,
+		HasModel:     len(program.Roots) != 0,
+		ModelImports: slices.Clone(imports.Assume),
+		LawImports:   slices.Clone(imports.Verify),
+	}
+	if !verification.HasModel {
+		verification.LawImports = append(verification.LawImports, imports.Assume...)
+	}
+	for _, contract := range lowered[program.Path].Contracts {
+		if path := contract.Symbol.Dependency; path != "" {
+			verification.ModelImports = append(verification.ModelImports, program.LeanImports[path].Assume...)
+		}
+	}
 	for _, fn := range program.Roots {
 		directives := program.Directives[fn]
 		if directives.Constructor {
@@ -155,6 +174,9 @@ func makeVerification(dir string, program gosource.Program, owners map[*ssa.Func
 		}
 		root := lean.VerificationRoot{Symbol: symbol, Laws: directives.Laws}
 		for _, target := range directives.Abstract {
+			if path := target.Callee.Pkg.Pkg.Path(); path != packagePath {
+				verification.ModelImports = append(verification.ModelImports, program.LeanImports[path].Assume...)
+			}
 			if model.Loop != nil || model.Fuel != nil {
 				return verification, fmt.Errorf("%s: abstraction is unsupported in a loop helper or fuelled caller", target.Position)
 			}
@@ -180,7 +202,11 @@ func makeVerification(dir string, program gosource.Program, owners map[*ssa.Func
 		}
 		verification.Roots = append(verification.Roots, root)
 	}
-	if len(verification.Roots) == 0 {
+	slices.Sort(verification.ModelImports)
+	verification.ModelImports = slices.Compact(verification.ModelImports)
+	slices.Sort(verification.LawImports)
+	verification.LawImports = slices.Compact(verification.LawImports)
+	if len(verification.Roots) == 0 && len(verification.ScopedLaws) == 0 {
 		return verification, nil
 	}
 	module, err := leanModule(dir, program.Path)

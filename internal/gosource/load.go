@@ -16,6 +16,8 @@ import (
 
 type Program struct {
 	Path              string
+	ScopedLaws        []Law
+	LeanImports       map[string]LeanImports
 	Package           *ssa.Package
 	Roots             []*ssa.Function
 	Directives        map[*ssa.Function]Directives
@@ -29,6 +31,7 @@ type selectedFile struct {
 	path  string
 	pkg   *packages.Package
 	roots []selectedRoot
+	laws  []Law
 }
 
 // Load finds marked functions in ./... and groups them by their source file.
@@ -50,6 +53,10 @@ func Load(dir string) ([]Program, error) {
 		return nil, loadErr
 	}
 
+	imports, err := packageLeanImports(loaded)
+	if err != nil {
+		return nil, err
+	}
 	var selected []selectedFile
 	var selectedPackages []*packages.Package
 	for _, pkg := range loaded {
@@ -64,8 +71,12 @@ func Load(dir string) ([]Program, error) {
 			if err != nil {
 				return nil, err
 			}
-			if len(roots) != 0 {
-				selected = append(selected, selectedFile{path: path, pkg: pkg, roots: roots})
+			laws, err := scopedLaws(pkg, file, roots)
+			if err != nil {
+				return nil, err
+			}
+			if len(roots) != 0 || len(laws) != 0 {
+				selected = append(selected, selectedFile{path: path, pkg: pkg, roots: roots, laws: laws})
 			}
 		}
 		if len(selected) > before {
@@ -86,6 +97,8 @@ func Load(dir string) ([]Program, error) {
 	for _, file := range selected {
 		result := Program{
 			Path: filepath.Clean(file.path), Package: prog.Package(file.pkg.Types),
+			ScopedLaws:        file.laws,
+			LeanImports:       imports,
 			InterfaceDocs:     docs,
 			InitializedFields: fields,
 			Assumptions:       assumptions,
@@ -114,7 +127,7 @@ func Load(dir string) ([]Program, error) {
 			}
 			result.Directives[fn] = directives
 		}
-		if len(result.Roots) != 0 {
+		if len(result.Roots) != 0 || len(result.ScopedLaws) != 0 {
 			programs = append(programs, result)
 		}
 	}

@@ -29,6 +29,9 @@ func RenderVerification(program ir.Program, verification Verification) string {
 	var out strings.Builder
 	r := renderer{wordBits: program.WordBits, records: program.Records, contracts: program.Contracts, tracedRoots: program.TracedRoots}
 	out.WriteString(GeneratedHeader + "\nimport Init\n")
+	for _, module := range verification.ModelImports {
+		fmt.Fprintf(&out, "import %s\n", module)
+	}
 	if len(verification.Roots) != 0 || len(verification.Constructors) != 0 {
 		out.WriteString("import Lean.Elab.Command\n")
 	}
@@ -106,8 +109,10 @@ func RenderVerification(program ir.Program, verification Verification) string {
 			r.renderConstructorProof(&out, fn)
 		}
 	}
-	for _, root := range verification.Roots {
-		renderLaws(&out, root)
+	if !verification.SeparateLaws {
+		for _, root := range verification.Roots {
+			renderLaws(&out, root)
+		}
 	}
 	out.WriteString("\nend GoLean\n")
 	return out.String()
@@ -191,6 +196,9 @@ func (r renderer) renderRecords(out *strings.Builder) {
 				typ = elem
 			}
 			if elem := typ.SliceElem(); elem != "" {
+				typ = elem
+			}
+			if elem, _ := typ.ArrayShape(); elem != "" {
 				typ = elem
 			}
 			emit(typ)
@@ -491,6 +499,12 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 			return fmt.Sprintf("(%s)[(%s).toNat]?", sequence, index)
 		}
 		return fmt.Sprintf("if (%s).toInt < 0 then none else (%s)[(%s).toInt.toNat]?", index, sequence, index)
+	case ir.ArrayReplicate:
+		return fmt.Sprintf("(Vector.replicate %s %s)", expr.Length, r.renderExpr(expr.Value))
+	case ir.ArrayGet:
+		return fmt.Sprintf("(Vector.getD %s %s %s)", r.renderExpr(expr.Sequence), r.indexNat(expr.Index, expr.IndexType), r.renderExpr(expr.Default))
+	case ir.ArraySet:
+		return fmt.Sprintf("(Vector.setIfInBounds %s %s %s)", r.renderExpr(expr.Sequence), r.indexNat(expr.Index, expr.IndexType), r.renderExpr(expr.Value))
 	case ir.Ref:
 		return binderName(ir.Binder(expr))
 	case ir.Negate:
@@ -558,6 +572,13 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 	default:
 		panic("unexpected IR expression")
 	}
+}
+
+func (r *renderer) indexNat(index ir.Expr, typ ir.Type) string {
+	if typ.IsUnsigned() {
+		return fmt.Sprintf("(%s).toNat", r.renderExpr(index))
+	}
+	return fmt.Sprintf("(%s).toInt.toNat", r.renderExpr(index))
 }
 
 func renderFloatComparison(op ir.Operator, left, right string) string {

@@ -15,14 +15,15 @@
 - Generic definitions can use type parameters with the unrestricted `any` constraint as Lean type variables. Calls can use concrete instances whose bodies pass the checker. The generic fresh-slice construction can apply a statically known callback with immutable captures and propagates a callback panic in traversal order. The checker rejects generic method constraints.
 - Calls on named interfaces with explicit contracts lower to Lean method projections. The generated function takes a contract containing the method models and their laws.
 - Direct calls to local closures can use immutable captured values as extra parameters. Captured cells must be initialized once before use, and closure values stay local to direct calls.
-- Named structs with scalar or nested record fields lower to Lean structures. Promoted fields follow the same projection chain as explicit selectors. Local record fields start at Go zero values and can be assigned, including nested fields and branch-dependent updates, while their addresses stay local.
+- Named structs with supported scalar, nested record, array, or read-only slice fields lower to Lean structures. Promoted fields follow the same projection chain as explicit selectors. Local record fields start at Go zero values and can be assigned, including nested fields and branch-dependent updates, while their addresses stay local.
 - Read-only, nonrecursive record pointer inputs use `Option` to distinguish nil from a record value. Dereferencing nil propagates a panic outcome.
 - A nil-guarded, read-only self-recursion on a singly linked input with an integer payload lowers to structural recursion on a Lean list. The step follows the direct next field, uses supported integer arithmetic, and passes additional parameters unchanged. The Go input must be a finite, acyclic chain for the proof to apply.
 - Read-only slices of supported value elements use Lean lists for indexing by supported Go integer types and for `len`. Both negative and out-of-range indices propagate a panic at element address formation. Nil and empty slices have the same indexing behavior.
+- A slice field can be initialized, replaced as a whole, tested against nil, measured with `len`, and read by index. Its Lean model uses `Option (List …)` to distinguish nil from non-nil empty slices. Ordinary functions generated in the same module also preserve that distinction for slice parameters and results when the module uses slice fields or compares slices with nil. Indexed writes to slice fields are unsupported.
 - Read-only maps with integer keys and values use Lean association lists with unique keys. An absent key gives the Go zero value. A comma-ok lookup also returns presence separately. Nil and empty maps have the same lookup behavior.
 - A function can return a fresh integer map it allocates with or without a size hint and accesses through acyclic control flow. A map literal with multiple entries requires constant keys. The allocation stays local until return. Each write replaces the entry for its key and preserves the other entries. The result uses `Option` to model panic outcomes.
 - A function can return a fresh slice with the input length and capacity equal to that length. It can use `copy` for matching elements or initialize each output element once at the current range or counted index. Checked transforms can change the element type, branch, call supported helpers, or invoke a validated callback in a generic instance. Other functions can return the result of a checked call that constructs a fresh slice. The checker rejects writes to caller-owned storage and escape before return. The result uses `Option` to model panic outcomes.
-- Unnamed Go arrays passed by value use fixed-length Lean vectors, with the same checked indexing as slices. Any local SSA array cell must hold an initialized, read-only copy whose address stays local.
+- Unnamed Go arrays passed by value or stored in record fields use fixed-length Lean vectors. Indexed writes are supported on local arrays and array fields, including value-receiver copies, while element addresses stay local. Unchecked indices propagate bounds panics. Constant in-range indices and recognized unsigned guards such as `if i < len(a)` can yield total accesses. The Nine Men’s Morris board uses this model.
 - Local bindings, assignments, early returns, branches with boolean conditions, and value and tagless switches. Control-flow joins select the supported scalar value from the branch taken. Short-circuit expressions evaluate their right operand only when needed. The checker rejects unsupported loop and recursion shapes, indirect calls, and effects such as reads of mutable globals.
 - A counted loop increments an integer counter by one while it is below an invariant bound of the same type. It can compute its start, bound, and accumulator seed before the loop, update scalar loop-carried values in a straight-line or conditional body, and compute a result after the loop. Lean recursion uses the nonnegative distance from start to bound as fuel.
 - A range or zero-based indexed traversal over a read-only slice can update scalar accumulators, including conditional updates and multiple values carried across iterations. The checker verifies that the traversal visits each element of the same slice in order and lowers it to a Lean left fold.
@@ -36,14 +37,29 @@ The transpiler runs SSA loading, subset and call graph checking, lowering to a s
 
 ### Laws declared in Go
 
-The examples and lowering self-proofs declare their laws in Go doc comments. Each law has a name unique to the Go file and a Lean proposition. Use consecutive `//golean:verify+` lines to continue it.
+Declare each law in the doc comment that matches its scope. Use a function or method comment for an operation, a concrete type comment for behavior across its methods, and the package comment for behavior across package entry points. Each law has a name unique to the Go file and a Lean proposition. Use consecutive `//golean:verify+` lines to continue it. For type or package laws, select the operations with `//golean:export` or their own verification directives.
 
 ```go
 //golean:verify clampBounds : ∀ value low high : Int64, low ≤ high →
 //golean:verify+ low ≤ Clamp value low high ∧ Clamp value low high ≤ high
 ```
 
-Write each proof in `<stem>_proofs.lean` under the generated model's namespace followed by `.Proofs`. A theorem named `clampBounds` can use `Laws.clampBounds` as its statement. Add the model, proof, and generated `<stem>_verify.lean` modules to the default Lake library's roots. Lake checks that the companion supplies each theorem, its type matches the Go law, and its dependencies use only the allowed Lean axioms. Run `go tool task generate` after Go edits and `go tool task check` to check generated-file freshness and build the proofs.
+Write each proof in `<stem>_proofs.lean` under the source file's Lean namespace followed by `.Proofs`. A theorem named `clampBounds` can use `Laws.clampBounds` as its statement. The proof companion imports `<stem>_laws` when generated and `<stem>_gen` otherwise. Add the generated modules and the proof companion to the default Lake library's roots. Building `<stem>_verify` checks that the companion supplies each theorem, its type matches the Go law, and its dependencies use only the allowed Lean axioms. Run `go tool task generate` after Go edits and `go tool task check` to check generated-file freshness and build the proofs.
+
+### Import Lean modules into Go laws
+
+Put import directives in package doc comments. Their scope is the Go package.
+
+| Directive | When the module is loaded |
+| --- | --- |
+| `//golean:verify:import Lean.Module` | When Lean elaborates verification laws, after the generated model. A reference spec can import `*_gen` to use its state types. |
+| `//golean:assume:import Lean.Module` | When Lean elaborates the model and its contracts. The import also reaches downstream callers that model these contracts. Verification laws can use the imported definitions too. |
+
+An assumption import must load before the model whose contracts use it. Keep it independent of that model to avoid an import cycle. This also applies to a verified operation law reused as an abstract callee contract.
+
+Verification imports and type or package laws cause generation of a separate `<stem>_laws.lean`. For a package law in a dedicated `doc.go`, import the generated operation models explicitly with `//golean:verify:import` and use qualified Lean names. A law-only file generates `doc_laws.lean` and `doc_verify.lean`.
+
+[Bowling](examples/provable/bowling/README.md) demonstrates all three placements. [Nine Men's Morris](examples/provable/nine_mens_morris/README.md) imports a reference spec that shares the generated game and board types.
 
 ### Abstract calls and assumed laws
 
@@ -216,7 +232,7 @@ go test -tags=golean_reject ./examples/reject/...
 
 Use Go 1.27 and Lean 4.36.0. The Go module pins Task, which you can run with `go tool task`. The [Lean installation guide](https://lean-lang.org/install/manual/) covers Elan, which reads the repository's `lean-toolchain` file. Once Elan is installed, open the repository root in VSCodium with the Lean 4 extension and open an example's `*_proofs.lean` file.
 
-Put theorems in `<example>_proofs.lean` beside the Go source. The proof file imports `<example>_gen.lean`. For example, `clamp_proofs.lean` uses `import clamp.clamp_gen`.
+Put theorems in `<example>_proofs.lean` beside the Go source. The proof file imports the generated law module when present. For example, bowling uses `import bowling.bowling_laws`, and clamp uses `import clamp.clamp_gen`.
 
 Generated definitions use a namespace based on the Go import path and source filename. A concrete method uses the name `«Receiver$Method»` and takes its receiver as the first Go value parameter. Open the relevant namespace in the proof file, such as `GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clamp».clamp`.
 

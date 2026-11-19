@@ -53,10 +53,17 @@ func (c *checker) checkLocalMemory(fn *ssa.Function) error {
 			if cell, ok := ins.(*ssa.Alloc); ok {
 				if typ := arrayValueType(cell); typ != "" {
 					initial := arrayInitializer(cell, typ)
-					if initial == nil {
-						return diagnostic(fn, cell.Pos(), "local array must be an initialized copy that does not escape")
+					if initial != nil && !arrayHasIndexedStore(cell) {
+						c.arrays[cell] = initial
+					} else {
+						if !concreteArrayElement(arrayType(cell.Type())) {
+							return diagnostic(fn, cell.Pos(), "mutable local arrays require concrete element types")
+						}
+						if !localRecordUses(cell) {
+							return diagnostic(fn, cell.Pos(), "local array address must not escape")
+						}
+						c.records[cell] = RecordCell{Mutable: true}
 					}
-					c.arrays[cell] = initial
 					continue
 				}
 				if CaptureType(cell.Type()).IsRecord() {
@@ -97,9 +104,22 @@ func (c *checker) checkLocalMemory(fn *ssa.Function) error {
 	for _, block := range fn.Blocks {
 		for _, ins := range block.Instrs {
 			switch ins := ins.(type) {
+			case *ssa.IndexAddr:
+				for _, use := range *ins.Referrers() {
+					if readsCell(use, ins) {
+						continue
+					}
+					if store, ok := use.(*ssa.Store); ok && store.Addr == ins {
+						continue // Checked at the store.
+					}
+					return diagnostic(fn, use.Pos(), "element addresses must stay local")
+				}
 			case *ssa.Store:
-				if index, ok := ins.Addr.(*ssa.IndexAddr); ok && c.isReadOnlyIndexAddr(index) {
-					return diagnostic(fn, ins.Pos(), "element addresses may only be read")
+				if index, ok := ins.Addr.(*ssa.IndexAddr); ok {
+					if c.isLocalArrayIndex(index) && hasType(ins.Val, Type(index.Type().Underlying().(*types.Pointer).Elem())) {
+						continue
+					}
+					return diagnostic(fn, ins.Pos(), "indexed writes require a local array; slice elements are read-only")
 				}
 				if c.isRecordAddress(ins.Addr) {
 					continue

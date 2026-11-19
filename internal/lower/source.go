@@ -9,6 +9,73 @@ type sourceProgram struct {
 	Functions []*sourceFunction
 }
 
+// Existing list-only models need no slice identity. A module that observes
+// nil or carries a slice in a record keeps that bit across its ordinary calls.
+func usesNullableSlices(functions []*sourceFunction) bool {
+	types := make(map[*sourceType]bool)
+	var recordContainsSlice func(*sourceType) bool
+	recordContainsSlice = func(typ *sourceType) bool {
+		if typ == nil || types[typ] {
+			return false
+		}
+		types[typ] = true
+		for _, field := range typ.Fields {
+			if field.Type.Model.SliceElem() != "" || recordContainsSlice(field.Type) {
+				return true
+			}
+		}
+		for _, element := range typ.Tuple {
+			if recordContainsSlice(element) {
+				return true
+			}
+		}
+		return recordContainsSlice(typ.Elem)
+	}
+	for _, fn := range functions {
+		if fn.Stateful != nil {
+			continue
+		}
+		for _, param := range fn.Params {
+			if recordContainsSlice(param.Type) {
+				return true
+			}
+		}
+		for _, result := range fn.Results {
+			if recordContainsSlice(result) {
+				return true
+			}
+		}
+		visited := make(map[*sourceBlock]bool)
+		var scan func(*sourceBlock) bool
+		scan = func(block *sourceBlock) bool {
+			if block == nil || visited[block] {
+				return false
+			}
+			visited[block] = true
+			for _, ins := range block.Instructions {
+				if recordContainsSlice(ins.Type) || ins.Kind == binaryValue && ins.X.Type.Model.SliceElem() != "" {
+					return true
+				}
+				for _, operand := range ins.Operands {
+					if recordContainsSlice(operand.Value.Type) {
+						return true
+					}
+				}
+			}
+			for _, next := range block.Succs {
+				if scan(next) {
+					return true
+				}
+			}
+			return false
+		}
+		if scan(fn.Entry) {
+			return true
+		}
+	}
+	return false
+}
+
 type sourceFunction struct {
 	ID                              int64
 	Name, Package, Receiver, Origin string
@@ -61,6 +128,7 @@ const (
 	fieldAddress
 	indexAddress
 	indexValue
+	emptySliceValue
 	makeMap
 	mapUpdate
 	mapLookup
@@ -95,7 +163,7 @@ type sourceValue struct {
 	Capture                                                     ir.Type
 	ArrayInitial, RecordWhole                                   *sourceValue
 	RecordFields                                                []*sourceValue
-	HasCell, MutableCell                                        bool
+	HasCell, MutableCell, IndexInBounds                         bool
 	Operands                                                    []*sourceOperand
 }
 

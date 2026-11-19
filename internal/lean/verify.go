@@ -2,6 +2,7 @@ package lean
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -11,6 +12,12 @@ import (
 
 type Verification struct {
 	Module       string
+	Scope        ir.Symbol
+	ScopedLaws   []gosource.Law
+	SeparateLaws bool
+	HasModel     bool
+	ModelImports []string
+	LawImports   []string
 	Roots        []VerificationRoot
 	Constructors map[ir.Symbol]bool
 }
@@ -140,11 +147,40 @@ private def auditGoProof (companion proof law : Lean.Name) : Lean.Elab.Command.C
       throwError "required proof {proof} depends on unapproved axiom {axiomName}"
 `
 
+func RenderLaws(v Verification) string {
+	var out strings.Builder
+	out.WriteString(GeneratedHeader + "\nimport Lean.Elab.Command\n")
+	model := moduleName(v.Module, "_gen")
+	if v.HasModel {
+		fmt.Fprintf(&out, "import %s\n", model)
+	}
+	for _, module := range v.LawImports {
+		if v.HasModel && (module == model || slices.Contains(v.ModelImports, module)) {
+			continue
+		}
+		fmt.Fprintf(&out, "import %s\n", module)
+	}
+	out.WriteString(declareLaw)
+	out.WriteString("\nnamespace GoLean\n")
+	for _, root := range v.Roots {
+		renderLaws(&out, root)
+	}
+	if len(v.ScopedLaws) != 0 {
+		renderLaws(&out, VerificationRoot{Symbol: v.Scope, Laws: v.ScopedLaws})
+	}
+	out.WriteString("\nend GoLean\n")
+	return out.String()
+}
+
 func RenderCheck(v Verification) string {
 	var out strings.Builder
 	companion := moduleName(v.Module, "_proofs")
+	suffix := "_gen"
+	if v.SeparateLaws {
+		suffix = "_laws"
+	}
 	fmt.Fprintf(&out, "%s\nimport Lean.Elab.Command\nimport Lean.Util.CollectAxioms\nimport %s\nimport %s\n",
-		GeneratedHeader, moduleName(v.Module, "_gen"), companion)
+		GeneratedHeader, moduleName(v.Module, suffix), companion)
 	imported := make(map[string]bool)
 	link := false
 	for _, root := range v.Roots {
@@ -163,7 +199,11 @@ func RenderCheck(v Verification) string {
 	if link {
 		out.WriteString(declareLaw)
 	}
-	for _, root := range v.Roots {
+	auditRoots := v.Roots
+	if len(v.ScopedLaws) != 0 {
+		auditRoots = append(slices.Clone(auditRoots), VerificationRoot{Symbol: v.Scope, Laws: v.ScopedLaws})
+	}
+	for _, root := range auditRoots {
 		scope := "GoLean." + symbolScope(root.Symbol)
 		for _, law := range root.Laws {
 			name := quoted(law.Name)

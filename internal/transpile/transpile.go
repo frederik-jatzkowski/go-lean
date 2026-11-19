@@ -29,6 +29,9 @@ func Generate(dir string) ([]Output, error) {
 		return nil, err
 	}
 	for _, program := range programs {
+		if len(program.Roots) == 0 {
+			continue
+		}
 		abstract := make(map[ir.Symbol]map[ir.Symbol]bool)
 		for _, fn := range program.Roots {
 			targets := program.Directives[fn].Abstract
@@ -60,11 +63,15 @@ func Generate(dir string) ([]Output, error) {
 			return nil, err
 		}
 		base := strings.TrimSuffix(program.Path, ".go")
-		outputs = append(outputs, Output{
-			Path:   base + "_gen.lean",
-			Source: lean.RenderVerification(model, verification),
-		})
-		if len(verification.Roots) != 0 {
+		if verification.HasModel {
+			outputs = append(outputs, Output{
+				Path: base + "_gen.lean", Source: lean.RenderVerification(model, verification),
+			})
+		}
+		if len(verification.Roots) != 0 || len(verification.ScopedLaws) != 0 {
+			if verification.SeparateLaws {
+				outputs = append(outputs, Output{Path: base + "_laws.lean", Source: lean.RenderLaws(verification)})
+			}
 			outputs = append(outputs, Output{Path: base + "_verify.lean", Source: lean.RenderCheck(verification)})
 		}
 	}

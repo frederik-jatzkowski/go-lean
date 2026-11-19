@@ -37,13 +37,14 @@ func TestExamplesMatchGeneratedOutput(t *testing.T) {
 				return err
 			}
 			if stem, ok := strings.CutSuffix(path, "_proofs.lean"); ok {
-				for _, suffix := range []string{"_gen.lean", "_verify.lean"} {
-					if !found[stem+suffix] {
-						t.Errorf("missing generated module %s", stem+suffix)
-					}
+				if !found[stem+"_gen.lean"] && !found[stem+"_laws.lean"] {
+					t.Errorf("missing generated model or laws module for %s", stem)
+				}
+				if !found[stem+"_verify.lean"] {
+					t.Errorf("missing generated module %s_verify.lean", stem)
 				}
 			}
-			if strings.HasSuffix(path, "_verify.lean") && !found[path] {
+			if (strings.HasSuffix(path, "_verify.lean") || strings.HasSuffix(path, "_laws.lean")) && !found[path] {
 				t.Errorf("obsolete generated verification module %s", path)
 			}
 			return nil

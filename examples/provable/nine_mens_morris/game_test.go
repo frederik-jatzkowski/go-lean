@@ -6,6 +6,25 @@ import (
 	morris "github.com/frederik-jatzkowski/go-lean/examples/provable/nine_mens_morris"
 )
 
+func TestZeroGameRejectsActions(t *testing.T) {
+	var game morris.Game
+	if game.IsValid() || !morris.Start().IsValid() {
+		t.Fatal("only the started game should have an initialized turn")
+	}
+	if game.CanPlace(0) || game.CanMove(0, 1) || game.CanCapture(0) {
+		t.Fatal("an uninitialized game should have no legal actions")
+	}
+	if next, ok := game.Place(0); ok || next != game {
+		t.Fatal("placement changed or accepted an uninitialized game")
+	}
+	if next, ok := game.Move(0, 1); ok || next != game {
+		t.Fatal("movement changed or accepted an uninitialized game")
+	}
+	if next, ok := game.Capture(0); ok || next != game {
+		t.Fatal("capture changed or accepted an uninitialized game")
+	}
+}
+
 func TestPublicGameTransitions(t *testing.T) {
 	start := morris.Start()
 	game := start

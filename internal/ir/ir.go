@@ -316,6 +316,21 @@ type CheckedIndex struct {
 	IndexType    Type
 }
 
+type ArrayReplicate struct {
+	Length string
+	Value  Expr
+}
+
+type ArrayGet struct {
+	Sequence, Index, Default Expr
+	IndexType                Type
+}
+
+type ArraySet struct {
+	Sequence, Index, Value Expr
+	IndexType              Type
+}
+
 type Convert struct {
 	Value Expr
 	To    Type
@@ -374,6 +389,9 @@ func (MapUpdate) expr()          {}
 func (OptionGetD) expr()         {}
 func (OptionIsSome) expr()       {}
 func (CheckedIndex) expr()       {}
+func (ArrayReplicate) expr()     {}
+func (ArrayGet) expr()           {}
+func (ArraySet) expr()           {}
 func (Convert) expr()            {}
 func (Binary) expr()             {}
 

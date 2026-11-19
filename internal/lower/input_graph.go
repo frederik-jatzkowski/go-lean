@@ -309,6 +309,7 @@ const (
 	fieldValueHasCell
 	fieldValueMutableCell
 	fieldValueOperands
+	fieldValueIndexInBounds
 )
 
 func valueFields(f sourceFields, value *sourceValue) {
@@ -347,6 +348,7 @@ func valueFields(f sourceFields, value *sourceValue) {
 	booleanField(f, fieldValueHasCell, &value.HasCell)
 	booleanField(f, fieldValueMutableCell, &value.MutableCell)
 	referenceListField(f, fieldValueOperands, &value.Operands, operandFields)
+	booleanField(f, fieldValueIndexInBounds, &value.IndexInBounds)
 }
 
 const (

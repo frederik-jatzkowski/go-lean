@@ -29,24 +29,29 @@ func verificationRoots(programs []gosource.Program) (map[*ssa.Function]gosource.
 			for _, target := range program.Directives[fn].Abstract {
 				callee := target.Callee
 				owner, exists := owners[callee]
+				assumed := len(program.Assumptions[callee]) != 0
+				name := functionName(callee)
 				switch {
 				case !scalarFunction(fn):
 					return nil, fmt.Errorf("%s: abstraction requires a non-generic scalar caller", target.Position)
 				case !scalarFunction(callee):
-					return nil, fmt.Errorf("%s: abstract callee must take scalar arguments and return one scalar result", target.Position)
-				case !exists || len(owner.Directives[callee].Laws) == 0:
-					return nil, fmt.Errorf("%s: abstract callee %s requires named //golean:verify laws in this Go module", target.Position, callee)
-				case names[callee.Name()]:
+					return nil, fmt.Errorf("%s: abstract callee must take scalar arguments and return one scalar result; methods require a scalar value receiver", target.Position)
+				case !assumed && (!exists || len(owner.Directives[callee].Laws) == 0):
+					return nil, fmt.Errorf("%s: abstract callee %s requires named //golean:assume or //golean:verify laws in this Go module", target.Position, callee)
+				case names[name]:
 					return nil, fmt.Errorf("%s: abstract callees must use distinct function names", target.Position)
 				case !hasDirectCall(fn, callee):
 					return nil, fmt.Errorf("%s: %s must be called directly by %s", target.Position, callee, fn.Name())
 				}
+				names[name] = true
+				if assumed {
+					continue
+				}
 				for _, root := range owner.Roots {
-					if len(owner.Directives[root].Abstract) != 0 {
+					if (owner.Path != program.Path || root == callee) && len(owner.Directives[root].Abstract) != 0 {
 						return nil, fmt.Errorf("%s: abstract callee must belong to a module with concrete proofs", target.Position)
 					}
 				}
-				names[callee.Name()] = true
 			}
 		}
 	}
@@ -55,7 +60,7 @@ func verificationRoots(programs []gosource.Program) (map[*ssa.Function]gosource.
 
 func scalarFunction(fn *ssa.Function) bool {
 	sig := fn.Signature
-	if sig.Recv() != nil || sig.TypeParams().Len() != 0 || sig.Variadic() || sig.Results().Len() != 1 {
+	if sig.TypeParams().Len() != 0 || sig.RecvTypeParams().Len() != 0 || len(fn.TypeArgs()) != 0 || sig.Variadic() || sig.Results().Len() != 1 {
 		return false
 	}
 	scalar := func(t types.Type) bool {
@@ -65,6 +70,9 @@ func scalarFunction(fn *ssa.Function) bool {
 		default:
 			return kind.IsInteger()
 		}
+	}
+	if recv := sig.Recv(); recv != nil && !scalar(recv.Type()) {
+		return false
 	}
 	for param := range sig.Params().Variables() {
 		if !scalar(param.Type()) {
@@ -86,6 +94,10 @@ func hasDirectCall(caller, callee *ssa.Function) bool {
 }
 
 func rootSymbol(program gosource.Program, fn *ssa.Function) ir.Symbol {
+	return ir.Symbol{Package: program.Package.Pkg.Path(), File: url.PathEscape(sourceStem(program.Path)), Name: functionName(fn)}
+}
+
+func functionName(fn *ssa.Function) string {
 	name := fn.Name()
 	if receiver := fn.Signature.Recv(); receiver != nil {
 		t := types.Unalias(receiver.Type())
@@ -94,11 +106,27 @@ func rootSymbol(program gosource.Program, fn *ssa.Function) ir.Symbol {
 		}
 		name = t.(*types.Named).Obj().Name() + "$" + name
 	}
-	return ir.Symbol{Package: program.Package.Pkg.Path(), File: url.PathEscape(sourceStem(program.Path)), Name: name}
+	return name
 }
 
 func abstractSymbol(caller ir.Symbol, callee *ssa.Function) ir.Symbol {
-	return ir.Symbol{Package: caller.Package, File: caller.File, Dependency: callee.Pkg.Pkg.Path(), Name: callee.Name()}
+	symbol := ir.Symbol{Package: caller.Package, File: caller.File, Name: functionName(callee)}
+	if path := callee.Pkg.Pkg.Path(); path != caller.Package {
+		symbol.Dependency = path
+	}
+	return symbol
+}
+
+func assumedSignature(fn *ssa.Function) ir.Function {
+	sig := fn.Signature
+	model := ir.Function{Result: subset.Type(sig.Results().At(0).Type())}
+	if recv := sig.Recv(); recv != nil {
+		model.Params = append(model.Params, ir.Binder{Type: subset.Type(recv.Type())})
+	}
+	for param := range sig.Params().Variables() {
+		model.Params = append(model.Params, ir.Binder{Type: subset.Type(param.Type())})
+	}
+	return model
 }
 
 func findModel(program ir.Program, symbol ir.Symbol) (ir.Function, bool) {
@@ -127,6 +155,12 @@ func makeVerification(dir string, program gosource.Program, owners map[*ssa.Func
 			if model.Loop != nil || model.Fuel != nil {
 				return verification, fmt.Errorf("%s: abstraction is unsupported in a loop helper or fuelled caller", target.Position)
 			}
+			if laws := program.Assumptions[target.Callee]; len(laws) != 0 {
+				root.Abstract = append(root.Abstract, lean.AbstractCall{
+					Call: abstractSymbol(symbol, target.Callee), Signature: assumedSignature(target.Callee), Operation: target.Callee.Name(), Laws: laws,
+				})
+				continue
+			}
 			owner := owners[target.Callee]
 			callee := rootSymbol(owner, target.Callee)
 			concrete, found := findModel(lowered[owner.Path], callee)
@@ -138,7 +172,7 @@ func makeVerification(dir string, program gosource.Program, owners map[*ssa.Func
 				return verification, err
 			}
 			root.Abstract = append(root.Abstract, lean.AbstractCall{
-				Call: abstractSymbol(symbol, target.Callee), Concrete: concrete, Module: module, Laws: owner.Directives[target.Callee].Laws,
+				Call: abstractSymbol(symbol, target.Callee), Signature: concrete, Operation: callee.Name, Module: module, Laws: owner.Directives[target.Callee].Laws,
 			})
 		}
 		verification.Roots = append(verification.Roots, root)

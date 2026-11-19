@@ -45,7 +45,24 @@ The examples and lowering self-proofs declare their laws in Go doc comments. Eac
 
 Write each proof in `<stem>_proofs.lean` under the generated model's namespace followed by `.Proofs`. A theorem named `clampBounds` can use `Laws.clampBounds` as its statement. Add the model, proof, and generated `<stem>_verify.lean` modules to the default Lake library's roots. Lake checks that the companion supplies each theorem, its type matches the Go law, and its dependencies use only the allowed Lean axioms. Run `make generate` after Go edits and `make check` to check generated-file freshness and build the proofs.
 
-[ClampImport](examples/provable/clampimport/clampimport.go) uses `//golean:abstract limits.Min` and `//golean:abstract limits.Max` to prove its laws through the callees' contracts. The pilot supports direct calls to imported, total scalar functions that declare their own verification laws in this Go module. Write each callee law using its unqualified Go function name for the operation. The caller model takes those operations and law fields as arguments. The generated verification module supplies the actual operations with their checked proofs and specializes the caller theorems.
+### Abstract calls and assumed laws
+
+Use `//golean:assume <name> : <Lean proposition>` on a function or concrete method to specify a boundary for a caller. Continue a proposition with consecutive `//golean:assume+` lines. Each law name is unique within the declaration. Use the unqualified Go function or method name for the Lean operation and pass a method's receiver as its first argument.
+
+```go
+//golean:assume quotaBound : ReadQuota ≤ 10
+func ReadQuota() int64 { return configuredQuota }
+
+//golean:abstract ReadQuota
+//golean:verify deniesEleven : CanSpend 11 = false
+func CanSpend(cost int64) bool { return cost <= ReadQuota() }
+```
+
+A caller with a named verification law can abstract a direct, statically resolved call using `Function`, `Type.Method`, `pkg.Function`, or `pkg.Type.Method`. The caller and callee must have non-generic, non-variadic scalar signatures with one scalar result. Methods require a scalar value receiver. Callers that lower to loop helpers or use recursion fuel are unsupported.
+
+The caller opts in per callee. An ordinary call or a separately selected verification root still goes through subset checking. An assumption-only declaration generates no Lean module of its own. The caller's Lean model takes a contract containing the operation and its law proofs, and the checked theorem quantifies over that contract. Applying the theorem to the Go implementation requires evidence that the callee returns without panicking, behaves as a single deterministic operation throughout the modeled execution, has no effects observable by the caller beyond its return value, and satisfies the laws.
+
+Examples cover a [global configuration read](examples/provable/assumed_quota/assumed_quota.go), a [goroutine-backed helper](examples/provable/assumed_worker/assumed_worker.go), and a [reflection-backed method](examples/provable/assumed_reflection/assumed_reflection.go). When every abstract callee supplies checked `verify` laws, the verification module also specializes the theorem with the concrete operations and their proofs, as in [ClampImport](examples/provable/clampimport/clampimport.go).
 
 ## Multiple results
 

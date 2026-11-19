@@ -21,10 +21,20 @@ type VerificationRoot struct {
 }
 
 type AbstractCall struct {
-	Call     ir.Symbol
-	Concrete ir.Function
-	Module   string
-	Laws     []gosource.Law
+	Call      ir.Symbol
+	Signature ir.Function
+	Operation string
+	Module    string
+	Laws      []gosource.Law
+}
+
+func (r VerificationRoot) canLink() bool {
+	for _, target := range r.Abstract {
+		if target.Module == "" {
+			return false
+		}
+	}
+	return len(r.Abstract) != 0
 }
 
 func moduleName(path, suffix string) string {
@@ -77,12 +87,12 @@ func abstractType(root VerificationRoot, target AbstractCall) string {
 
 func (r renderer) renderAbstractContract(out *strings.Builder, root VerificationRoot, target AbstractCall) {
 	var signature []string
-	for _, param := range target.Concrete.Params {
+	for _, param := range target.Signature.Params {
 		signature = append(signature, r.leanType(param.Type))
 	}
-	signature = append(signature, r.leanType(target.Concrete.Result))
+	signature = append(signature, r.leanType(target.Signature.Result))
 	operationType := strings.Join(signature, " → ")
-	operation := quoted(target.Call.Name)
+	operation := quoted(target.Operation)
 	name := strings.TrimPrefix(abstractType(root, target), "_root_.GoLean.")
 	for _, law := range target.Laws {
 		emitLaw(out, name+".Statements."+quoted(law.Name), "("+operationType+") → Prop",
@@ -135,16 +145,21 @@ func RenderCheck(v Verification) string {
 	fmt.Fprintf(&out, "%s\nimport Lean.Elab.Command\nimport Lean.Util.CollectAxioms\nimport %s\nimport %s\n",
 		GeneratedHeader, moduleName(v.Module, "_gen"), companion)
 	imported := make(map[string]bool)
+	link := false
 	for _, root := range v.Roots {
+		if !root.canLink() {
+			continue
+		}
+		link = true
 		for _, target := range root.Abstract {
-			if !imported[target.Module] {
+			if target.Module != v.Module && !imported[target.Module] {
 				fmt.Fprintf(&out, "import %s\n", moduleName(target.Module, "_verify"))
 				imported[target.Module] = true
 			}
 		}
 	}
 	out.WriteString(auditProof)
-	if len(imported) != 0 {
+	if link {
 		out.WriteString(declareLaw)
 	}
 	for _, root := range v.Roots {
@@ -155,8 +170,10 @@ func RenderCheck(v Verification) string {
 			fmt.Fprintf(&out, "\nrun_cmd auditGoProof `%s `%s `%s.Laws.%s\n", companion, proof, scope, name)
 			fmt.Fprintf(&out, "theorem %s.Checked.%s : %s.Laws.%s := %s\n", scope, name, scope, name, proof)
 		}
-		if len(root.Abstract) != 0 {
-			renderLink(&out, root, scope)
+	}
+	for _, root := range v.Roots {
+		if root.canLink() {
+			renderLink(&out, root, "GoLean."+symbolScope(root.Symbol))
 		}
 	}
 	return out.String()
@@ -165,7 +182,7 @@ func RenderCheck(v Verification) string {
 func renderLink(out *strings.Builder, root VerificationRoot, scope string) {
 	var arguments []string
 	for _, target := range root.Abstract {
-		callee := target.Concrete.Symbol
+		callee := target.Signature.Symbol
 		name := scope + ".Linked." + quoted(root.Symbol.Name+"$"+callee.Name)
 		arguments = append(arguments, name)
 		fmt.Fprintf(out, "\ndef %s : %s where\n  operation := GoLean.%s\n",

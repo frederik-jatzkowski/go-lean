@@ -436,7 +436,11 @@ func (l *lowerer) instructions(block, predecessor *sourceBlock, start int) ir.Bo
 				continue
 			}
 			target := ins.Call.Target
-			call := ir.Call{Callee: l.symbol(target), Contracts: l.facts.contracts(target)}
+			call := ir.Call{Callee: l.symbol(target)}
+			abstract := l.abstract[call.Callee]
+			if !abstract {
+				call.Contracts = l.facts.contracts(target)
+			}
 			for _, contract := range call.Contracts {
 				l.usedContracts[contract] = true
 			}
@@ -445,7 +449,10 @@ func (l *lowerer) instructions(block, predecessor *sourceBlock, start int) ir.Bo
 					call.Args = append(call.Args, l.value(capture))
 				}
 			}
-			build := target.Build
+			var build *sourceBuild
+			if !abstract {
+				build = target.Build
+			}
 			for i, arg := range ins.Call.Args {
 				if build != nil && target.Params[i] == build.Callback {
 					call.Args = append(call.Args, l.sliceCallback(arg, build.Effectful))
@@ -453,7 +460,7 @@ func (l *lowerer) instructions(block, predecessor *sourceBlock, start int) ir.Bo
 					call.Args = append(call.Args, l.value(arg))
 				}
 			}
-			canPanic := !l.abstract[call.Callee] && l.facts.effect(target)
+			canPanic := !abstract && l.facts.effect(target)
 			result.Bindings = append(result.Bindings, ir.Binding{
 				Binder: l.bind(ins), Value: call, CanPanic: canPanic,
 			})

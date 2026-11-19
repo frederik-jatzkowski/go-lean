@@ -19,6 +19,7 @@ type Program struct {
 	Package       *ssa.Package
 	Roots         []*ssa.Function
 	Directives    map[*ssa.Function]Directives
+	Assumptions   map[*ssa.Function][]Law
 	WordBits      int64
 	InterfaceDocs map[*types.TypeName]InterfaceDoc
 }
@@ -78,11 +79,13 @@ func Load(dir string) ([]Program, error) {
 	prog, _ := ssautil.AllPackages(selectedPackages, ssa.InstantiateGenerics)
 	prog.Build()
 	docs := interfaceDocs(loaded)
+	assumptions := make(map[*ssa.Function][]Law)
 	programs := make([]Program, 0, len(selected))
 	for _, file := range selected {
 		result := Program{
 			Path: filepath.Clean(file.path), Package: prog.Package(file.pkg.Types),
 			InterfaceDocs: docs,
+			Assumptions:   assumptions,
 			Directives:    make(map[*ssa.Function]Directives),
 			WordBits:      8 * file.pkg.TypesSizes.Sizeof(types.Typ[types.Int]),
 		}
@@ -90,6 +93,12 @@ func Load(dir string) ([]Program, error) {
 			fn := prog.FuncValue(root.fn)
 			if fn == nil {
 				return nil, packages.Error{Pos: fset.Position(root.fn.Pos()).String(), Msg: "no SSA definition for " + root.fn.Name()}
+			}
+			if len(root.assumptions) != 0 {
+				assumptions[fn] = root.assumptions
+			}
+			if !root.marked {
+				continue
 			}
 			result.Roots = append(result.Roots, fn)
 			directives := Directives{Laws: root.laws}
@@ -102,7 +111,9 @@ func Load(dir string) ([]Program, error) {
 			}
 			result.Directives[fn] = directives
 		}
-		programs = append(programs, result)
+		if len(result.Roots) != 0 {
+			programs = append(programs, result)
+		}
 	}
 	return programs, nil
 }

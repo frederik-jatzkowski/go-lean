@@ -5,7 +5,7 @@ description: Write, refactor, and verify idiomatic Go with go-lean. Use when cho
 
 # Getting started
 
-go-lean translates marked Go functions and methods and their reachable supported helpers into Lean definitions. Lean checks the laws you state about those definitions. Applying a theorem to Go execution relies on the correctness of the translation, the stated input preconditions, and the behavior of any modeled dependencies.
+go-lean's main purpose is to prove observable behavior at Go package boundaries. It translates marked Go functions and methods and their reachable supported helpers into Lean definitions. Lean checks the laws you state about those definitions. Applying a theorem to Go execution relies on the correctness of the translation, the stated input preconditions, and the behavior of any modeled dependencies.
 
 - Use the Go version in [go.mod](../../../go.mod) and the Lean version in [lean-toolchain](../../../lean-toolchain). Install Elan using the [Lean installation guide](https://lean-lang.org/install/manual/) and confirm `lake --version` from the project root. The repository pins Go Task as a Go tool.
 - In this repository, run `go tool task generate` followed by `go tool task check`. The direct equivalents are `go run ./cmd/go-lean transpile ./...` for generation and `go test ./...`, `go vet ./...`, and `lake build` for checks.
@@ -37,7 +37,11 @@ Regenerate after Go edits. On a subset error, start with the reported source loc
 
 # go-lean idiomatic Go
 
-Start with a property the program needs, such as preserving a bound, rejecting an invalid input, or maintaining an invariant after an update. Select the smallest ordinary function or method that captures the behavior. State input preconditions that the caller can establish and prove the property across the relevant inputs and branches.
+go-lean works best with a rich domain model. Put most business rules on the entities whose state they govern, and keep those methods free of external side effects. In [Nine Men's Morris](../../../examples/provable/nine_mens_morris/morris.go), the public action methods enforce the rules and return the complete next game value. Callers handle persistence and I/O.
+
+Start with a property callers rely on, such as preserving a bound, rejecting an invalid input, or maintaining an invariant after an update. Put verification laws directly on the public functions and methods callers use whenever possible. State input preconditions callers can establish and prove the property across the relevant inputs and branches.
+
+Prove internal behavior separately when it helps establish a public law or supplies a useful invariant. If go-lean cannot model a public entry point, report the exact blocker and which observable behavior a narrower proof would cover before proposing that change.
 
 - Prefer explicit inputs, small functions, value structs, and straightforward branches. Keep state local where possible. Read slices and maps without mutating caller-owned storage. Build a fresh result when ownership matters. Favor supported counted loops or slice traversals and make the bound evident. For an in-place operation that fits the API, keep mutation within one tracked receiver and state what changes and what is preserved. See [batch fulfillment](../../../examples/provable/batch_fulfillment/batch_fulfillment_proofs.lean) for a bounded state update.
 - Use the generated types to write the law. Go integer arithmetic wraps at the modeled width, and `int` and `uint` depend on the Go target. If wrapping would break the property, prove it cannot occur under the relevant preconditions. For indexing, division, or nil dereference, use guards or explicit preconditions and prove a successful result where needed. See [guarded division](../../../examples/provable/division_guarded/division_guarded_proofs.lean).

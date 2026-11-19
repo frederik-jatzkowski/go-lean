@@ -174,6 +174,18 @@ Run `lake build grid_game.grid_game_verify` to check the [no-win proof](examples
 It proves that `Won` returns false after every finite sequence of directions from
 `Start`, in either mode. This covers every finite prefix supplied by the callback.
 
+### Play Nine Men's Morris
+
+```sh
+go run ./examples/provable/nine_mens_morris/cmd/morris
+lake build nine_mens_morris.morris_verify
+```
+
+Two players share the terminal and enter the numbered points shown on the
+board. Enter one point to place or capture, two points to move, or `q` to quit.
+The [example guide](examples/provable/nine_mens_morris/README.md) explains the
+rule variant and the scope of its Lean proofs.
+
 `examples/reject/` contains 15 draft fixtures behind the `golean_reject` build tag. The table records the intended rejection reasons for future tests.
 
 | Fixture | Intended rejection reason |

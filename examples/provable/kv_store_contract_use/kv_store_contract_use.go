@@ -3,9 +3,7 @@ package kv_store_contract_use
 // KVStore describes a functional update followed by a read of the updated key.
 type KVStore interface {
 	Get(key int64) int64
-	//golean:start
-	// get_after_put : ∀ s k v, Get (Put s k v) k = v
-	//golean:end
+	//golean:law get_after_put : ∀ s k v, Get (Put s k v) k = v
 	Put(key, value int64) KVStore
 }
 

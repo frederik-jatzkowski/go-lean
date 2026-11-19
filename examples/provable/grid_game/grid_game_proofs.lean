@@ -4,6 +4,37 @@ open GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game
 
 namespace GridGame
 
+-- Direction values follow the Go constants: Up = 0, Down = 1, Left = 2, Right = 3.
+private abbrev sameCoordinates (actual expected : Position) : Prop :=
+  actual.«field:X» = expected.«field:X» ∧ actual.«field:Y» = expected.«field:Y»
+
+theorem stepBoundedEdge :
+    sameCoordinates (Step (Position.mk 0 3) 2 false) (Position.mk 0 3) := by decide
+
+theorem stepLeftWraps :
+    sameCoordinates (Step (Position.mk 0 3) 2 true) (Position.mk 7 3) := by decide
+
+theorem stepRightWraps :
+    sameCoordinates (Step (Position.mk 7 3) 3 true) (Position.mk 0 3) := by decide
+
+theorem stepUpWraps :
+    sameCoordinates (Step (Position.mk 1 0) 0 true) (Position.mk 1 7) := by decide
+
+theorem stepDownWraps :
+    sameCoordinates (Step (Position.mk 1 7) 1 true) (Position.mk 1 0) := by decide
+
+theorem stepOrdinaryWall :
+    sameCoordinates (Step (Position.mk 4 1) 3 false) (Position.mk 4 1) := by decide
+
+theorem stepHorizontalSeamWall :
+    sameCoordinates (Step Start 2 true) Start := by decide
+
+theorem stepVerticalSeamWall :
+    sameCoordinates (Step (Position.mk 7 6) 1 true) (Position.mk 7 6) := by decide
+
+theorem stepUnknownDirection :
+    sameCoordinates (Step Start 255 true) Start := by decide
+
 -- The exterior consists of the in-bounds cells outside the goal room and its walls.
 private def safe (wrap : Bool) (position : Position) : Bool :=
   decide (position.«field:X».toNat < 8) &&

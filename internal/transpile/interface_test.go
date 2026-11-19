@@ -15,9 +15,7 @@ func TestRejectMultiResultInterfaceContract(t *testing.T) {
 	dir := newModule(t)
 	writeFile(t, filepath.Join(dir, "input.go"), `package sample
 
-// golean:start
-// law : True
-// golean:end
+//golean:law law : True
 type Service interface {
 	Get() (int64, bool)
 }
@@ -40,19 +38,14 @@ func TestImportedInterfaceContract(t *testing.T) {
 
 // Evaluator models a read.
 //
-// golean:start
-// read_identity : ∀ s x, Read s x = x
-// golean:end
+//golean:law read_identity : ∀ s x, Read s x = x
+//golean:law second_law : True
 type Evaluator interface {
-	//golean:start
-	// read_zero : ∀ s, Read s 0 = 0
-	//golean:end
+	//golean:law read_zero : ∀ s, Read s 0 = 0
 	Read(int) int
 }
 
-// golean:start
-// unused_law : True
-// golean:end
+//golean:law unused_law : True
 type Unused interface { Read(int) int }
 `))
 	if err != nil {
@@ -81,6 +74,7 @@ func Divide(e boundary.Evaluator, x int) int { return x / read(e, x) }
 	for _, want := range []string{
 		".Dependencies.«example.test/sample/boundary».InterfaceContracts.«EvaluatorContract»",
 		"read_identity : ∀ s x, Read s x = x",
+		"second_law : True",
 		"read_zero : ∀ s, Read s 0 = 0",
 		".«Read» «v0_e» «v1_x»",
 		".«read» «contract:",
@@ -93,16 +87,23 @@ func Divide(e boundary.Evaluator, x int) int { return x / read(e, x) }
 	if strings.Count(got, "\nstructure ") != 1 || strings.Contains(got, "unused_law") {
 		t.Fatalf("expected only the reached contract:\n%s", got)
 	}
+	if strings.Index(got, "read_identity :") >= strings.Index(got, "second_law :") ||
+		strings.Index(got, "second_law :") >= strings.Index(got, "read_zero :") {
+		t.Fatalf("expected contract laws in declaration order:\n%s", got)
+	}
 }
 
 func TestInterfaceContractRejections(t *testing.T) {
-	const contract = "//golean:start\n// valid : True\n//golean:end\n"
+	const contract = "//golean:law valid : True\n"
 	for _, test := range []struct {
 		name, declaration, function, message string
 	}{
 		{"unannotated", "type Evaluator interface { Evaluate(int64) int64 }", "func Apply(e Evaluator, x int64) int64 { return e.Evaluate(x) }", "requires a golean contract"},
-		{"unclosed", "//golean:start\n// valid : True\ntype Evaluator interface { Evaluate(int64) int64 }", "func Apply(e Evaluator) int64 { return e.Evaluate(0) }", "no matching golean:end"},
-		{"nested", "//golean:start\n//golean:start\n//golean:end\ntype Evaluator interface { Evaluate(int64) int64 }", "func Apply(e Evaluator) int64 { return e.Evaluate(0) }", "nested golean:start"},
+		{"legacy start", "//golean:start\ntype Evaluator interface { Evaluate(int64) int64 }", "func Apply(e Evaluator) int64 { return e.Evaluate(0) }", "use //golean:law"},
+		{"legacy end", "//golean:end\ntype Evaluator interface { Evaluate(int64) int64 }", "func Apply(e Evaluator) int64 { return e.Evaluate(0) }", "use //golean:law"},
+		{"empty law", "//golean:law\ntype Evaluator interface { Evaluate(int64) int64 }", "func Apply(e Evaluator) int64 { return e.Evaluate(0) }", "expected //golean:law"},
+		{"missing law name", "//golean:law : True\ntype Evaluator interface { Evaluate(int64) int64 }", "func Apply(e Evaluator) int64 { return e.Evaluate(0) }", "expected //golean:law"},
+		{"missing proposition", "//golean:law empty :\ntype Evaluator interface { Evaluate(int64) int64 }", "func Apply(e Evaluator) int64 { return e.Evaluate(0) }", "expected //golean:law"},
 		{"embedded", "type Reader interface { Evaluate(int64) int64 }\n" + contract + "type Evaluator interface { Reader }", "func Apply(e Evaluator) int64 { return e.Evaluate(0) }", "embedded interfaces"},
 		{"nil receiver", contract + "type Evaluator interface { Evaluate(int64) int64 }", "func Apply() int64 { return Evaluator(nil).Evaluate(0) }", "non-nil handle"},
 		{"nil comparison", contract + "type Evaluator interface { Evaluate(int64) int64 }", "func Apply(e Evaluator) bool { return e == nil }", "unsupported runtime operation"},
@@ -130,9 +131,7 @@ func TestIllTypedInterfaceLawRejectedByLean(t *testing.T) {
 	dir := newModule(t)
 	writeFile(t, filepath.Join(dir, "input.go"), `package sample
 type Evaluator interface {
-	//golean:start
-	// invalid_law : ∀ s, Evaluate s true = 0
-	//golean:end
+	//golean:law invalid_law : ∀ s, Evaluate s true = 0
 	Evaluate(int64) int64
 }
 

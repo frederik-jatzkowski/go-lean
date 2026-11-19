@@ -2,73 +2,68 @@
 package lower
 
 import (
-	"go/constant"
-	"go/token"
-	"go/types"
 	"maps"
-	"math"
 	"net/url"
 	"slices"
 	"strconv"
 
 	"github.com/frederik-jatzkowski/go-lean/internal/ir"
-	"github.com/frederik-jatzkowski/go-lean/internal/subset"
-	"golang.org/x/tools/go/ssa"
 )
 
-func FromSSA(checked subset.Checked, sourceStem string, wordBits int64) ir.Program {
+func FromSSA(input Input, sourceStem string, wordBits int64) ir.Program {
 	program := ir.Program{Records: make(map[ir.Type]ir.Record), Contracts: make(map[ir.Type]ir.Contract)}
 	file := url.PathEscape(sourceStem)
+	reader := inputReader{input: input, objects: make(map[int64]any)}
 	// The checker orders callees before callers, so their effects are already known.
-	effects := make(map[*ssa.Function]bool)
-	dependencies := make(map[*ssa.Function][]ir.Type)
-	instances := make(map[*ssa.Function]string)
-	for _, fn := range checked.Functions() {
-		if len(fn.TypeArgs()) != 0 {
-			instances[fn] = fn.Origin().Name() + "$instance" + strconv.Itoa(len(instances))
+	facts := &functionFacts{store: stateSnapshot{}}
+	instances := make(map[*sourceFunction]string)
+	for i := int64(0); i < input.FunctionCount(); i++ {
+		fn := reader.decodeFunction(input.FunctionAt(i))
+		if fn.Origin != "" {
+			instances[fn] = fn.Origin + "$instance" + strconv.Itoa(len(instances))
 		}
 		l := lowerer{
-			root: checked.Root(), file: file, bindings: make(map[ssa.Value]ir.Binder), effects: effects,
-			checked: checked, records: program.Records, instances: instances,
-			contracts: program.Contracts, dependencies: dependencies, usedContracts: make(map[ir.Type]bool),
+			root: input.PackagePath(), input: input, file: file, state: stateSnapshot{}, binders: new([]ir.Binder), facts: facts,
+			records: program.Records, instances: instances,
+			contracts: program.Contracts, usedContracts: make(map[ir.Type]bool),
 		}
-		if method := checked.Stateful(fn); method != nil {
+		if method := fn.Stateful; method != nil {
 			program.Functions = append(program.Functions, l.lowerStateful(fn, method)...)
 			if l.usesWord {
 				program.WordBits = wordBits
 			}
 			continue
 		}
-		result := ir.Function{Symbol: l.symbol(fn), Result: productType(fn.Signature.Results(), l.valueType)}
-		for i := 0; i < fn.Signature.TypeParams().Len(); i++ {
+		result := ir.Function{Symbol: l.symbol(fn), Result: productType(fn.Results, l.valueType)}
+		for i := 0; i < fn.TypeParameters; i++ {
 			result.TypeParams = append(result.TypeParams, ir.TypeParameter(i))
 		}
 		for _, capture := range fn.FreeVars {
 			result.Params = append(result.Params, l.bindAs(capture, l.captureType(capture)))
 		}
-		chain := checked.ChainRecursion(fn)
+		chain := fn.Chain
 		for _, param := range fn.Params {
-			if build := checked.SliceBuild(fn); build != nil && param == build.Callback {
-				result.Params = append(result.Params, l.bindAs(param, build.CallbackType()))
+			if build := fn.Build; build != nil && param == build.Callback {
+				result.Params = append(result.Params, l.bindAs(param, build.CallbackType))
 			} else if chain != nil && param == chain.Input {
 				result.Params = append(result.Params, l.bindAs(param, ir.SliceType(chain.Element)))
 			} else {
 				result.Params = append(result.Params, l.bind(param))
 			}
 		}
-		if loop := checked.CountedLoop(fn); loop != nil {
+		if loop := fn.Counted; loop != nil {
 			if loop.Structured != nil {
 				l.lowerStructuredCountedLoop(&result, loop)
 			} else {
 				l.lowerCountedLoop(&result, loop)
 			}
-		} else if fold := checked.RangeFold(fn); fold != nil {
+		} else if fold := fn.Range; fold != nil {
 			if fold.Structured != nil {
 				result.Body.Result = l.lowerStructuredFold(fold)
 			} else {
 				result.Body.Result = l.lowerRangeFold(fold)
 			}
-		} else if build := checked.SliceBuild(fn); build != nil {
+		} else if build := fn.Build; build != nil {
 			if build.Exit != nil {
 				result.Body = l.lowerSliceResults(build)
 			} else if build.Element == nil {
@@ -80,21 +75,50 @@ func FromSSA(checked subset.Checked, sourceStem string, wordBits int64) ir.Progr
 		} else if chain != nil {
 			result.Body.Result = l.lowerChainRecursion(chain)
 		} else {
-			result.Body = l.body(fn.Blocks[0], nil)
+			result.Body = l.body(fn.Entry, nil)
 		}
 		if l.usesWord {
 			program.WordBits = wordBits
 		}
 		result.Contracts = slices.Sorted(maps.Keys(l.usedContracts))
-		dependencies[fn] = result.Contracts
 		result.CanPanic = l.canPanic
-		effects[fn] = result.CanPanic
 		program.Functions = append(program.Functions, result)
+		facts.record(fn, result.CanPanic, result.Contracts)
 	}
 	return program
 }
 
-func (l *lowerer) lowerCountedLoop(fn *ir.Function, loop *subset.CountedLoop) {
+// lookupBindingID resolves a source value in the current branch's store.
+//
+//golean:verify
+func lookupBindingID(state StateStore, value int64) (int64, bool) {
+	if !state.HasBinding(value) {
+		return 0, false
+	}
+	return state.LookupBinding(value), true
+}
+
+// recordEmission records the effect fact after a definition has been emitted.
+//
+//golean:verify
+func recordEmission(state StateStore, function int64, canPanic bool) StateStore {
+	if canPanic {
+		return state.PutFact(function, effectFact, 1)
+	}
+	return state.PutFact(function, effectFact, 0)
+}
+
+// lookupEmission distinguishes a known pure definition from an absent one.
+//
+//golean:verify
+func lookupEmission(state StateStore, function int64) (bool, bool) {
+	if !state.HasFact(function, effectFact) {
+		return false, false
+	}
+	return state.LookupFact(function, effectFact) != 0, true
+}
+
+func (l *lowerer) lowerCountedLoop(fn *ir.Function, loop *sourceCounted) {
 	helper := ir.CountedLoop{Symbol: fn.Symbol, State: l.bind(loop.State)}
 	helper.Symbol.Name += "$loop"
 	call := ir.Call{Callee: helper.Symbol}
@@ -108,7 +132,7 @@ func (l *lowerer) lowerCountedLoop(fn *ir.Function, loop *subset.CountedLoop) {
 	fn.Body.Bindings = l.lowerPureSteps(loop.Before)
 	helper.Next = l.value(loop.Next)
 	call.Args = append(call.Args, ir.LoopFuel{Start: l.value(loop.Start), Bound: l.value(loop.Bound),
-		Signed: !subset.Type(loop.Bound.Type()).IsUnsigned(), ZeroStart: subset.IsZero(loop.Start)}, l.value(loop.Initial))
+		Signed: !loop.Bound.Type.Model.IsUnsigned(), ZeroStart: loop.Start.IsZero}, l.value(loop.Initial))
 	if loop.Result == loop.State && len(loop.After) == 0 {
 		fn.Body.Result = ir.Return{Value: call}
 	} else {
@@ -119,7 +143,7 @@ func (l *lowerer) lowerCountedLoop(fn *ir.Function, loop *subset.CountedLoop) {
 	fn.Loop = &helper
 }
 
-func (l *lowerer) lowerRangeFold(fold *subset.RangeFold) ir.ListFold {
+func (l *lowerer) lowerRangeFold(fold *sourceRange) ir.ListFold {
 	result := ir.ListFold{
 		Sequence: l.value(fold.Source), Initial: l.value(fold.Initial),
 		State: l.bind(fold.State), Element: l.bind(fold.Element),
@@ -129,7 +153,7 @@ func (l *lowerer) lowerRangeFold(fold *subset.RangeFold) ir.ListFold {
 	return result
 }
 
-func (l *lowerer) lowerSliceResults(build *subset.SliceBuild) ir.Body {
+func (l *lowerer) lowerSliceResults(build *sourceBuild) ir.Body {
 	var body ir.Body
 	for _, length := range build.Lengths {
 		body.Bindings = append(body.Bindings, ir.Binding{Binder: l.bind(length),
@@ -155,7 +179,7 @@ func (l *lowerer) lowerSliceResults(build *subset.SliceBuild) ir.Body {
 	return body
 }
 
-func (l *lowerer) lowerSliceBuild(build *subset.SliceBuild) ir.ListBuild {
+func (l *lowerer) lowerSliceBuild(build *sourceBuild) ir.ListBuild {
 	result := ir.ListBuild{Sequence: l.value(build.Source), Element: l.bind(build.Element), Effectful: build.Effectful}
 	if iter := build.Iteration; iter != nil {
 		l.iteration = &iteration{header: iter.Header, skip: iter.Skip, stores: iter.Stores}
@@ -176,8 +200,8 @@ func (l *lowerer) lowerSliceBuild(build *subset.SliceBuild) ir.ListBuild {
 	return result
 }
 
-func (l *lowerer) lowerChainRecursion(chain *subset.ChainRecursion) ir.ListRecursion {
-	input := l.bindings[chain.Input]
+func (l *lowerer) lowerChainRecursion(chain *sourceChain) ir.ListRecursion {
+	input := l.mustBinding(chain.Input)
 	result := ir.ListRecursion{Input: input, Tail: l.bindAs(chain.Tail, input.Type), Base: packResults(chain.Base, l.value)}
 	if chain.Head != nil {
 		head := l.bind(chain.Head)
@@ -188,20 +212,20 @@ func (l *lowerer) lowerChainRecursion(chain *subset.ChainRecursion) ir.ListRecur
 	return result
 }
 
-func (l *lowerer) lowerPureSteps(values []ssa.Value) []ir.Binding {
+func (l *lowerer) lowerPureSteps(values []*sourceValue) []ir.Binding {
 	var steps []ir.Binding
 	for _, step := range values {
 		var expr ir.Expr
-		switch step := step.(type) {
-		case *ssa.BinOp:
+		switch step.Kind {
+		case binaryValue:
 			expr = l.binary(step)
-		case *ssa.UnOp:
+		case unaryValue:
 			expr = ir.Negate{Value: l.value(step.X)}
-		case *ssa.Extract:
+		case extractValue:
 			expr = l.project(step)
-		case *ssa.Call:
+		case callValue:
 			arg := l.value(step.Call.Args[0])
-			if callee := step.Call.StaticCallee(); callee != nil {
+			if callee := step.Call.Target; callee != nil {
 				call := ir.SelfCall{Name: l.symbol(callee).Name, Args: []ir.Expr{arg}}
 				for _, arg := range step.Call.Args[1:] {
 					call.Args = append(call.Args, l.value(arg))
@@ -217,97 +241,90 @@ func (l *lowerer) lowerPureSteps(values []ssa.Value) []ir.Binding {
 }
 
 type iteration struct {
-	header     *ssa.BasicBlock
-	skip       map[ssa.Instruction]bool
-	stores     map[ssa.Instruction]ssa.Value
+	header     *sourceBlock
+	skip       []*sourceValue
+	stores     []*sourceStore
 	stored     ir.Expr
-	backValues map[*ssa.BasicBlock][]ssa.Value
+	backValues []*sourceBackEdge
 }
 
 type lowerer struct {
 	iteration     *iteration
-	root          *ssa.Package
+	root          string
+	input         Input
 	file          string
-	bindings      map[ssa.Value]ir.Binder
-	effects       map[*ssa.Function]bool
+	state         StateStore
+	binders       *[]ir.Binder
+	facts         *functionFacts
 	canPanic      bool
-	next          int
 	usesWord      bool
-	checked       subset.Checked
 	records       map[ir.Type]ir.Record
-	instances     map[*ssa.Function]string
+	instances     map[*sourceFunction]string
 	contracts     map[ir.Type]ir.Contract
-	dependencies  map[*ssa.Function][]ir.Type
 	usedContracts map[ir.Type]bool
 }
 
-func (l *lowerer) symbol(fn *ssa.Function) ir.Symbol {
-	symbol := ir.Symbol{Package: l.root.Pkg.Path(), File: l.file, Name: fn.Name()}
-	if recv := fn.Signature.Recv(); recv != nil {
-		typ := types.Unalias(recv.Type())
-		if pointer, ok := typ.(*types.Pointer); ok {
-			typ = types.Unalias(pointer.Elem())
-		}
-		symbol.Name = typ.(*types.Named).Obj().Name() + "$" + fn.Name()
+func (l *lowerer) symbol(fn *sourceFunction) ir.Symbol {
+	symbol := ir.Symbol{Package: l.root, File: l.file, Name: fn.Name}
+	if fn.Receiver != "" {
+		symbol.Name = fn.Receiver + "$" + fn.Name
 	}
-	pkg := fn.Pkg
 	if name, ok := l.instances[fn]; ok {
 		symbol.Name = name
-		pkg = fn.Origin().Pkg
 	}
-	if pkg != l.root {
-		symbol.Dependency = pkg.Pkg.Path()
+	if fn.Package != l.root {
+		symbol.Dependency = fn.Package
 	}
 	return symbol
 }
 
-func (l *lowerer) bind(value ssa.Value) ir.Binder {
-	return l.bindAs(value, l.valueType(value.Type()))
+func (l *lowerer) bind(value *sourceValue) ir.Binder {
+	return l.bindAs(value, l.valueType(value.Type))
 }
 
-func (l *lowerer) bindAs(value ssa.Value, typ ir.Type) ir.Binder {
-	binder := ir.Binder{Name: value.Name(), Index: l.next, Type: typ}
-	l.next++
-	l.bindings[value] = binder
+func (l *lowerer) bindAs(value *sourceValue, typ ir.Type) ir.Binder {
+	binder := l.freshBinder(value.Name, typ)
+	l.state = l.state.Bind(value.ID, int64(len(*l.binders)))
+	*l.binders = append(*l.binders, binder)
 	return binder
 }
 
-func (l *lowerer) body(block, predecessor *ssa.BasicBlock) ir.Body {
+func (l *lowerer) body(block, predecessor *sourceBlock) ir.Body {
 	if l.iteration != nil && block == l.iteration.header {
 		value := l.iteration.stored
 		if l.iteration.backValues != nil {
-			value = packResults(l.iteration.backValues[predecessor], l.value)
+			value = packResults(backEdgeValues(l.iteration.backValues, predecessor), l.value)
 		}
 		return ir.Body{Result: ir.Return{Value: value}}
 	}
 	return l.instructions(block, predecessor, 0)
 }
 
-func (l *lowerer) instructions(block, predecessor *ssa.BasicBlock, start int) ir.Body {
+func (l *lowerer) instructions(block, predecessor *sourceBlock, start int) ir.Body {
 	var result ir.Body
-	for _, ins := range block.Instrs[start:] {
-		if l.iteration != nil && l.iteration.skip[ins] {
-			if value := l.iteration.stores[ins]; value != nil {
+	for _, ins := range block.Instructions[start:] {
+		if l.iteration != nil && slices.Contains(l.iteration.skip, ins) {
+			if value := storedValue(l.iteration.stores, ins); value != nil {
 				l.iteration.stored = l.value(value)
 			}
 			continue
 		}
-		switch ins := ins.(type) {
-		case *ssa.BinOp:
+		switch ins.Kind {
+		case binaryValue:
 			value := l.binary(ins)
 			canPanic := value.Op.PanicsOnZeroDivisor()
 			result.Bindings = append(result.Bindings, ir.Binding{
 				Binder: l.bind(ins), Value: value, CanPanic: canPanic,
 			})
 			l.canPanic = l.canPanic || canPanic
-		case *ssa.UnOp:
+		case unaryValue:
 			var value ir.Expr
 			canPanic := false
-			switch ins.Op {
-			case token.NOT:
+			switch {
+			case ins.Not:
 				value = ir.Not{Value: l.value(ins.X)}
-			case token.MUL:
-				canPanic = subset.IsReadOnlyRecordPointer(ins.X)
+			case ins.Dereference:
+				canPanic = ins.ReadOnly
 				if canPanic {
 					value = l.value(ins.X)
 				} else {
@@ -320,66 +337,63 @@ func (l *lowerer) instructions(block, predecessor *ssa.BasicBlock, start int) ir
 				Binder: l.bind(ins), Value: value, CanPanic: canPanic,
 			})
 			l.canPanic = l.canPanic || canPanic
-		case *ssa.Field:
-			record := ins.X.Type().Underlying().(*types.Struct)
+		case fieldValue:
 			result.Bindings = append(result.Bindings, ir.Binding{
 				Binder: l.bind(ins),
-				Value:  ir.RecordField{Value: l.value(ins.X), Name: record.Field(ins.Field).Name()},
+				Value:  ir.RecordField{Value: l.value(ins.X), Name: ins.Field},
 			})
-		case *ssa.FieldAddr:
-			if subset.IsReadOnlyRecordField(ins) {
-				recordType := ins.X.Type().Underlying().(*types.Pointer).Elem()
-				field := recordType.Underlying().(*types.Struct).Field(ins.Field)
-				binder := l.bindAs(ins, l.valueType(field.Type()))
+		case fieldAddress:
+			if ins.ReadOnly {
+				binder := l.bindAs(ins, l.valueType(ins.FieldType))
 				source := l.value(ins.X)
-				_, nested := ins.X.(*ssa.FieldAddr)
-				var value ir.Expr = ir.RecordField{Value: source, Name: field.Name()}
+				nested := ins.X.Kind == fieldAddress
+				var value ir.Expr = ir.RecordField{Value: source, Name: ins.Field}
 				if !nested {
-					value = ir.CheckedRecordField{Value: source, Type: l.valueType(recordType), Name: field.Name()}
+					value = ir.CheckedRecordField{Value: source, Type: l.valueType(ins.RecordType), Name: ins.Field}
 					l.canPanic = true
 				}
 				result.Bindings = append(result.Bindings, ir.Binding{
 					Binder: binder, Value: value, CanPanic: !nested,
 				})
 			}
-		case *ssa.IndexAddr:
-			result.Bindings = append(result.Bindings, l.checkedIndex(ins, ins.X, ins.Index))
-		case *ssa.Index:
-			result.Bindings = append(result.Bindings, l.checkedIndex(ins, ins.X, ins.Index))
-		case *ssa.MakeMap:
+		case indexAddress:
+			result.Bindings = append(result.Bindings, l.checkedIndex(ins, ins.X, ins.IndexValue))
+		case indexValue:
+			result.Bindings = append(result.Bindings, l.checkedIndex(ins, ins.X, ins.IndexValue))
+		case makeMap:
 			l.canPanic = true // Keep the fresh map result in the panic-result model.
 			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: ir.EmptyMap{}})
-		case *ssa.MapUpdate:
+		case mapUpdate:
 			// The checker proved exclusive access, so a new binding can replace
 			// the map state without losing observations through other aliases.
-			update := ir.MapUpdate{Map: l.value(ins.Map), Key: l.value(ins.Key), Value: l.value(ins.Value)}
-			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins.Map), Value: update})
-		case *ssa.Lookup:
-			_, elem := l.valueType(ins.X.Type()).MapShape()
+			update := ir.MapUpdate{Map: l.value(ins.X), Key: l.value(ins.Key), Value: l.value(ins.Value)}
+			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins.X), Value: update})
+		case mapLookup:
+			_, elem := l.valueType(ins.X.Type).MapShape()
 			typ := ir.OptionType(elem)
-			var value ir.Expr = ir.MapLookup{Map: l.value(ins.X), Key: l.value(ins.Index)}
-			if !ins.CommaOk {
+			var value ir.Expr = ir.MapLookup{Map: l.value(ins.X), Key: l.value(ins.IndexValue)}
+			if !ins.CommaOK {
 				typ = elem
 				value = ir.OptionGetD{Value: value, Default: ir.IntLiteral{Value: "0", Type: elem}}
 			}
 			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bindAs(ins, typ), Value: value})
-		case *ssa.Extract:
+		case extractValue:
 			binder := l.bind(ins)
-			if _, ok := ins.Tuple.(*ssa.Call); ok {
+			if ins.X.Kind == callValue {
 				result.Bindings = append(result.Bindings, ir.Binding{Binder: binder, Value: l.project(ins)})
 				continue
 			}
-			lookup := l.value(ins.Tuple)
+			lookup := l.value(ins.X)
 			var value ir.Expr = ir.OptionIsSome{Value: lookup}
-			if ins.Index == 0 {
+			if ins.OperandIndex == 0 {
 				value = ir.OptionGetD{Value: lookup, Default: ir.IntLiteral{Value: "0", Type: binder.Type}}
 			}
 			result.Bindings = append(result.Bindings, ir.Binding{Binder: binder, Value: value})
-		case *ssa.Call:
-			if ins.Call.IsInvoke() {
+		case callValue:
+			if ins.Call.Method != "" {
 				receiver := ins.Call.Value
 				call := ir.InterfaceCall{
-					Contract: l.valueType(receiver.Type()), Method: ins.Call.Method.Name(),
+					Contract: l.valueType(receiver.Type), Method: ins.Call.Method,
 					Args: []ir.Expr{l.value(receiver)},
 				}
 				for _, arg := range ins.Call.Args {
@@ -388,27 +402,27 @@ func (l *lowerer) instructions(block, predecessor *ssa.BasicBlock, start int) ir
 				result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: call})
 				continue
 			}
-			if subset.IsLength(ins) {
+			if ins.Call.Length {
 				arg := ins.Call.Args[0]
 				value := l.value(arg)
 				var length ir.Expr = ir.ByteLen{Value: value}
-				if subset.Type(arg.Type()).SliceElem() != "" {
+				if arg.Type.Model.SliceElem() != "" {
 					length = ir.SliceLength{List: value}
 				}
 				result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: length})
 				continue
 			}
-			target := ins.Call.StaticCallee()
-			call := ir.Call{Callee: l.symbol(target), Contracts: l.dependencies[target]}
+			target := ins.Call.Target
+			call := ir.Call{Callee: l.symbol(target), Contracts: l.facts.contracts(target)}
 			for _, contract := range call.Contracts {
 				l.usedContracts[contract] = true
 			}
-			if closure, ok := ins.Call.Value.(*ssa.MakeClosure); ok {
-				for _, capture := range closure.Bindings {
+			if closure := ins.Call.Value; closure.Kind == closureValue {
+				for _, capture := range closure.Values {
 					call.Args = append(call.Args, l.value(capture))
 				}
 			}
-			build := l.checked.SliceBuild(target)
+			build := target.Build
 			for i, arg := range ins.Call.Args {
 				if build != nil && target.Params[i] == build.Callback {
 					call.Args = append(call.Args, l.sliceCallback(arg, build.Effectful))
@@ -416,69 +430,66 @@ func (l *lowerer) instructions(block, predecessor *ssa.BasicBlock, start int) ir
 					call.Args = append(call.Args, l.value(arg))
 				}
 			}
-			canPanic := l.effects[target]
+			canPanic := l.facts.effect(target)
 			result.Bindings = append(result.Bindings, ir.Binding{
 				Binder: l.bind(ins), Value: call, CanPanic: canPanic,
 			})
 			l.canPanic = l.canPanic || canPanic
-		case *ssa.Convert:
+		case convertValue:
 			binder := l.bind(ins)
 			result.Bindings = append(result.Bindings, ir.Binding{
 				Binder: binder, Value: ir.Convert{Value: l.value(ins.X), To: binder.Type},
 			})
-		case *ssa.ChangeType:
+		case changeType:
 			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: l.value(ins.X)})
-		case *ssa.Alloc:
-			if cell, ok := l.checked.RecordCell(ins); ok && cell.Mutable {
-				goType := ins.Type().Underlying().(*types.Pointer).Elem()
-				value := l.zeroValue(goType)
+		case allocValue:
+			if ins.MutableCell {
+				typ := ins.Type.Elem
+				value := l.zeroValue(typ)
 				result.Bindings = append(result.Bindings, ir.Binding{
-					Binder: l.bindAs(ins, l.valueType(goType)), Value: value,
+					Binder: l.bindAs(ins, l.valueType(typ)), Value: value,
 				})
 			}
-		case *ssa.Store:
-			root := ins.Addr
-			for field, ok := root.(*ssa.FieldAddr); ok; field, ok = root.(*ssa.FieldAddr) {
-				root = field.X
+		case storeValue:
+			root := ins.X
+			for root.Kind == fieldAddress {
+				root = root.X
 			}
-			if cell, ok := l.checked.RecordCell(root); ok {
-				if cell.Mutable {
-					value := l.recordStore(ins.Addr, l.value(ins.Val))
-					typ := root.Type().Underlying().(*types.Pointer).Elem()
-					result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bindAs(root, l.valueType(typ)), Value: value})
+			if root.HasCell {
+				if root.MutableCell {
+					value := l.recordStore(ins.X, l.value(ins.Value))
+					typ := l.valueType(root.Type.Elem)
+					result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bindAs(root, typ), Value: value})
 				}
 				continue
 			}
-			if l.checked.ArrayInitializer(ins.Addr) != nil {
-				continue
-			}
-			if _, ok := ins.Addr.(*ssa.FieldAddr); ok {
+			if ins.X.ArrayInitial != nil || ins.X.Kind == fieldAddress {
 				continue
 			}
 			result.Bindings = append(result.Bindings, ir.Binding{
-				Binder: l.bindAs(ins.Addr, l.captureType(ins.Addr)), Value: l.value(ins.Val),
+				Binder: l.bindAs(ins.X, l.captureType(ins.X)), Value: l.value(ins.Value),
 			})
-		case *ssa.If:
-			condition := l.value(ins.Cond)
-			incoming := maps.Clone(l.bindings)
+		case ifValue:
+			condition := l.value(ins.X)
+			incoming := l.state
 			var stored ir.Expr
 			if l.iteration != nil {
 				stored = l.iteration.stored
 			}
 			then := l.body(block.Succs[0], block)
-			l.bindings = incoming
+			l.state = restoreBindings(incoming, l.state)
 			if l.iteration != nil {
 				l.iteration.stored = stored
 			}
 			otherwise := l.body(block.Succs[1], block)
 			result.Result = ir.If{Condition: condition, Then: then, Else: otherwise}
-		case *ssa.Phi:
+		case phiValue:
 			// Each branch contains only the computations along its own path.
-			edge := ins.Edges[slices.Index(block.Preds, predecessor)]
-			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: l.value(edge)})
-		case *ssa.Return:
-			result.Result = ir.Return{Value: packResults(ins.Results, l.value)}
-		case *ssa.Jump:
+			value := l.phiValue(ins, predecessor, l.value)
+			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: value})
+		case returnValue:
+			result.Result = ir.Return{Value: packResults(ins.Values, l.value)}
+		case jumpValue:
 			next := l.body(block.Succs[0], block)
 			result.Bindings = append(result.Bindings, next.Bindings...)
 			result.Result = next.Result
@@ -487,11 +498,11 @@ func (l *lowerer) instructions(block, predecessor *ssa.BasicBlock, start int) ir
 	return result
 }
 
-func (l *lowerer) checkedIndex(value, sequence, index ssa.Value) ir.Binding {
-	if init := l.checked.ArrayInitializer(sequence); init != nil {
-		sequence = init.Val
+func (l *lowerer) checkedIndex(value, sequence, index *sourceValue) ir.Binding {
+	if init := sequence.ArrayInitial; init != nil {
+		sequence = init
 	}
-	typ := l.valueType(sequence.Type())
+	typ := l.valueType(sequence.Type)
 	elem := typ.SliceElem()
 	if elem == "" {
 		elem, _ = typ.ArrayShape()
@@ -500,18 +511,18 @@ func (l *lowerer) checkedIndex(value, sequence, index ssa.Value) ir.Binding {
 	return ir.Binding{
 		Binder: l.bindAs(value, elem),
 		Value: ir.CheckedIndex{
-			Sequence: l.value(sequence), SequenceType: typ, Index: l.value(index), IndexType: l.valueType(index.Type()),
+			Sequence: l.value(sequence), SequenceType: typ, Index: l.value(index), IndexType: l.valueType(index.Type),
 		},
 		CanPanic: true,
 	}
 }
 
-func (l *lowerer) value(value ssa.Value) ir.Expr {
-	if fn, ok := value.(*ssa.Function); ok {
-		return ir.FunctionRef(l.symbol(fn))
+func (l *lowerer) value(value *sourceValue) ir.Expr {
+	if value.Kind == functionValue {
+		return ir.FunctionRef(l.symbol(value.Target))
 	}
-	if c, ok := value.(*ssa.Const); ok {
-		typ := l.valueType(c.Type())
+	if value.Kind == constantValue {
+		typ := l.valueType(value.Type)
 		if typ.Pointee() != "" {
 			return ir.NilPointer{}
 		}
@@ -522,45 +533,40 @@ func (l *lowerer) value(value ssa.Value) ir.Expr {
 			return ir.EmptyMap{}
 		}
 		switch typ {
+		case ir.Bool:
+			return ir.BoolLiteral(value.Boolean)
+		case ir.Bytes:
+			return ir.BytesLiteral(value.Text)
 		case ir.Float32:
-			f, _ := constant.Float32Val(c.Value)
-			return ir.Float32Literal(math.Float32bits(f))
+			return ir.Float32Literal(value.Bits)
 		case ir.Float64:
-			f, _ := constant.Float64Val(c.Value)
-			return ir.Float64Literal(math.Float64bits(f))
+			return ir.Float64Literal(value.Bits)
 		}
-		switch c.Value.Kind() {
-		case constant.Bool:
-			return ir.BoolLiteral(constant.BoolVal(c.Value))
-		case constant.String:
-			return ir.BytesLiteral(constant.StringVal(c.Value))
-		}
-		return ir.IntLiteral{Value: c.Value.ExactString(), Type: typ}
+		return ir.IntLiteral{Value: value.Text, Type: typ}
 	}
-	if binder, ok := l.bindings[value]; ok {
+	if binder, ok := l.binding(value); ok {
 		return ir.Ref(binder)
 	}
-	panic("missing binding for checked SSA value: " + value.String())
+	panic("missing binding for checked SSA value: " + value.Name)
 }
 
-func (l *lowerer) binary(expr *ssa.BinOp) ir.Binary {
-	op, _ := subset.Binary(expr.Op)
-	return ir.Binary{Op: op, Left: l.value(expr.X), Right: l.value(expr.Y), OperandType: l.valueType(expr.X.Type())}
+func (l *lowerer) binary(expr *sourceValue) ir.Binary {
+	return ir.Binary{Op: expr.Op, Left: l.value(expr.X), Right: l.value(expr.Y), OperandType: l.valueType(expr.X.Type)}
 }
 
-func productType(results *types.Tuple, valueType func(types.Type) ir.Type) ir.Type {
-	if results.Len() == 0 {
+func productType(results []*sourceType, valueType func(*sourceType) ir.Type) ir.Type {
+	if len(results) == 0 {
 		return ir.Unit
 	}
-	last := results.Len() - 1
-	typ := valueType(results.At(last).Type())
+	last := len(results) - 1
+	typ := valueType(results[last])
 	for i := last - 1; i >= 0; i-- {
-		typ = ir.ProductType(valueType(results.At(i).Type()), typ)
+		typ = ir.ProductType(valueType(results[i]), typ)
 	}
 	return typ
 }
 
-func packResults(results []ssa.Value, value func(ssa.Value) ir.Expr) ir.Expr {
+func packResults(results []*sourceValue, value func(*sourceValue) ir.Expr) ir.Expr {
 	if len(results) == 0 {
 		return ir.UnitLiteral{}
 	}
@@ -572,131 +578,116 @@ func packResults(results []ssa.Value, value func(ssa.Value) ir.Expr) ir.Expr {
 	return result
 }
 
-func (l *lowerer) project(extract *ssa.Extract) ir.Expr {
-	value := l.value(extract.Tuple)
-	for i := 0; i < extract.Index; i++ {
+func (l *lowerer) project(extract *sourceValue) ir.Expr {
+	value := l.value(extract.X)
+	for i := 0; i < extract.OperandIndex; i++ {
 		value = ir.PairField{Value: value, Second: true}
 	}
-	if extract.Index < extract.Tuple.Type().(*types.Tuple).Len()-1 {
+	if extract.OperandIndex < len(extract.X.Type.Tuple)-1 {
 		value = ir.PairField{Value: value}
 	}
 	return value
 }
 
-func (l *lowerer) valueType(t types.Type) ir.Type {
-	if tuple, ok := t.(*types.Tuple); ok {
-		return productType(tuple, l.valueType)
+func (l *lowerer) valueType(t *sourceType) ir.Type {
+	if t.IsTuple {
+		return productType(t.Tuple, l.valueType)
 	}
-	if handle := subset.InterfaceHandle(t); handle != "" {
-		l.useContract(t, handle)
-		return handle
+	typ := t.Model
+	if t.IsInterface {
+		l.useContract(t, typ)
+		return typ
 	}
-	typ := subset.Type(t)
 	l.usesWord = l.usesWord || typ.IsWord()
-	if typ.Pointee() != "" {
-		l.valueType(t.Underlying().(*types.Pointer).Elem())
-	}
-	if typ.SliceElem() != "" {
-		l.valueType(t.Underlying().(*types.Slice).Elem())
-	}
-	if elem, _ := typ.ArrayShape(); elem != "" {
-		l.valueType(t.Underlying().(*types.Array).Elem())
+	elem, _ := typ.ArrayShape()
+	if typ.Pointee() != "" || typ.SliceElem() != "" || elem != "" {
+		l.valueType(t.Elem)
 	}
 	if key, value := typ.MapShape(); key != "" {
 		l.usesWord = l.usesWord || key.IsWord() || value.IsWord()
 	}
 	if typ.IsRecord() {
 		if _, exists := l.records[typ]; !exists {
-			named := types.Unalias(t).(*types.Named)
-			obj := named.Obj()
-			symbol := ir.Symbol{Package: l.root.Pkg.Path(), File: l.file, Name: obj.Name()}
-			if obj.Pkg() != l.root.Pkg {
-				symbol.Dependency = obj.Pkg().Path()
+			record := ir.Record{Symbol: l.typeSymbol(t, "")}
+			for _, field := range t.Fields {
+				record.Fields = append(record.Fields, ir.Field{Name: field.Name, Type: l.valueType(field.Type)})
 			}
-			var fields []ir.Field
-			for field := range named.Underlying().(*types.Struct).Fields() {
-				fields = append(fields, ir.Field{Name: field.Name(), Type: l.valueType(field.Type())})
-			}
-			l.records[typ] = ir.Record{Symbol: symbol, Fields: fields}
+			l.records[typ] = record
 		}
 	}
 	return typ
 }
 
-func (l *lowerer) useContract(t types.Type, handle ir.Type) {
+func (l *lowerer) typeSymbol(t *sourceType, suffix string) ir.Symbol {
+	symbol := ir.Symbol{Package: l.root, File: l.file, Name: t.Name + suffix}
+	if t.Package != l.root {
+		symbol.Dependency = t.Package
+	}
+	return symbol
+}
+
+func (l *lowerer) useContract(t *sourceType, handle ir.Type) {
 	l.usedContracts[handle] = true
 	if _, exists := l.contracts[handle]; exists {
 		return
 	}
-	named := types.Unalias(t).(*types.Named)
-	obj := named.Obj()
-	symbol := ir.Symbol{Package: l.root.Pkg.Path(), File: l.file, Name: obj.Name() + "Contract"}
-	if obj.Pkg() != l.root.Pkg {
-		symbol.Dependency = obj.Pkg().Path()
-	}
-	contract := ir.Contract{Symbol: symbol, Laws: l.checked.InterfaceLaws(t)}
-	for method := range named.Underlying().(*types.Interface).ExplicitMethods() {
-		sig := method.Signature()
-		field := ir.Method{Name: method.Name()}
-		for param := range sig.Params().Variables() {
-			field.Params = append(field.Params, l.valueType(param.Type()))
+	contract := ir.Contract{Symbol: l.typeSymbol(t, "Contract"), Laws: t.Laws}
+	for _, method := range t.Methods {
+		field := ir.Method{Name: method.Name}
+		for _, param := range method.Params {
+			field.Params = append(field.Params, l.valueType(param))
 		}
-		if result := sig.Results().At(0).Type(); types.Identical(result, t) {
+		if method.Result == t {
 			field.Result = handle
 		} else {
-			field.Result = l.valueType(result)
+			field.Result = l.valueType(method.Result)
 		}
 		contract.Methods = append(contract.Methods, field)
 	}
 	l.contracts[handle] = contract
 }
 
-func (l *lowerer) load(addr ssa.Value) ir.Expr {
-	if init := l.checked.ArrayInitializer(addr); init != nil {
-		return l.value(init.Val)
+func (l *lowerer) load(addr *sourceValue) ir.Expr {
+	if addr.ArrayInitial != nil {
+		return l.value(addr.ArrayInitial)
 	}
-	if field, ok := addr.(*ssa.FieldAddr); ok {
-		if subset.IsReadOnlyRecordField(field) {
-			return l.value(field)
-		}
-		record := field.X.Type().Underlying().(*types.Pointer).Elem().Underlying().(*types.Struct)
-		return ir.RecordField{Value: l.load(field.X), Name: record.Field(field.Field).Name()}
-	}
-	if cell, ok := l.checked.RecordCell(addr); ok {
-		if cell.Mutable {
+	if addr.Kind == fieldAddress {
+		if addr.ReadOnly {
 			return l.value(addr)
 		}
-		if cell.Whole != nil {
-			return l.value(cell.Whole.Val)
+		return ir.RecordField{Value: l.load(addr.X), Name: addr.Field}
+	}
+	if addr.HasCell {
+		if addr.MutableCell {
+			return l.value(addr)
 		}
-		typ := l.valueType(addr.Type().Underlying().(*types.Pointer).Elem())
-		value := ir.RecordLiteral{Type: typ}
-		for _, field := range cell.Fields {
-			value.Values = append(value.Values, l.value(field.Val))
+		if addr.RecordWhole != nil {
+			return l.value(addr.RecordWhole)
+		}
+		value := ir.RecordLiteral{Type: l.valueType(addr.Type.Elem)}
+		for _, field := range addr.RecordFields {
+			value.Values = append(value.Values, l.value(field))
 		}
 		return value
 	}
-	// Validated capture loads read a value already bound by the initializer.
 	return l.value(addr)
 }
 
-func (l *lowerer) captureType(value ssa.Value) ir.Type {
-	typ := subset.CaptureType(value.Type())
+func (l *lowerer) captureType(value *sourceValue) ir.Type {
+	typ := value.Capture
 	l.usesWord = l.usesWord || typ.IsWord()
 	return typ
 }
 
-func (l *lowerer) recordStore(addr ssa.Value, value ir.Expr) ir.Expr {
-	field, ok := addr.(*ssa.FieldAddr)
-	if !ok {
+func (l *lowerer) recordStore(addr *sourceValue, value ir.Expr) ir.Expr {
+	if addr.Kind != fieldAddress {
 		return value
 	}
-	record := field.X.Type().Underlying().(*types.Pointer).Elem().Underlying().(*types.Struct)
-	update := ir.RecordUpdate{Record: l.load(field.X), Field: record.Field(field.Field).Name(), Value: value}
-	return l.recordStore(field.X, update)
+	update := ir.RecordUpdate{Record: l.load(addr.X), Field: addr.Field, Value: value}
+	return l.recordStore(addr.X, update)
 }
 
-func (l *lowerer) zeroValue(t types.Type) ir.Expr {
+func (l *lowerer) zeroValue(t *sourceType) ir.Expr {
 	typ := l.valueType(t)
 	switch typ {
 	case ir.Bool:
@@ -708,37 +699,36 @@ func (l *lowerer) zeroValue(t types.Type) ir.Expr {
 	case ir.Float64:
 		return ir.Float64Literal(0)
 	}
-	if record, ok := t.Underlying().(*types.Struct); ok {
+	if t.IsRecord {
 		zero := ir.RecordLiteral{Type: typ}
-		for field := range record.Fields() {
-			zero.Values = append(zero.Values, l.zeroValue(field.Type()))
+		for _, field := range t.Fields {
+			zero.Values = append(zero.Values, l.zeroValue(field.Type))
 		}
 		return zero
 	}
 	return ir.IntLiteral{Type: typ, Value: "0"}
 }
 
-func (l *lowerer) sliceCallback(value ssa.Value, effectful bool) ir.Expr {
-	fn, _ := value.(*ssa.Function)
+func (l *lowerer) sliceCallback(value *sourceValue, effectful bool) ir.Expr {
+	fn := value.Target
 	var captures []ir.Expr
-	if closure, ok := value.(*ssa.MakeClosure); ok {
-		fn = closure.Fn.(*ssa.Function)
-		for _, capture := range closure.Bindings {
+	if value.Kind == closureValue {
+		for _, capture := range value.Values {
 			captures = append(captures, l.value(capture))
 		}
 	}
-	contracts := l.dependencies[fn]
+	contracts := l.facts.contracts(fn)
 	for _, contract := range contracts {
 		l.usedContracts[contract] = true
 	}
 	var callback ir.Expr = ir.Call{Callee: l.symbol(fn), Contracts: contracts, Args: captures}
-	if effectful && !l.effects[fn] {
+	if effectful && !l.facts.effect(fn) {
 		callback = ir.LiftCallback{Function: callback}
 	}
 	return callback
 }
 
-func (l *lowerer) lowerStructuredFold(fold *subset.RangeFold) ir.StructuredFold {
+func (l *lowerer) lowerStructuredFold(fold *sourceRange) ir.StructuredFold {
 	spec := fold.Structured
 	iter := spec.Iteration
 	result := ir.StructuredFold{Sequence: l.value(fold.Source), Initial: packResults(spec.Initial, l.value),
@@ -748,33 +738,33 @@ func (l *lowerer) lowerStructuredFold(fold *subset.RangeFold) ir.StructuredFold 
 	bindings := l.unpackLoopState(spec.States, result.State)
 	result.Final = l.freshBinder("final", typ)
 	l.iteration = &iteration{header: iter.Header, skip: iter.Skip, backValues: spec.Next}
-	parameterBindings := maps.Clone(l.bindings)
+	parameterBindings := l.state
 	result.Iteration = l.body(iter.Entry, iter.Header)
 	result.Iteration.Bindings = append(bindings, result.Iteration.Bindings...)
 	result.Effectful = l.canPanic
 	l.iteration = nil
-	l.bindings = parameterBindings
+	l.state = restoreBindings(parameterBindings, l.state)
 	result.Continuation = l.body(spec.Exit, iter.Header)
 	result.Continuation.Bindings = append(l.unpackLoopState(spec.States, result.Final), result.Continuation.Bindings...)
 	return result
 }
 
 func (l *lowerer) freshBinder(name string, typ ir.Type) ir.Binder {
-	binder := ir.Binder{Index: l.next, Name: name, Type: typ}
-	l.next++
+	binder := ir.Binder{Index: int(l.state.NextID()), Name: name, Type: typ}
+	l.state = l.state.Advance()
 	return binder
 }
 
-func (l *lowerer) loopStateType(states []*ssa.Phi) ir.Type {
+func (l *lowerer) loopStateType(states []*sourceValue) ir.Type {
 	last := len(states) - 1
-	typ := l.valueType(states[last].Type())
+	typ := l.valueType(states[last].Type)
 	for i := last - 1; i >= 0; i-- {
-		typ = ir.ProductType(l.valueType(states[i].Type()), typ)
+		typ = ir.ProductType(l.valueType(states[i].Type), typ)
 	}
 	return typ
 }
 
-func (l *lowerer) unpackLoopState(states []*ssa.Phi, state ir.Binder) []ir.Binding {
+func (l *lowerer) unpackLoopState(states []*sourceValue, state ir.Binder) []ir.Binding {
 	var bindings []ir.Binding
 	var tuple ir.Expr = ir.Ref(state)
 	for i, phi := range states {
@@ -783,7 +773,7 @@ func (l *lowerer) unpackLoopState(states []*ssa.Phi, state ir.Binder) []ir.Bindi
 			value = ir.PairField{Value: tuple}
 			tuple = ir.PairField{Value: tuple, Second: true}
 		}
-		binder, ok := l.bindings[phi]
+		binder, ok := l.binding(phi)
 		if !ok {
 			binder = l.bind(phi)
 		}
@@ -792,7 +782,7 @@ func (l *lowerer) unpackLoopState(states []*ssa.Phi, state ir.Binder) []ir.Bindi
 	return bindings
 }
 
-func (l *lowerer) lowerStructuredCountedLoop(fn *ir.Function, loop *subset.CountedLoop) {
+func (l *lowerer) lowerStructuredCountedLoop(fn *ir.Function, loop *sourceCounted) {
 	spec := loop.Structured
 	iter := spec.Iteration
 	typ := l.loopStateType(spec.States)
@@ -801,22 +791,22 @@ func (l *lowerer) lowerStructuredCountedLoop(fn *ir.Function, loop *subset.Count
 	helper.Params = slices.Clone(fn.Params)
 	fn.Body.Bindings = l.lowerPureSteps(loop.Before)
 	for _, value := range loop.Before {
-		helper.Params = append(helper.Params, l.bindings[value])
+		helper.Params = append(helper.Params, l.mustBinding(value))
 	}
 	call := ir.Call{Callee: helper.Symbol}
 	for _, param := range helper.Params {
 		call.Args = append(call.Args, ir.Ref(param))
 	}
 	call.Args = append(call.Args, ir.LoopFuel{Start: l.value(loop.Start), Bound: l.value(loop.Bound),
-		Signed: !subset.Type(loop.Bound.Type()).IsUnsigned(), ZeroStart: subset.IsZero(loop.Start)}, packResults(spec.Initial, l.value))
+		Signed: !loop.Bound.Type.Model.IsUnsigned(), ZeroStart: loop.Start.IsZero}, packResults(spec.Initial, l.value))
 	initialBindings := l.unpackLoopState(spec.States, helper.State)
-	wrapperBindings := maps.Clone(l.bindings)
+	wrapperBindings := l.state
 	l.iteration = &iteration{header: iter.Header, backValues: spec.Next}
 	body := l.body(iter.Entry, iter.Header)
 	body.Bindings = append(initialBindings, body.Bindings...)
 	helper.Body = &body
 	l.iteration = nil
-	l.bindings = wrapperBindings
+	l.state = restoreBindings(wrapperBindings, l.state)
 	final := l.freshBinder("final", typ)
 	fn.Body.Bindings = append(fn.Body.Bindings, ir.Binding{Binder: final, Value: call})
 	fn.Body.Bindings = append(fn.Body.Bindings, l.unpackLoopState(spec.States, final)...)
@@ -824,4 +814,22 @@ func (l *lowerer) lowerStructuredCountedLoop(fn *ir.Function, loop *subset.Count
 	fn.Body.Bindings = append(fn.Body.Bindings, continuation.Bindings...)
 	fn.Body.Result = continuation.Result
 	fn.Loop = &helper
+}
+
+func storedValue(stores []*sourceStore, instruction *sourceValue) *sourceValue {
+	for _, store := range stores {
+		if store.Instruction == instruction {
+			return store.Value
+		}
+	}
+	return nil
+}
+
+func backEdgeValues(edges []*sourceBackEdge, predecessor *sourceBlock) []*sourceValue {
+	for _, edge := range edges {
+		if edge.Block == predecessor {
+			return edge.Values
+		}
+	}
+	return nil
 }

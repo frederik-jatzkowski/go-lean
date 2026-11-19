@@ -2,9 +2,7 @@ package interface_dispatch
 
 // Evaluator models an evaluation boundary.
 //
-// golean:start
-// evaluate_identity : ∀ s x, Evaluate s x = x
-// golean:end
+//golean:law evaluate_identity : ∀ s x, Evaluate s x = x
 type Evaluator interface {
 	Evaluate(int64) int64
 }

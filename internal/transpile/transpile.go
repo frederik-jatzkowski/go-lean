@@ -31,7 +31,7 @@ func Generate(dir string) ([]Output, error) {
 		stem := strings.TrimSuffix(filepath.Base(program.Path), ".go")
 		outputs = append(outputs, Output{
 			Path:   filepath.Join(filepath.Dir(program.Path), stem+"_gen.lean"),
-			Source: lean.Render(lower.FromSSA(checked, stem, program.WordBits)),
+			Source: lean.Render(lower.FromSSA(lower.NewInput(checked), stem, program.WordBits)),
 		})
 	}
 	return outputs, nil

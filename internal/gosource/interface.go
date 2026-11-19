@@ -53,37 +53,26 @@ func (doc InterfaceDoc) Laws() ([]string, error) {
 		if group == nil {
 			continue
 		}
-		var start token.Pos
-		var block []string
 		for _, comment := range group.List {
 			line, isLine := strings.CutPrefix(comment.Text, "//")
-			switch strings.TrimSpace(line) {
-			case "golean:start":
-				if start.IsValid() {
-					return nil, doc.error(comment.Pos(), "nested golean:start")
-				}
-				start = comment.Pos()
-			case "golean:end":
-				if !start.IsValid() {
-					return nil, doc.error(comment.Pos(), "golean:end has no matching golean:start")
-				}
-				if strings.TrimSpace(strings.Join(block, "")) == "" {
-					return nil, doc.error(start, "empty interface contract block (gofmt may move unspaced markers in type doc comments)")
-				}
-				laws = append(laws, block...)
-				start, block = token.NoPos, nil
-			default:
-				if start.IsValid() {
-					if !isLine {
-						return nil, doc.error(comment.Pos(), "interface contract fields require line comments")
-					}
-					lawsLine, _ := strings.CutPrefix(line, " ")
-					block = append(block, lawsLine)
-				}
+			if !isLine {
+				continue
 			}
-		}
-		if start.IsValid() {
-			return nil, doc.error(start, "golean:start has no matching golean:end")
+			fields := strings.Fields(line)
+			if len(fields) == 0 {
+				continue
+			}
+			switch fields[0] {
+			case "golean:start", "golean:end":
+				return nil, doc.error(comment.Pos(), "legacy contract marker; use //golean:law for each law")
+			case "golean:law":
+				law := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "golean:law"))
+				name, proposition, valid := strings.Cut(law, ":")
+				if !valid || len(strings.Fields(name)) != 1 || strings.TrimSpace(proposition) == "" {
+					return nil, doc.error(comment.Pos(), "expected //golean:law <name> : <Lean proposition>")
+				}
+				laws = append(laws, law)
+			}
 		}
 	}
 	return laws, nil

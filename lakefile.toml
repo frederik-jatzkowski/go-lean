@@ -52,4 +52,4 @@ roots = [
 [[lean_lib]]
 name = "SelfProofs"
 srcDir = "internal"
-roots = ["subset.check_gen", "subset.check_proofs"]
+roots = ["subset.check_gen", "subset.check_proofs", "lower.contract_gen", "lower.contract_proofs", "lower.ssa_gen", "lower.ssa_proofs"]

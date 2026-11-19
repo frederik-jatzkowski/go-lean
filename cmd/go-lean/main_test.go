@@ -43,6 +43,12 @@ func TestExamplesMatchGeneratedOutput(t *testing.T) {
 	if !found["internal/subset/check_gen.lean"] {
 		t.Error("missing generated module for subset.Binary")
 	}
+	if !found["internal/lower/contract_gen.lean"] {
+		t.Error("missing generated module for lowering contracts")
+	}
+	if !found["internal/lower/ssa_gen.lean"] {
+		t.Error("missing generated module for SSA lowering")
+	}
 }
 
 func TestTranspileTree(t *testing.T) {

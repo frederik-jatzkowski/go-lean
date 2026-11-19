@@ -61,14 +61,12 @@ The [movement example](examples/provable/movement_arrival/movement_arrival_proof
 
 ## Interface contracts
 
-Write Lean law fields between `//golean:start` and `//golean:end` in a method's doc comment. For interface-level doc comments use `// golean:start` and `// golean:end` so `gofmt` preserves the block.
+Write each Lean law field on its own `//golean:law <name> : <proposition>` line in the interface or method doc comment. Repeat the directive for each law. These lines survive `gofmt`.
 
 ```go
 type KVStore interface {
     Get(key int64) int64
-    //golean:start
-    // get_after_put : ∀ s k v, Get (Put s k v) k = v
-    //golean:end
+    //golean:law get_after_put : ∀ s k v, Get (Put s k v) k = v
     Put(key, value int64) KVStore
 }
 ```
@@ -76,6 +74,8 @@ type KVStore interface {
 Each generated module includes the contracts it needs for marked functions and their reachable helpers. The generator derives method types from Go, followed by the annotated law fields. Lean checks the fields during `lake build`. Callers take explicit contract arguments, and proofs can use fields such as `contract.get_after_put`.
 
 The contract models valid, non-nil interface handles and total method behavior on those handles. Methods accept supported Go value arguments and return one supported value or a handle of the same interface. Functional updates can return a new handle. Applying a caller proof to Go requires its actual dependency to satisfy the model, including the assumptions about side effects and panics.
+
+The [lowering interfaces](internal/lower/contract.go) use this mechanism to describe checked SSA input and persistent lowering state.
 
 The [caller example](examples/provable/kv_store_contract_use/kv_store_contract_use_proofs.lean) proves read-your-writes for any supplied contract. The [implementation example](examples/provable/kv_store_contract_impl/kv_store_contract_impl_proofs.lean) discharges that contract using translated Go functions and specializes the caller theorem. The concrete Go methods delegate to those functions.
 

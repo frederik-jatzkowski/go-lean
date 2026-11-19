@@ -248,10 +248,13 @@ func (ListRecursion) result()  {}
 
 type Expr interface{ expr() }
 
-// Trace is empty when no classified effect has occurred.
+// Trace represents an empty trace or a single classified effect.
 type Trace string
 
-func (Trace) expr() {}
+type TraceAppend struct{ Before, After Expr }
+
+func (Trace) expr()       {}
+func (TraceAppend) expr() {}
 
 type IntLiteral struct {
 	Value string

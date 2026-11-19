@@ -406,6 +406,8 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 			return "[]"
 		}
 		return "[" + strconv.Quote(string(expr)) + "]"
+	case ir.TraceAppend:
+		return fmt.Sprintf("(%s ++ %s)", r.renderExpr(expr.Before), r.renderExpr(expr.After))
 	case ir.UnitLiteral:
 		return "()"
 	case ir.Some:

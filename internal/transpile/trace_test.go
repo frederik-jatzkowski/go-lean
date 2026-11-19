@@ -102,13 +102,66 @@ end GoLean.«example.test/sample».input
 `)
 }
 
+func TestSequentialBoundaryEffects(t *testing.T) {
+	dir := newModule(t)
+	writeFile(t, filepath.Join(dir, "input.go"), "package sample\n"+traceRepository+`
+//golean:assume valid : True
+type Bus interface {
+	Publish(int64)
+}
+
+func save(repo Repository, value int64) int64 {
+	return repo.Write(value)
+}
+
+func publish(bus Bus, value int64, enabled bool) int64 {
+	if enabled {
+		bus.Publish(value)
+	}
+	return value
+}
+
+//golean:boundary Repository.Read readonly
+//golean:boundary Repository.Write effect
+//golean:boundary Bus.Publish effect
+//golean:verify effects : True
+func Run(repo Repository, bus Bus, enabled bool) int64 {
+	value := repo.Read()
+	value = repo.Write(value)
+	value = save(repo, value)
+	return publish(bus, value, enabled)
+}
+`)
+	outputs, err := transpile.Generate(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkInitializedLean(t, dir, outputs[0].Path, outputs[0].Source+`
+namespace GoLean.«example.test/sample».input
+
+private def repo : InterfaceContracts.RepositoryContract Unit :=
+  ⟨fun _ => 3, fun _ value => value + 1, trivial⟩
+
+private def bus : InterfaceContracts.BusContract Unit :=
+  ⟨fun _ _ => (), trivial⟩
+
+example : Run bus repo () () true =
+    (5, ["example.test/sample.Repository.Write", "example.test/sample.Repository.Write",
+         "example.test/sample.Bus.Publish"]) := rfl
+example : Run bus repo () () false =
+    (5, ["example.test/sample.Repository.Write", "example.test/sample.Repository.Write"]) := rfl
+
+end GoLean.«example.test/sample».input
+`)
+}
+
 func TestRejectStrictInterfaceCalls(t *testing.T) {
 	for _, tc := range []struct {
 		name, entries, body, diagnostic string
 	}{
 		{"unlisted in helper", "Repository.Read readonly", "return write(repo, 0)", "Repository.Write is missing"},
-		{"two effects", "Repository.Write effect", "return write(repo, write(repo, 0))", "multiple effects"},
 		{"read after effect", "Repository.Write effect\n//golean:boundary Repository.Read readonly", "return write(repo, 0) + repo.Read()", "interface call after an effect"},
+		{"read in helper after possible effect", "Repository.Write effect\n//golean:boundary Repository.Read readonly", "return maybeWrite(repo, repo.Read() > 0) + read(repo)", "call to read: readonly interface call after an effect"},
 		{"duplicate", "Repository.Write effect\n//golean:boundary Repository.Write readonly", "return write(repo, 0)", "duplicate interface boundary"},
 		{"unused", "Repository.Write effect\n//golean:boundary Repository.Read readonly", "return write(repo, 0)", "unused interface boundary"},
 		{"invalid method", "Repository.Missing effect", "return write(repo, 0)", "expected a named interface method"},
@@ -117,6 +170,11 @@ func TestRejectStrictInterfaceCalls(t *testing.T) {
 			dir := newModule(t)
 			writeFile(t, filepath.Join(dir, "input.go"), "package sample\n"+traceRepository+`
 func write(repo Repository, value int64) int64 { return repo.Write(value) }
+func read(repo Repository) int64 { return repo.Read() }
+func maybeWrite(repo Repository, enabled bool) int64 {
+	if enabled { return write(repo, 0) }
+	return 0
+}
 
 //golean:boundary `+tc.entries+`
 //golean:verify law : True

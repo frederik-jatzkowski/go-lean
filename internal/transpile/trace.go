@@ -20,33 +20,33 @@ func (op interfaceOperation) name() string {
 	return strings.TrimPrefix(string(op.handle), "interface:") + "." + op.method
 }
 
-// A summary is a set of possible path outcomes. Sequential composition rejects
-// any path that can observe an interface after an effect.
+// A summary records whether a read or an effect is possible. Sequential
+// composition rejects a possible read after an effect.
 type pathSummary uint8
 
 const (
-	noCalls pathSummary = 1 << iota
-	readCalls
-	effectCall
+	readCalls pathSummary = 1 << iota
+	effectCalls
 )
 
 func (before pathSummary) followedBy(after pathSummary) (pathSummary, error) {
-	if before&effectCall != 0 {
-		switch {
-		case after&effectCall != 0:
-			return 0, fmt.Errorf("multiple effects on one control-flow path")
-		case after&readCalls != 0:
-			return 0, fmt.Errorf("interface call after an effect on one control-flow path")
-		}
+	if before&effectCalls != 0 && after&readCalls != 0 {
+		return 0, fmt.Errorf("readonly interface call after an effect on one control-flow path")
 	}
-	result := after &^ noCalls
-	if after&noCalls != 0 {
-		result |= before
-	}
-	return result, nil
+	return before | after, nil
 }
 
 var traceType = ir.SliceType(ir.Type("String"))
+
+func appendTrace(before, after ir.Expr) ir.Expr {
+	if before == ir.Trace("") {
+		return after
+	}
+	if after == ir.Trace("") {
+		return before
+	}
+	return ir.TraceAppend{Before: before, After: after}
+}
 
 type tracedFunction struct {
 	summary pathSummary
@@ -141,12 +141,12 @@ func (c *traceCompiler) function(symbol ir.Symbol) (tracedFunction, error) {
 	if fn.CanPanic || fn.Loop != nil || fn.Fuel != nil {
 		return tracedFunction{}, fmt.Errorf("%s must have an acyclic, total model", symbol.Name)
 	}
-	body, summary, err := c.body(fn.Body, noCalls, ir.Trace(""))
+	body, summary, err := c.body(fn.Body, 0, ir.Trace(""))
 	if err != nil {
 		return tracedFunction{}, fmt.Errorf("%s: %w", symbol.Name, err)
 	}
 	result := tracedFunction{summary: summary, symbol: symbol}
-	if symbol == c.root || summary&effectCall != 0 {
+	if symbol == c.root || summary&effectCalls != 0 {
 		if symbol != c.root {
 			result.symbol.Name = c.root.Name + "$trace$" + strconv.Itoa(len(c.variants)) + "$" + symbol.Name
 		}
@@ -171,7 +171,8 @@ func (c *traceCompiler) body(original ir.Body, summary pathSummary, trace ir.Exp
 			c.used[op] = true
 			next := readCalls
 			if effect {
-				next, trace = effectCall, ir.Trace(op.name())
+				next = effectCalls
+				trace = appendTrace(trace, ir.Trace(op.name()))
 			}
 			var err error
 			summary, err = summary.followedBy(next)
@@ -187,13 +188,13 @@ func (c *traceCompiler) body(original ir.Body, summary pathSummary, trace ir.Exp
 			if err != nil {
 				return ir.Body{}, 0, fmt.Errorf("call to %s: %w", call.Callee.Name, err)
 			}
-			if callee.summary&effectCall != 0 {
+			if callee.summary&effectCalls != 0 {
 				call.Callee = callee.symbol
 				c.binders++
 				pair := ir.Binder{Name: "$trace", Index: c.binders, Type: ir.ProductType(binding.Binder.Type, traceType)}
 				body.Bindings = append(body.Bindings, ir.Binding{Binder: pair, Value: call})
 				binding.Value = ir.PairField{Value: ir.Ref(pair)}
-				trace = ir.PairField{Value: ir.Ref(pair), Second: true}
+				trace = appendTrace(trace, ir.PairField{Value: ir.Ref(pair), Second: true})
 			}
 		}
 		body.Bindings = append(body.Bindings, binding)

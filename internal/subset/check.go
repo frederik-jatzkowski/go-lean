@@ -23,10 +23,13 @@ type Checked struct {
 	ranges    map[*ssa.Function]*RangeFold
 	builds    map[*ssa.Function]*SliceBuild
 	chains    map[*ssa.Function]*ChainRecursion
+	stateful  map[*ssa.Function]*StatefulMethod
 }
 
 func (c Checked) Root() *ssa.Package         { return c.root }
 func (c Checked) Functions() []*ssa.Function { return c.functions }
+
+func (c Checked) Stateful(fn *ssa.Function) *StatefulMethod { return c.stateful[fn] }
 
 func (c Checked) CountedLoop(fn *ssa.Function) *CountedLoop { return c.loops[fn] }
 
@@ -62,15 +65,22 @@ func Check(program gosource.Program) (Checked, error) {
 		builds:    make(map[*ssa.Function]*SliceBuild),
 		chains:    make(map[*ssa.Function]*ChainRecursion),
 		freshMaps: make(map[*ssa.MakeMap]bool),
+		stateful:  make(map[*ssa.Function]*StatefulMethod),
 	}
 	for _, fn := range program.Roots {
+		if writesReceiver(fn, make(map[*ssa.Function]bool)) {
+			if err := c.checkStateful(fn); err != nil {
+				return Checked{}, err
+			}
+			continue
+		}
 		if err := c.function(fn); err != nil {
 			return Checked{}, err
 		}
 	}
 	return Checked{
 		contracts: c.contracts, root: program.Package, functions: c.ordered, records: c.records, arrays: c.arrays, loops: c.loops,
-		ranges: c.ranges, builds: c.builds, chains: c.chains,
+		ranges: c.ranges, builds: c.builds, chains: c.chains, stateful: c.stateful,
 	}, nil
 }
 
@@ -88,9 +98,13 @@ type checker struct {
 	builds        map[*ssa.Function]*SliceBuild
 	chains        map[*ssa.Function]*ChainRecursion
 	freshMaps     map[*ssa.MakeMap]bool
+	stateful      map[*ssa.Function]*StatefulMethod
 }
 
 func (c *checker) function(fn *ssa.Function) error {
+	if c.stateful[fn] != nil {
+		return diagnostic(fn, fn.Pos(), "stateful calls must use the tracked receiver")
+	}
 	if c.done[fn] {
 		return nil
 	}

@@ -39,7 +39,7 @@ func Render(program ir.Program) string {
 		}
 		name := symbolName(fn.Symbol)
 		recursion, recursive := fn.Body.Result.(ir.ListRecursion)
-		if recursive {
+		if recursive || fn.Fuel != nil {
 			fmt.Fprintf(&out, "\nnamespace %s\n", symbolNamespace(fn.Symbol))
 			name = quoted(fn.Symbol.Name)
 		}
@@ -56,9 +56,18 @@ func Render(program ir.Program) string {
 		} else {
 			fmt.Fprintf(&out, " : %s :=\n", r.leanType(fn.Result))
 		}
-		r.renderBody(&out, fn.Body, "  ", fn.CanPanic)
+		if fn.Fuel != nil {
+			fuel := binderName(*fn.Fuel)
+			fmt.Fprintf(&out, "  match %s with\n  | 0 => none\n  | %s + 1 => do\n", fuel, fuel)
+			r.renderBody(&out, fn.Body, "    ", true)
+			fmt.Fprintf(&out, "termination_by structural %s\n", fuel)
+		} else {
+			r.renderBody(&out, fn.Body, "  ", fn.CanPanic)
+		}
 		if recursive {
 			fmt.Fprintf(&out, "termination_by structural %s\n", binderName(recursion.Input))
+		}
+		if recursive || fn.Fuel != nil {
 			fmt.Fprintf(&out, "\nend %s\n", symbolNamespace(fn.Symbol))
 		}
 	}
@@ -99,7 +108,14 @@ func (r renderer) renderRecords(out *strings.Builder) {
 		}
 		emitted[typ] = true
 		for _, field := range record.Fields {
-			emit(field.Type)
+			typ := field.Type
+			if elem := typ.OptionElem(); elem != "" {
+				typ = elem
+			}
+			if elem := typ.SliceElem(); elem != "" {
+				typ = elem
+			}
+			emit(typ)
 		}
 		fmt.Fprintf(out, "\nstructure %s where\n", symbolName(record.Symbol))
 		for _, field := range record.Fields {
@@ -145,6 +161,9 @@ func (r renderer) renderContracts(out *strings.Builder) {
 }
 
 func (r renderer) leanType(typ ir.Type) string {
+	if left, right := typ.ProductShape(); left != "" {
+		return "(" + r.leanType(left) + " × " + r.leanType(right) + ")"
+	}
 	if input, output := typ.UnaryFunctionShape(); input != "" {
 		return "(" + r.leanType(input) + " → " + r.leanType(output) + ")"
 	}
@@ -188,6 +207,20 @@ func (r renderer) renderBody(out *strings.Builder, body ir.Body, indent string, 
 			out.WriteString("return ")
 		}
 		fmt.Fprintln(out, r.renderExpr(result.Value))
+	case ir.TailCall:
+		if result.Recursive {
+			fmt.Fprint(out, indent+quoted(result.Call.Callee.Name))
+			for _, arg := range result.Call.Args {
+				fmt.Fprint(out, " "+r.renderExpr(arg))
+			}
+			fmt.Fprintln(out)
+		} else {
+			fmt.Fprintln(out, indent+r.renderExpr(result.Call))
+		}
+	case ir.WithReceiver:
+		fmt.Fprintf(out, "%smatch %s with\n%s| none => none\n%s| some %s =>\n",
+			indent, r.renderExpr(result.Receiver), indent, indent, binderName(result.State))
+		r.renderBody(out, result.Body, indent+"  ", canPanic)
 	case ir.If:
 		fmt.Fprintf(out, "%sif %s then\n", indent, r.renderExpr(result.Condition))
 		r.renderBody(out, result.Then, indent+"  ", canPanic)
@@ -232,6 +265,30 @@ func (r renderer) renderBindings(out *strings.Builder, bindings []ir.Binding, in
 
 func (r renderer) renderExpr(expr ir.Expr) string {
 	switch expr := expr.(type) {
+	case ir.UnitLiteral:
+		return "()"
+	case ir.Some:
+		return "(some " + r.renderExpr(expr.Value) + ")"
+	case ir.Pair:
+		return fmt.Sprintf("(%s, %s)", r.renderExpr(expr.Left), r.renderExpr(expr.Right))
+	case ir.PairField:
+		field := 1
+		if expr.Second {
+			field = 2
+		}
+		return fmt.Sprintf("(%s).%d", r.renderExpr(expr.Value), field)
+	case ir.RecordUpdate:
+		return fmt.Sprintf("{ %s with %s := %s }", r.renderExpr(expr.Record), recordFieldName(expr.Field), r.renderExpr(expr.Value))
+	case ir.ListLength:
+		return fmt.Sprintf("(%s).length", r.renderExpr(expr.List))
+	case ir.SliceLength:
+		return fmt.Sprintf("(%s.ofNat (%s).length)", r.leanType(ir.IntWord), r.renderExpr(expr.List))
+	case ir.Cons:
+		return fmt.Sprintf("(%s :: %s)", r.renderExpr(expr.Head), r.renderExpr(expr.Tail))
+	case ir.Reverse:
+		return fmt.Sprintf("(%s).reverse", r.renderExpr(expr.List))
+	case ir.IndexFuel:
+		return fmt.Sprintf("(((%s).toInt - (%s).toInt).toNat + 1)", r.renderExpr(expr.Length), r.renderExpr(expr.Cursor))
 	case ir.IntLiteral:
 		if expr.Type.IsUnsigned() {
 			return fmt.Sprintf("(%s.ofNat (%s))", r.leanType(expr.Type), expr.Value)

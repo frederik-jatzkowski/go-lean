@@ -32,6 +32,13 @@ func FromSSA(checked subset.Checked, sourceStem string, wordBits int64) ir.Progr
 			checked: checked, records: program.Records, instances: instances,
 			contracts: program.Contracts, dependencies: dependencies, usedContracts: make(map[ir.Type]bool),
 		}
+		if method := checked.Stateful(fn); method != nil {
+			program.Functions = append(program.Functions, l.lowerStateful(fn, method)...)
+			if l.usesWord {
+				program.WordBits = wordBits
+			}
+			continue
+		}
 		result := ir.Function{Symbol: l.symbol(fn), Result: l.valueType(fn.Signature.Results().At(0).Type())}
 		for i := 0; i < fn.Signature.TypeParams().Len(); i++ {
 			result.TypeParams = append(result.TypeParams, ir.TypeParameter(i))

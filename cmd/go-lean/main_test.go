@@ -24,9 +24,9 @@ func TestExamplesMatchGeneratedOutput(t *testing.T) {
 		}
 	}
 	for _, example := range []string{
-		"acyclic_list", "arithmetic", "array_bounds", "boolean_implication", "bounded_counter", "branch_join", "byte_rune", "clamp", "clampimport", "constant_conversions",
+		"acyclic_list", "arithmetic", "array_bounds", "batch_fulfillment", "boolean_implication", "bounded_counter", "branch_join", "byte_rune", "clamp", "clampimport", "constant_conversions",
 		"division_guarded", "division_precondition", "division_propagation", "embedded_struct", "float32_rounding", "float64_special",
-		"generic_identity", "generic_map", "immutable_closure", "integer_remainder", "machine_words", "map_build", "map_lookup", "narrow_signed", "nil_dereference", "range_fold",
+		"generic_identity", "generic_map", "immutable_closure", "integer_remainder", "machine_words", "map_build", "map_lookup", "movement_arrival", "narrow_signed", "nil_dereference", "range_fold",
 		"slice_bounds", "slice_copy", "string_bytes", "struct_fields", "switch_tagless", "switch_value", "territory_methods", "unsigned_wrap",
 	} {
 		if !found[example+"_gen.lean"] {

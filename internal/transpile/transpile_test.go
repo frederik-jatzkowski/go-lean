@@ -131,15 +131,22 @@ func Limit() uint8 { return First(1).Limit() + (*Second)(nil).Limit() }
 	}
 }
 
-func TestRejectReceiverMutation(t *testing.T) {
-	dir := newModule(t)
-	writeFile(t, filepath.Join(dir, "input.go"), `package sample
-type Record struct{ value int64 }
-//golean:verify
-func (r *Record) Set(x int64) int64 { r.value = x; return x }
-`)
-	if _, err := transpile.Generate(dir); err == nil {
-		t.Fatal("accepted a write through a pointer receiver")
+func TestRejectUnsupportedStatefulMethods(t *testing.T) {
+	for _, test := range []struct{ name, body, want string }{
+		{"untracked pointer", "func (r *Record) f(other *Record) int { r.value++; other.value++; return r.value }", "unsupported stateful method parameter"},
+		{"receiver escape", "func (r *Record) f() int { r.value++; escaped = r; return r.value }", "unsupported receiver-state instruction"},
+		{"slice write", "func (r *Record) f() int { r.value++; r.items[0] = 1; return r.value }", "unsupported receiver-state instruction"},
+		{"unbounded", "func (r *Record) f() int { for r.value < 100 { r.value-- }; return r.value }", "one cursor increment on every back edge"},
+		{"no increment", "func (r *Record) f() int { for r.value < len(r.items) { if r.items[r.value] == 0 { r.value++ } }; return r.value }", "one cursor increment on every back edge"},
+		{"changes input on back edge", "func (r *Record) f(items []int) int { for r.value < len(r.items) { r.items = items; r.value++ }; return r.value }", "one cursor increment on every back edge"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := newModule(t)
+			writeFile(t, filepath.Join(dir, "input.go"), "package sample\ntype Record struct { value int; items []int }\nvar escaped *Record\n//golean:verify\n"+test.body+"\n")
+			if _, err := transpile.Generate(dir); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("got %v, want %q", err, test.want)
+			}
+		})
 	}
 }
 

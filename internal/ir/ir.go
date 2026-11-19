@@ -44,6 +44,7 @@ type Function struct {
 	Body       Body
 	CanPanic   bool
 	Loop       *CountedLoop
+	Fuel       *Binder
 }
 
 // CountedLoop repeats the SSA update once per unit of natural-number fuel.
@@ -105,6 +106,19 @@ func (t Type) UnaryFunctionShape() (input, output Type) {
 	if signature, ok := strings.CutPrefix(string(t), "func:"); ok {
 		input, output, _ := strings.Cut(signature, "\x00")
 		return Type(input), Type(output)
+	}
+	return "", ""
+}
+
+func ProductType(left, right Type) Type {
+	return Type("product:" + strconv.Itoa(len(left)) + ":" + string(left) + string(right))
+}
+
+func (t Type) ProductShape() (left, right Type) {
+	if tail, ok := strings.CutPrefix(string(t), "product:"); ok {
+		length, rest, _ := strings.Cut(tail, ":")
+		n, _ := strconv.Atoi(length)
+		return Type(rest[:n]), Type(rest[n:])
 	}
 	return "", ""
 }

@@ -104,7 +104,7 @@ func Load(dir string) ([]Program, error) {
 				continue
 			}
 			result.Roots = append(result.Roots, fn)
-			directives := Directives{Laws: root.laws, Constructor: root.constructor}
+			directives := Directives{Laws: root.laws, Constructor: root.constructor, InterfaceCalls: root.interfaceCalls}
 			for _, target := range root.abstract {
 				callee := prog.FuncValue(target.fn)
 				if callee == nil {

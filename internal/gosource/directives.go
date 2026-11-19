@@ -23,19 +23,28 @@ type Abstract struct {
 	Position token.Position
 }
 
+type InterfaceCall struct {
+	Interface *types.Named
+	Method    *types.Func
+	Effect    bool
+	Position  token.Position
+}
+
 type Directives struct {
-	Constructor bool
-	Laws        []Law
-	Abstract    []Abstract
+	InterfaceCalls []InterfaceCall
+	Constructor    bool
+	Laws           []Law
+	Abstract       []Abstract
 }
 
 type selectedRoot struct {
-	constructor bool
-	fn          *types.Func
-	marked      bool
-	laws        []Law
-	assumptions []Law
-	abstract    []abstractTarget
+	interfaceCalls []InterfaceCall
+	constructor    bool
+	fn             *types.Func
+	marked         bool
+	laws           []Law
+	assumptions    []Law
+	abstract       []abstractTarget
 }
 
 type abstractTarget struct {
@@ -115,6 +124,21 @@ func selectRoots(pkg *packages.Package, file *ast.File) ([]selectedRoot, error) 
 					continuationKind = directive
 					continue
 				}
+			case "//golean:boundary":
+				parts := strings.Fields(payload)
+				if len(parts) != 2 || (parts[1] != "readonly" && parts[1] != "effect") {
+					return nil, directiveError(position, "expected //golean:boundary Interface.Method readonly or effect")
+				}
+				iface, method := resolveInterfaceMethod(pkg.Types, imports, parts[0])
+				if method == nil {
+					return nil, directiveError(position, "expected a named interface method, got %s", parts[0])
+				}
+				for _, existing := range root.interfaceCalls {
+					if existing.Interface == iface && existing.Method == method {
+						return nil, directiveError(position, "duplicate interface boundary for %s", parts[0])
+					}
+				}
+				root.interfaceCalls = append(root.interfaceCalls, InterfaceCall{Interface: iface, Method: method, Effect: parts[1] == "effect", Position: position})
 			case "//golean:abstract":
 				target := resolveAbstract(pkg.Types, imports, payload)
 				if target == nil {
@@ -132,6 +156,15 @@ func selectRoots(pkg *packages.Package, file *ast.File) ([]selectedRoot, error) 
 		if len(root.abstract) != 0 && len(root.laws) == 0 {
 			return nil, directiveError(root.abstract[0].position, "abstraction requires a caller with a named //golean:verify law")
 		}
+		if len(root.interfaceCalls) != 0 {
+			pos := root.interfaceCalls[0].Position
+			if len(root.laws) == 0 {
+				return nil, directiveError(pos, "//golean:boundary requires a named //golean:verify law")
+			}
+			if len(root.abstract) != 0 || root.constructor {
+				return nil, directiveError(pos, "//golean:boundary cannot be combined with //golean:abstract or //golean:verify:constructor")
+			}
+		}
 		if marked || len(root.assumptions) != 0 {
 			if fn.Name.Name == "_" || (fn.Recv == nil && fn.Name.Name == "init") {
 				return nil, directiveError(pkg.Fset.Position(fn.Pos()), "directives require a named function or concrete method")
@@ -142,6 +175,38 @@ func selectRoots(pkg *packages.Package, file *ast.File) ([]selectedRoot, error) 
 		}
 	}
 	return roots, nil
+}
+
+func resolveInterfaceMethod(pkg *types.Package, imports map[string]*types.Package, target string) (*types.Named, *types.Func) {
+	parts := strings.Split(target, ".")
+	if len(parts) == 3 {
+		pkg = imports[parts[0]]
+		parts = parts[1:]
+		if pkg == nil || !token.IsExported(parts[0]) || !token.IsExported(parts[1]) {
+			return nil, nil
+		}
+	}
+	if len(parts) != 2 {
+		return nil, nil
+	}
+	obj, ok := pkg.Scope().Lookup(parts[0]).(*types.TypeName)
+	if !ok {
+		return nil, nil
+	}
+	named, ok := types.Unalias(obj.Type()).(*types.Named)
+	if !ok || named.TypeParams().Len() != 0 {
+		return nil, nil
+	}
+	iface, ok := named.Underlying().(*types.Interface)
+	if !ok {
+		return nil, nil
+	}
+	for method := range iface.ExplicitMethods() {
+		if method.Name() == parts[1] {
+			return named, method
+		}
+	}
+	return nil, nil
 }
 
 func resolveAbstract(pkg *types.Package, imports map[string]*types.Package, payload string) *types.Func {

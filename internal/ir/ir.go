@@ -7,10 +7,11 @@ import (
 )
 
 type Program struct {
-	Functions []Function
-	Records   map[Type]Record
-	Contracts map[Type]Contract
-	WordBits  int64
+	TracedRoots map[Symbol]bool
+	Functions   []Function
+	Records     map[Type]Record
+	Contracts   map[Type]Contract
+	WordBits    int64
 }
 
 type Contract struct {
@@ -37,6 +38,7 @@ type Field struct {
 }
 
 type Function struct {
+	Traced     bool
 	Symbol     Symbol
 	TypeParams []Type
 	Contracts  []Type
@@ -245,6 +247,11 @@ func (ListBuild) result()      {}
 func (ListRecursion) result()  {}
 
 type Expr interface{ expr() }
+
+// Trace is empty when no classified effect has occurred.
+type Trace string
+
+func (Trace) expr() {}
 
 type IntLiteral struct {
 	Value string

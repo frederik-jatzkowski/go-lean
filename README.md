@@ -64,6 +64,14 @@ The caller opts in per callee. An ordinary call or a separately selected verific
 
 Examples cover a [global configuration read](examples/provable/assumed_quota/assumed_quota.go), a [goroutine-backed helper](examples/provable/assumed_worker/assumed_worker.go), and a [reflection-backed method](examples/provable/assumed_reflection/assumed_reflection.go). When every abstract callee supplies checked `verify` laws, the verification module also specializes the theorem with the concrete operations and their proofs, as in [ClampImport](examples/provable/clampimport/clampimport.go).
 
+### Interface call allowlists and effect traces
+
+A function or method with a named verification law can list interface calls using `//golean:boundary Interface.Method readonly` or `//golean:boundary Interface.Method effect`. Use `pkg.Interface.Method` for imported declarations. Once a root has a classified entry, every interface call in its checked call tree must be listed, including calls inside direct helpers. Each entry must be used. Callbacks, legacy callee abstractions, and opaque calls are outside this subset.
+
+The Go signature is unchanged. The strict root's Lean result is a pair of the usual return value and a `List String`. Each `effect` invocation contributes an entry named `import/path.Interface.Method`. A `readonly` invocation contributes no entry and assumes that the implementation has no externally observable effects. Existing interface contracts supply the return values in both cases. The checker requires an acyclic, total model with at most one effect on any control-flow path and no subsequent interface call on that path.
+
+Use the trace to prove when a call occurs. In the [fraud withdrawal example](examples/provable/fraud_withdrawal/fraud_withdrawal.go), Lean proves an empty trace on rejection and one setter call on approval. The Go adapter tests cover persistence, and the empty-trace guarantee depends on the adapters honoring their read-only classifications.
+
 ## Multiple results
 
 Go results become right-nested Lean products in declaration order. For example,

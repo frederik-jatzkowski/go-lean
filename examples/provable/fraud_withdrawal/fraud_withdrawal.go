@@ -32,6 +32,36 @@ func (service WithdrawalService) blocked(accountID, amount uint64) bool {
 }
 
 // Withdraw saves an approved debit and returns the balance reported by the repository.
+//
+//golean:boundary BalanceRepository.Balance readonly
+//golean:boundary FraudRepository.Blocked readonly
+//golean:boundary BalanceRepository.SetBalance effect
+//golean:verify blockedPreservesBalance : ∀ {B F : Type} (balances : InterfaceContracts.BalanceRepositoryContract B)
+//golean:verify+   (fraud : InterfaceContracts.FraudRepositoryContract F) (service : WithdrawalService B F)
+//golean:verify+   (accountID amount : UInt64),
+//golean:verify+   fraud.Blocked service.«field:fraud» accountID amount = true →
+//golean:verify+   «WithdrawalService$Withdraw» balances fraud service accountID amount =
+//golean:verify+     ((balances.Balance service.«field:balances» accountID, false), [])
+//golean:verify invalidAmountPreservesBalance : ∀ {B F : Type} (balances : InterfaceContracts.BalanceRepositoryContract B)
+//golean:verify+   (fraud : InterfaceContracts.FraudRepositoryContract F) (service : WithdrawalService B F)
+//golean:verify+   (accountID amount : UInt64),
+//golean:verify+   amount = 0 ∨ balances.Balance service.«field:balances» accountID < amount →
+//golean:verify+   «WithdrawalService$Withdraw» balances fraud service accountID amount =
+//golean:verify+     ((balances.Balance service.«field:balances» accountID, false), [])
+//golean:verify rejectedWithdrawHasNoEffect : ∀ {B F : Type} (balances : InterfaceContracts.BalanceRepositoryContract B)
+//golean:verify+   (fraud : InterfaceContracts.FraudRepositoryContract F) (service : WithdrawalService B F)
+//golean:verify+   (accountID amount : UInt64),
+//golean:verify+   let result := «WithdrawalService$Withdraw» balances fraud service accountID amount
+//golean:verify+   result.1.2 = false →
+//golean:verify+     result.1.1 = balances.Balance service.«field:balances» accountID ∧ result.2 = []
+//golean:verify approvedWithdrawWritesOnce : ∀ {B F : Type} (balances : InterfaceContracts.BalanceRepositoryContract B)
+//golean:verify+   (fraud : InterfaceContracts.FraudRepositoryContract F) (service : WithdrawalService B F)
+//golean:verify+   (accountID amount : UInt64),
+//golean:verify+   fraud.Blocked service.«field:fraud» accountID amount = false →
+//golean:verify+   amount ≠ 0 → ¬ balances.Balance service.«field:balances» accountID < amount →
+//golean:verify+   «WithdrawalService$Withdraw» balances fraud service accountID amount =
+//golean:verify+     ((balances.Balance service.«field:balances» accountID - amount, true),
+//golean:verify+       ["github.com/frederik-jatzkowski/go-lean/examples/provable/fraud_withdrawal.BalanceRepository.SetBalance"])
 func (service WithdrawalService) Withdraw(accountID, amount uint64) (balance uint64, withdrawn bool) {
 	balance, approved := service.planWithdrawal(accountID, amount)
 	if !approved {
@@ -41,26 +71,6 @@ func (service WithdrawalService) Withdraw(accountID, amount uint64) (balance uin
 }
 
 // planWithdrawal reads the current balance and computes the debit decision.
-//
-//golean:verify blockedPreservesBalance : ∀ {B F : Type} (balances : InterfaceContracts.BalanceRepositoryContract B)
-//golean:verify+   (fraud : InterfaceContracts.FraudRepositoryContract F) (service : WithdrawalService B F)
-//golean:verify+   (accountID amount : UInt64),
-//golean:verify+   fraud.Blocked service.«field:fraud» accountID amount = true →
-//golean:verify+   «WithdrawalService$planWithdrawal» balances fraud service accountID amount =
-//golean:verify+     (balances.Balance service.«field:balances» accountID, false)
-//golean:verify invalidAmountPreservesBalance : ∀ {B F : Type} (balances : InterfaceContracts.BalanceRepositoryContract B)
-//golean:verify+   (fraud : InterfaceContracts.FraudRepositoryContract F) (service : WithdrawalService B F)
-//golean:verify+   (accountID amount : UInt64),
-//golean:verify+   amount = 0 ∨ balances.Balance service.«field:balances» accountID < amount →
-//golean:verify+   «WithdrawalService$planWithdrawal» balances fraud service accountID amount =
-//golean:verify+     (balances.Balance service.«field:balances» accountID, false)
-//golean:verify approvedDeductsAmount : ∀ {B F : Type} (balances : InterfaceContracts.BalanceRepositoryContract B)
-//golean:verify+   (fraud : InterfaceContracts.FraudRepositoryContract F) (service : WithdrawalService B F)
-//golean:verify+   (accountID amount : UInt64),
-//golean:verify+   fraud.Blocked service.«field:fraud» accountID amount = false →
-//golean:verify+   amount ≠ 0 → ¬ balances.Balance service.«field:balances» accountID < amount →
-//golean:verify+   «WithdrawalService$planWithdrawal» balances fraud service accountID amount =
-//golean:verify+     (balances.Balance service.«field:balances» accountID - amount, true)
 func (service WithdrawalService) planWithdrawal(accountID, amount uint64) (balance uint64, approved bool) {
 	balance = service.balances.Balance(accountID)
 	if service.blocked(accountID, amount) {

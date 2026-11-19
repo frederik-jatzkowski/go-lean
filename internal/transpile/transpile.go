@@ -46,7 +46,11 @@ func Generate(dir string) ([]Output, error) {
 		if err != nil {
 			return nil, err
 		}
-		lowered[program.Path] = lower.FromSSAWithAbstractCalls(lower.NewInput(checked), sourceStem(program.Path), program.WordBits, abstract)
+		model := lower.FromSSAWithAbstractCalls(lower.NewInput(checked), sourceStem(program.Path), program.WordBits, abstract)
+		if err := traceVerificationRoots(program, &model, abstract); err != nil {
+			return nil, err
+		}
+		lowered[program.Path] = model
 	}
 	var outputs []Output
 	for _, program := range programs {

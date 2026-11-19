@@ -107,6 +107,16 @@ The contract models valid, non-nil interface handles and total method behavior o
 
 The [lowering interfaces](internal/lower/contract.go) use this mechanism to describe checked SSA input and persistent lowering state.
 
+### Initialized interface fields
+
+Place `//golean:assume:initialized` in the field doc comment to use a named interface field in a verified value method or function. A named Go struct can mix supported ordinary fields with multiple annotated interface fields. The Lean record stores one handle per field, and calls through those fields use the existing interface contracts, including through statically resolved helpers.
+
+The directive is a precondition of the method proof. In Go, each annotated field must hold a valid dependency, excluding nil interfaces and typed-nil values, and the dependency must satisfy its interface contract. The Go zero value of the struct remains available to callers. Verified code can read annotated fields from values and pass them to checked callees. Pointer access and mutation of these fields are outside this subset.
+
+Optionally mark a function with `//golean:verify:constructor`. It generates a checked `<Function>$initialized` theorem for the returned struct. The theorem models interface parameters as optional handles and proves that every annotated field is present when the input dependencies are present. Each return path must construct a struct that assigns its annotated fields directly from same-type interface parameters. Constructor verification adds no runtime behavior and is independent of method verification. The initial subset covers value-returning constructors with direct injection. Runtime nil validation and constructors with failure results are outside this subset.
+
+The [fraud withdrawal example](examples/provable/fraud_withdrawal/fraud_withdrawal.go) proves that a blocked withdrawal returns the original balance and is rejected. It also proves the behavior for invalid amounts and approved withdrawals.
+
 The [caller example](examples/provable/kv_store_contract_use/kv_store_contract_use_proofs.lean) proves read-your-writes for any supplied contract. The [implementation example](examples/provable/kv_store_contract_impl/kv_store_contract_impl_proofs.lean) discharges that contract using translated Go functions and specializes the caller theorem. The concrete Go methods delegate to those functions.
 
 ## Planned scope

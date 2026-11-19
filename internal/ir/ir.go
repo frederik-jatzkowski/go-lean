@@ -26,8 +26,9 @@ type Method struct {
 }
 
 type Record struct {
-	Symbol Symbol
-	Fields []Field
+	Symbol  Symbol
+	Fields  []Field
+	Handles []Type
 }
 
 type Field struct {

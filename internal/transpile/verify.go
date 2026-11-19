@@ -139,9 +139,12 @@ func findModel(program ir.Program, symbol ir.Symbol) (ir.Function, bool) {
 }
 
 func makeVerification(dir string, program gosource.Program, owners map[*ssa.Function]gosource.Program, lowered map[string]ir.Program) (lean.Verification, error) {
-	var verification lean.Verification
+	verification := lean.Verification{Constructors: make(map[ir.Symbol]bool)}
 	for _, fn := range program.Roots {
 		directives := program.Directives[fn]
+		if directives.Constructor {
+			verification.Constructors[rootSymbol(program, fn)] = true
+		}
 		if len(directives.Laws) == 0 {
 			continue
 		}

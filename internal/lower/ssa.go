@@ -562,6 +562,9 @@ func (l *lowerer) value(value *sourceValue) ir.Expr {
 		if key, _ := typ.MapShape(); key != "" {
 			return ir.EmptyMap{}
 		}
+		if value.IsNil {
+			return l.zeroValue(value.Type)
+		}
 		switch typ {
 		case ir.Bool:
 			return ir.BoolLiteral(value.Boolean)
@@ -639,10 +642,23 @@ func (l *lowerer) valueType(t *sourceType) ir.Type {
 	if typ.IsRecord() {
 		if _, exists := l.records[typ]; !exists {
 			record := ir.Record{Symbol: l.typeSymbol(t, "")}
+			handles := make(map[ir.Type]bool)
 			for _, field := range t.Fields {
-				record.Fields = append(record.Fields, ir.Field{Name: field.Name, Type: l.valueType(field.Type)})
+				fieldType := l.valueType(field.Type)
+				record.Fields = append(record.Fields, ir.Field{Name: field.Name, Type: fieldType})
+				if field.Type.IsInterface {
+					handles[fieldType] = true
+				}
+				for _, handle := range l.records[fieldType].Handles {
+					handles[handle] = true
+				}
 			}
+			record.Handles = slices.Sorted(maps.Keys(handles))
 			l.records[typ] = record
+		} else {
+			for _, handle := range l.records[typ].Handles {
+				l.usedContracts[handle] = true
+			}
 		}
 	}
 	return typ

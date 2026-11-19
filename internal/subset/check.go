@@ -55,21 +55,22 @@ func (c Checked) RecordCell(value ssa.Value) (RecordCell, bool) {
 func Check(program gosource.Program) (Checked, error) {
 	c := checker{
 		contracts: make(map[*types.TypeName][]string), interfaceDocs: program.InterfaceDocs,
-		directives: program.Directives,
-		visiting:   make(map[*ssa.Function]bool),
-		done:       make(map[*ssa.Function]bool),
-		cells:      make(map[*ssa.Alloc]*ssa.Store),
-		records:    make(map[*ssa.Alloc]RecordCell),
-		arrays:     make(map[*ssa.Alloc]*ssa.Store),
-		loops:      make(map[*ssa.Function]*CountedLoop),
-		ranges:     make(map[*ssa.Function]*RangeFold),
-		builds:     make(map[*ssa.Function]*SliceBuild),
-		chains:     make(map[*ssa.Function]*ChainRecursion),
-		freshMaps:  make(map[*ssa.MakeMap]bool),
-		stateful:   make(map[*ssa.Function]*StatefulMethod),
+		initializedFields: program.InitializedFields,
+		directives:        program.Directives,
+		visiting:          make(map[*ssa.Function]bool),
+		done:              make(map[*ssa.Function]bool),
+		cells:             make(map[*ssa.Alloc]*ssa.Store),
+		records:           make(map[*ssa.Alloc]RecordCell),
+		arrays:            make(map[*ssa.Alloc]*ssa.Store),
+		loops:             make(map[*ssa.Function]*CountedLoop),
+		ranges:            make(map[*ssa.Function]*RangeFold),
+		builds:            make(map[*ssa.Function]*SliceBuild),
+		chains:            make(map[*ssa.Function]*ChainRecursion),
+		freshMaps:         make(map[*ssa.MakeMap]bool),
+		stateful:          make(map[*ssa.Function]*StatefulMethod),
 	}
 	for _, fn := range program.Roots {
-		if writesReceiver(fn, make(map[*ssa.Function]bool)) {
+		if !program.Directives[fn].Constructor && writesReceiver(fn, make(map[*ssa.Function]bool)) {
 			if err := c.checkStateful(fn); err != nil {
 				return Checked{}, err
 			}
@@ -92,21 +93,22 @@ func Check(program gosource.Program) (Checked, error) {
 }
 
 type checker struct {
-	directives    map[*ssa.Function]gosource.Directives
-	contracts     map[*types.TypeName][]string
-	interfaceDocs map[*types.TypeName]gosource.InterfaceDoc
-	visiting      map[*ssa.Function]bool
-	done          map[*ssa.Function]bool
-	ordered       []*ssa.Function
-	cells         map[*ssa.Alloc]*ssa.Store
-	records       map[*ssa.Alloc]RecordCell
-	arrays        map[*ssa.Alloc]*ssa.Store
-	loops         map[*ssa.Function]*CountedLoop
-	ranges        map[*ssa.Function]*RangeFold
-	builds        map[*ssa.Function]*SliceBuild
-	chains        map[*ssa.Function]*ChainRecursion
-	freshMaps     map[*ssa.MakeMap]bool
-	stateful      map[*ssa.Function]*StatefulMethod
+	initializedFields map[*types.Var]bool
+	directives        map[*ssa.Function]gosource.Directives
+	contracts         map[*types.TypeName][]string
+	interfaceDocs     map[*types.TypeName]gosource.InterfaceDoc
+	visiting          map[*ssa.Function]bool
+	done              map[*ssa.Function]bool
+	ordered           []*ssa.Function
+	cells             map[*ssa.Alloc]*ssa.Store
+	records           map[*ssa.Alloc]RecordCell
+	arrays            map[*ssa.Alloc]*ssa.Store
+	loops             map[*ssa.Function]*CountedLoop
+	ranges            map[*ssa.Function]*RangeFold
+	builds            map[*ssa.Function]*SliceBuild
+	chains            map[*ssa.Function]*ChainRecursion
+	freshMaps         map[*ssa.MakeMap]bool
+	stateful          map[*ssa.Function]*StatefulMethod
 }
 
 func (c *checker) function(fn *ssa.Function) error {
@@ -123,6 +125,11 @@ func (c *checker) function(fn *ssa.Function) error {
 		return diagnostic(fn, fn.Pos(), "Go body unavailable for %s", fn)
 	}
 	sig := fn.Signature
+	constructor := c.directives[fn].Constructor
+	if constructor && (sig.Recv() != nil || sig.Results().Len() != 1 ||
+		sig.TypeParams().Len() != 0 || !interfaceRecord(sig.Results().At(0).Type())) {
+		return diagnostic(fn, fn.Pos(), "//golean:verify:constructor requires a non-generic function returning one struct with initialized interface fields")
+	}
 	instance := len(fn.TypeArgs()) != 0
 	if sig.RecvTypeParams().Len() != 0 ||
 		(sig.Recv() != nil && fn.Synthetic != "") {
@@ -140,6 +147,9 @@ func (c *checker) function(fn *ssa.Function) error {
 			}
 		} else if Type(result) == "" {
 			return diagnostic(fn, fn.Pos(), "expected a function or concrete method with supported results and no variadic arguments")
+		}
+		if err := c.checkRecord(fn, fn.Pos(), result); err != nil {
+			return err
 		}
 		if Type(result).Pointee() != "" {
 			return diagnostic(fn, fn.Pos(), "record pointers may not escape as results")
@@ -174,6 +184,12 @@ func (c *checker) function(fn *ssa.Function) error {
 	}
 	chain := checkChainRecursion(fn)
 	for _, param := range fn.Params {
+		if constructor && interfaceRecord(param.Type()) {
+			return diagnostic(fn, param.Pos(), "constructor parameters may not contain interface fields")
+		}
+		if err := c.checkRecord(fn, param.Pos(), param.Type()); err != nil {
+			return err
+		}
 		if InterfaceHandle(param.Type()) != "" {
 			if err := c.checkInterface(fn, param.Pos(), param.Type()); err != nil {
 				return err
@@ -207,6 +223,13 @@ func (c *checker) function(fn *ssa.Function) error {
 		c.builds[fn] = build
 	} else if chain != nil {
 		c.chains[fn] = chain
+	} else if constructor {
+		if err := c.checkOrdinaryBody(fn); err != nil {
+			return err
+		}
+		if err := c.checkConstructor(fn); err != nil {
+			return err
+		}
 	} else if err := c.checkBody(fn); err != nil {
 		return err
 	}
@@ -405,6 +428,9 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		}
 		return diagnostic(fn, ins.Pos(), "unsupported type change from %s to %s", ins.X.Type(), ins.Type())
 	case *ssa.Call:
+		if c.directives[fn].Constructor {
+			return diagnostic(fn, ins.Pos(), "calls are unsupported in verified constructors")
+		}
 		if ins.Call.IsInvoke() {
 			return c.checkInvoke(fn, ins)
 		}
@@ -431,6 +457,9 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 			abstract = abstract || target.Callee == callee
 		}
 		if !abstract {
+			if c.directives[callee].Constructor {
+				return diagnostic(fn, ins.Pos(), "verified constructor calls are unsupported in checked functions")
+			}
 			if len(c.directives[callee].Abstract) != 0 {
 				return diagnostic(fn, ins.Pos(), "calling an abstracted verification root in the same module is unsupported")
 			}
@@ -512,7 +541,7 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		return diagnostic(fn, ins.Pos(), "map writes require a validated fresh map and supported key and value")
 	case *ssa.Field:
 		if Type(ins.X.Type()).IsRecord() && supportedValue(ins.X) {
-			return nil
+			return c.checkRecord(fn, ins.Pos(), ins.X.Type())
 		}
 		return diagnostic(fn, ins.Pos(), "field selection requires a supported record value")
 	case *ssa.If:
@@ -544,6 +573,9 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		}
 		return nil
 	case *ssa.Return:
+		if c.directives[fn].Constructor {
+			return c.checkConstructorReturn(fn, ins)
+		}
 		for _, value := range ins.Results {
 			if !supportedValue(value) && !supportedHandle(value) {
 				return diagnostic(fn, ins.Pos(), "return must have supported values")
@@ -607,6 +639,9 @@ func Type(t types.Type) ir.Type {
 		return ""
 	}
 	if pointer, ok := t.(*types.Pointer); ok {
+		if interfaceRecord(pointer.Elem()) {
+			return ""
+		}
 		if pointee := Type(pointer.Elem()); pointee.IsRecord() {
 			return ir.RecordPointer(pointee)
 		}
@@ -664,6 +699,9 @@ func Type(t types.Type) ir.Type {
 }
 
 func sequenceElement(t types.Type) ir.Type {
+	if interfaceRecord(t) {
+		return ""
+	}
 	elem := Type(t)
 	key, _ := elem.MapShape()
 	if nested, _ := elem.ArrayShape(); nested != "" || elem.SliceElem() != "" || elem.Pointee() != "" || key != "" {

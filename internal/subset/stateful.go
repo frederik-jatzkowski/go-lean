@@ -45,6 +45,9 @@ func StatefulRecord(t types.Type) *types.Named {
 }
 
 func stateValueType(t types.Type) bool {
+	if interfaceRecord(t) {
+		return false
+	}
 	typ := Type(t)
 	return typ.IsInteger() || typ == ir.Bool || typ.IsRecord() || typ.SliceElem().IsRecord() ||
 		typ.SliceElem().IsInteger() || typ.SliceElem() == ir.Bool

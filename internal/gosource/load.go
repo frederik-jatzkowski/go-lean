@@ -15,13 +15,14 @@ import (
 )
 
 type Program struct {
-	Path          string
-	Package       *ssa.Package
-	Roots         []*ssa.Function
-	Directives    map[*ssa.Function]Directives
-	Assumptions   map[*ssa.Function][]Law
-	WordBits      int64
-	InterfaceDocs map[*types.TypeName]InterfaceDoc
+	Path              string
+	Package           *ssa.Package
+	Roots             []*ssa.Function
+	Directives        map[*ssa.Function]Directives
+	Assumptions       map[*ssa.Function][]Law
+	WordBits          int64
+	InterfaceDocs     map[*types.TypeName]InterfaceDoc
+	InitializedFields map[*types.Var]bool
 }
 
 type selectedFile struct {
@@ -79,15 +80,17 @@ func Load(dir string) ([]Program, error) {
 	prog, _ := ssautil.AllPackages(selectedPackages, ssa.InstantiateGenerics)
 	prog.Build()
 	docs := interfaceDocs(loaded)
+	fields := initializedFields(loaded)
 	assumptions := make(map[*ssa.Function][]Law)
 	programs := make([]Program, 0, len(selected))
 	for _, file := range selected {
 		result := Program{
 			Path: filepath.Clean(file.path), Package: prog.Package(file.pkg.Types),
-			InterfaceDocs: docs,
-			Assumptions:   assumptions,
-			Directives:    make(map[*ssa.Function]Directives),
-			WordBits:      8 * file.pkg.TypesSizes.Sizeof(types.Typ[types.Int]),
+			InterfaceDocs:     docs,
+			InitializedFields: fields,
+			Assumptions:       assumptions,
+			Directives:        make(map[*ssa.Function]Directives),
+			WordBits:          8 * file.pkg.TypesSizes.Sizeof(types.Typ[types.Int]),
 		}
 		for _, root := range file.roots {
 			fn := prog.FuncValue(root.fn)
@@ -101,7 +104,7 @@ func Load(dir string) ([]Program, error) {
 				continue
 			}
 			result.Roots = append(result.Roots, fn)
-			directives := Directives{Laws: root.laws}
+			directives := Directives{Laws: root.laws, Constructor: root.constructor}
 			for _, target := range root.abstract {
 				callee := prog.FuncValue(target.fn)
 				if callee == nil {

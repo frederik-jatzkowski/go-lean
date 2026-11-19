@@ -299,9 +299,12 @@ func (b *ssaInputBuilder) fillValue(result *sourceValue, val ssa.Value) {
 		if cell.Whole != nil {
 			result.RecordWhole = b.value(cell.Whole.Val)
 		}
-		for _, field := range cell.Fields {
+		for index, field := range cell.Fields {
 			if field != nil {
 				result.RecordFields = append(result.RecordFields, b.value(field.Val))
+			} else if cell.Whole == nil {
+				fieldType := val.Type().Underlying().(*types.Pointer).Elem().Underlying().(*types.Struct).Field(index).Type()
+				result.RecordFields = append(result.RecordFields, b.value(ssa.NewConst(nil, fieldType)))
 			}
 		}
 	}

@@ -56,12 +56,12 @@ func (c *checker) checkInterface(fn *ssa.Function, pos token.Pos, t types.Type) 
 			return diagnostic(fn, method.Pos(), "interface contract methods require one result and no variadic arguments")
 		}
 		for param := range sig.Params().Variables() {
-			if Type(param.Type()) == "" {
+			if Type(param.Type()) == "" || interfaceRecord(param.Type()) {
 				return diagnostic(fn, param.Pos(), "interface contract method parameters require supported Go value types")
 			}
 		}
 		result := sig.Results().At(0).Type()
-		if !types.Identical(result, t) && (Type(result) == "" || Type(result).Pointee() != "") {
+		if !types.Identical(result, t) && (Type(result) == "" || Type(result).Pointee() != "" || interfaceRecord(result)) {
 			return diagnostic(fn, method.Pos(), "interface contract methods must return a supported value or the same interface")
 		}
 	}
@@ -74,7 +74,7 @@ func supportedHandle(value ssa.Value) bool {
 		return false
 	}
 	switch value.(type) {
-	case *ssa.Parameter, *ssa.Call, *ssa.Phi, *ssa.Extract:
+	case *ssa.Parameter, *ssa.Call, *ssa.Phi, *ssa.Extract, *ssa.Field, *ssa.UnOp:
 		return true
 	default:
 		return false

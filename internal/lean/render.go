@@ -27,7 +27,7 @@ func RenderVerification(program ir.Program, verification Verification) string {
 	var out strings.Builder
 	r := renderer{wordBits: program.WordBits, records: program.Records, contracts: program.Contracts}
 	out.WriteString(GeneratedHeader + "\nimport Init\n")
-	if len(verification.Roots) != 0 {
+	if len(verification.Roots) != 0 || len(verification.Constructors) != 0 {
 		out.WriteString("import Lean.Elab.Command\n")
 	}
 	// Go allows unused parameters, and they are part of the generated signature.
@@ -69,7 +69,10 @@ func RenderVerification(program ir.Program, verification Verification) string {
 			fmt.Fprintf(&out, " {%s : Type}", param)
 		}
 		for _, handle := range fn.Contracts {
-			fmt.Fprintf(&out, " {%s : Type} (%s : %s %s)", r.leanType(handle), contractBinder(handle), contractName(r.contracts[handle]), r.leanType(handle))
+			fmt.Fprintf(&out, " {%s : Type}", r.leanType(handle))
+			if !verification.Constructors[fn.Symbol] {
+				fmt.Fprintf(&out, " (%s : %s %s)", contractBinder(handle), contractName(r.contracts[handle]), r.leanType(handle))
+			}
 		}
 		for _, target := range root.Abstract {
 			fmt.Fprintf(&out, " (%s : %s)", abstractBinder(target), abstractType(root, target))
@@ -94,6 +97,9 @@ func RenderVerification(program ir.Program, verification Verification) string {
 		if recursive || fn.Fuel != nil {
 			fmt.Fprintf(&out, "\nend %s\n", symbolNamespace(fn.Symbol))
 		}
+		if verification.Constructors[fn.Symbol] {
+			r.renderConstructorProof(&out, fn)
+		}
 	}
 	for _, root := range verification.Roots {
 		renderLaws(&out, root)
@@ -106,6 +112,37 @@ func (r renderer) renderParams(out *strings.Builder, params []ir.Binder) {
 	for _, param := range params {
 		fmt.Fprintf(out, " (%s : %s)", binderName(param), r.leanType(param.Type))
 	}
+}
+
+func (r renderer) renderConstructorProof(out *strings.Builder, fn ir.Function) {
+	name := symbolName(fn.Symbol)
+	theorem := fn.Symbol
+	theorem.Name += "$initialized"
+	fmt.Fprintf(out, "\n/-- Initialized inputs give initialized interface fields in the returned value. -/\ntheorem %s", symbolName(theorem))
+	for _, handle := range fn.Contracts {
+		fmt.Fprintf(out, " {%s : Type}", r.leanType(handle))
+	}
+	args := []string{name}
+	var hypotheses []string
+	for _, param := range fn.Params {
+		typ := param.Type
+		if _, isInterface := r.contracts[typ]; isInterface {
+			typ = ir.OptionType(typ)
+			hypotheses = append(hypotheses, binderName(param))
+		}
+		fmt.Fprintf(out, " (%s : %s)", binderName(param), r.leanType(typ))
+		args = append(args, binderName(param))
+	}
+	for i, hypothesis := range hypotheses {
+		fmt.Fprintf(out, " (initialized%d : %s.isSome = true)", i, hypothesis)
+	}
+	var fields []string
+	for _, field := range r.records[fn.Result].Fields {
+		if _, isInterface := r.contracts[field.Type]; isInterface {
+			fields = append(fields, fmt.Sprintf("(%s).%s.isSome = true", strings.Join(args, " "), recordFieldName(field.Name)))
+		}
+	}
+	fmt.Fprintf(out, " :\n  %s := by\n  simp only [%s]\n  repeat' split\n  all_goals simp_all\n", strings.Join(fields, " ∧\n  "), name)
 }
 
 func (r renderer) renderCountedLoop(out *strings.Builder, loop ir.CountedLoop) {
@@ -153,7 +190,11 @@ func (r renderer) renderRecords(out *strings.Builder) {
 			}
 			emit(typ)
 		}
-		fmt.Fprintf(out, "\nstructure %s where\n", symbolName(record.Symbol))
+		fmt.Fprintf(out, "\nstructure %s", symbolName(record.Symbol))
+		for _, handle := range record.Handles {
+			fmt.Fprintf(out, " (%s : Type)", r.leanType(handle))
+		}
+		out.WriteString(" where\n")
 		for _, field := range record.Fields {
 			fmt.Fprintf(out, "  %s : %s\n", recordFieldName(field.Name), r.leanType(field.Type))
 		}
@@ -222,7 +263,15 @@ func (r renderer) leanType(typ ir.Type) string {
 		return quoted("handle:" + string(typ))
 	}
 	if record, ok := r.records[typ]; ok {
-		return "_root_.GoLean." + symbolName(record.Symbol)
+		name := "_root_.GoLean." + symbolName(record.Symbol)
+		if len(record.Handles) == 0 {
+			return name
+		}
+		args := []string{name}
+		for _, handle := range record.Handles {
+			args = append(args, r.leanType(handle))
+		}
+		return "(" + strings.Join(args, " ") + ")"
 	}
 	switch typ {
 	case ir.IntWord:
@@ -399,7 +448,7 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 		}
 		return fmt.Sprintf("((%s).toNat - (%s).toNat)", bound, start)
 	case ir.RecordLiteral:
-		args := []string{r.leanType(expr.Type) + ".mk"}
+		args := []string{"_root_.GoLean." + symbolName(r.records[expr.Type].Symbol) + ".mk"}
 		for _, field := range expr.Values {
 			args = append(args, r.renderExpr(field))
 		}

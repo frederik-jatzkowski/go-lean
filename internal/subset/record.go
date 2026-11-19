@@ -1,6 +1,7 @@
 package subset
 
 import (
+	"go/token"
 	"go/types"
 
 	"golang.org/x/tools/go/ssa"
@@ -21,12 +22,52 @@ func supportedFields(record *types.Struct) bool {
 		switch field.Type().Underlying().(type) {
 		case *types.Pointer, *types.Slice, *types.Array, *types.Map:
 			return false
+		case *types.Interface:
+			if field.Name() == "_" || InterfaceHandle(field.Type()) == "" {
+				return false
+			}
+			continue
 		}
 		if field.Name() == "_" || Type(field.Type()) == "" {
 			return false
 		}
 	}
 	return true
+}
+
+func interfaceRecord(t types.Type) bool {
+	record, ok := t.Underlying().(*types.Struct)
+	if !ok {
+		return false
+	}
+	for field := range record.Fields() {
+		if isInterfaceValue(field.Type()) || interfaceRecord(field.Type()) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *checker) checkRecord(fn *ssa.Function, pos token.Pos, t types.Type) error {
+	record, ok := t.Underlying().(*types.Struct)
+	if !ok {
+		return nil
+	}
+	for field := range record.Fields() {
+		if isInterfaceValue(field.Type()) {
+			if !c.initializedFields[field] {
+				return diagnostic(fn, pos, "interface field %s requires //golean:assume:initialized", field.Name())
+			}
+			if err := c.checkInterface(fn, pos, field.Type()); err != nil {
+				return err
+			}
+		} else if err := c.checkRecord(fn, pos, field.Type()); err != nil {
+			return err
+		} else if c.initializedFields[field] {
+			return diagnostic(fn, pos, "//golean:assume:initialized requires an interface field: %s", field.Name())
+		}
+	}
+	return nil
 }
 
 func (c *checker) isRecordAddress(addr ssa.Value) bool {
@@ -54,6 +95,10 @@ func recordAddressBase(addr ssa.Value) ssa.Value {
 }
 
 func recordInitializer(cell *ssa.Alloc) (RecordCell, bool) {
+	return recordInitializerWithInterfaces(cell, false)
+}
+
+func recordInitializerWithInterfaces(cell *ssa.Alloc, constructor bool) (RecordCell, bool) {
 	named := cell.Type().Underlying().(*types.Pointer).Elem()
 	record := named.Underlying().(*types.Struct)
 	result := RecordCell{Fields: make([]*ssa.Store, record.NumFields())}
@@ -66,10 +111,15 @@ func recordInitializer(cell *ssa.Alloc) (RecordCell, bool) {
 			}
 			result.Whole = use
 		case *ssa.FieldAddr:
-			typ := Type(record.Field(use.Field).Type())
+			fieldType := record.Field(use.Field).Type()
 			for _, access := range *use.Referrers() {
 				if store, ok := access.(*ssa.Store); ok {
-					if store.Addr != use || result.Fields[use.Field] != nil || !hasType(store.Val, typ) {
+					valid := hasType(store.Val, Type(fieldType))
+					if constructor && isInterfaceValue(fieldType) {
+						param, ok := store.Val.(*ssa.Parameter)
+						valid = ok && types.Identical(param.Type(), fieldType)
+					}
+					if store.Addr != use || result.Fields[use.Field] != nil || !valid {
 						return RecordCell{}, false
 					}
 					result.Fields[use.Field] = store
@@ -92,7 +142,12 @@ func recordInitializer(cell *ssa.Alloc) (RecordCell, bool) {
 			reads = append(reads, use)
 		}
 	}
-	for _, store := range result.Fields {
+	for index, store := range result.Fields {
+		fieldType := record.Field(index).Type()
+		if constructor && result.Whole == nil && store == nil &&
+			!isInterfaceValue(fieldType) && !interfaceRecord(fieldType) {
+			continue
+		}
 		if (store != nil) == (result.Whole != nil) {
 			return RecordCell{}, false
 		}
@@ -102,6 +157,9 @@ func recordInitializer(cell *ssa.Alloc) (RecordCell, bool) {
 		stores = []*ssa.Store{result.Whole}
 	}
 	for _, store := range stores {
+		if store == nil {
+			continue
+		}
 		for _, read := range reads {
 			if !comesBefore(store, read) {
 				return RecordCell{}, false

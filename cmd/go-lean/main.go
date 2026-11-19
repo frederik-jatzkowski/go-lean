@@ -19,7 +19,7 @@ func newCommand() *cobra.Command {
 
 	transpileCmd := &cobra.Command{
 		Use:   "transpile ./...",
-		Short: "Generate Lean models and check modules from //golean:verify and //golean:export",
+		Short: "Generate Lean models and checks from go-lean directives",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if args[0] != "./..." {

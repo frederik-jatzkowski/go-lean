@@ -15,6 +15,45 @@ type InterfaceDoc struct {
 	groups []*ast.CommentGroup
 }
 
+func initializedFields(loaded []*packages.Package) map[*types.Var]bool {
+	fields := make(map[*types.Var]bool)
+	packages.Visit(loaded, nil, func(pkg *packages.Package) {
+		for _, file := range pkg.Syntax {
+			ast.Inspect(file, func(node ast.Node) bool {
+				record, ok := node.(*ast.StructType)
+				if !ok {
+					return true
+				}
+				recordType, ok := pkg.TypesInfo.TypeOf(record).(*types.Struct)
+				if !ok {
+					return true
+				}
+				index := 0
+				for _, field := range record.Fields.List {
+					count := max(1, len(field.Names))
+					if field.Doc != nil && hasInitializedDirective(field.Doc) {
+						for i := range count {
+							fields[recordType.Field(index+i)] = true
+						}
+					}
+					index += count
+				}
+				return true
+			})
+		}
+	})
+	return fields
+}
+
+func hasInitializedDirective(doc *ast.CommentGroup) bool {
+	for _, comment := range doc.List {
+		if comment.Text == "//golean:assume:initialized" {
+			return true
+		}
+	}
+	return false
+}
+
 func interfaceDocs(loaded []*packages.Package) map[*types.TypeName]InterfaceDoc {
 	docs := make(map[*types.TypeName]InterfaceDoc)
 	packages.Visit(loaded, nil, func(pkg *packages.Package) {

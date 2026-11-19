@@ -27,6 +27,7 @@ roots = [
   "embedded_struct.embedded_struct_gen", "embedded_struct.embedded_struct_proofs", "embedded_struct.embedded_struct_verify",
   "float32_rounding.float32_rounding_gen", "float32_rounding.float32_rounding_proofs", "float32_rounding.float32_rounding_verify",
   "float64_special.float64_special_gen", "float64_special.float64_special_proofs", "float64_special.float64_special_verify",
+  "fraud_withdrawal.fraud_withdrawal_gen", "fraud_withdrawal.fraud_withdrawal_proofs", "fraud_withdrawal.fraud_withdrawal_verify",
   "generic_identity.generic_identity_gen", "generic_identity.generic_identity_proofs", "generic_identity.generic_identity_verify",
   "generic_map.generic_map_gen", "generic_map.generic_map_proofs", "generic_map.generic_map_verify",
   "grid_game.grid_game_gen", "grid_game.grid_game_proofs", "grid_game.grid_game_verify",

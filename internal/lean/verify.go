@@ -10,8 +10,9 @@ import (
 )
 
 type Verification struct {
-	Module string
-	Roots  []VerificationRoot
+	Module       string
+	Roots        []VerificationRoot
+	Constructors map[ir.Symbol]bool
 }
 
 type VerificationRoot struct {

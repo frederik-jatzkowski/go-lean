@@ -24,11 +24,13 @@ type Abstract struct {
 }
 
 type Directives struct {
-	Laws     []Law
-	Abstract []Abstract
+	Constructor bool
+	Laws        []Law
+	Abstract    []Abstract
 }
 
 type selectedRoot struct {
+	constructor bool
 	fn          *types.Func
 	marked      bool
 	laws        []Law
@@ -71,6 +73,12 @@ func selectRoots(pkg *packages.Package, file *ast.File) ([]selectedRoot, error) 
 			remainder := strings.TrimPrefix(line, directive)
 			payload := strings.TrimSpace(remainder)
 			switch directive {
+			case "//golean:verify:constructor":
+				if payload != "" || root.constructor {
+					return nil, directiveError(position, "expected a single //golean:verify:constructor without arguments")
+				}
+				root.constructor = true
+				marked = true
 			case "//golean:export":
 				if payload != "" {
 					return nil, directiveError(position, "expected //golean:export without arguments")

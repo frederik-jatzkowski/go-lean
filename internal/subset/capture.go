@@ -60,6 +60,22 @@ func (c *checker) checkLocalMemory(fn *ssa.Function) error {
 					continue
 				}
 				if CaptureType(cell.Type()).IsRecord() {
+					recordType := cell.Type().Underlying().(*types.Pointer).Elem()
+					if interfaceRecord(recordType) {
+						if err := c.checkRecord(fn, cell.Pos(), recordType); err != nil {
+							return err
+						}
+						constructor := c.directives[fn].Constructor && types.Identical(recordType, fn.Signature.Results().At(0).Type())
+						record, ok := recordInitializerWithInterfaces(cell, constructor)
+						if !ok || (record.Whole == nil) != constructor {
+							if !constructor {
+								return diagnostic(fn, cell.Pos(), "interface field records require a read-only local copy of an initialized value")
+							}
+							return diagnostic(fn, cell.Pos(), "constructor must initialize every interface field directly from a same-type parameter")
+						}
+						c.records[cell] = record
+						continue
+					}
 					record, ok := recordInitializer(cell)
 					if !ok {
 						if !localRecordUses(cell) {

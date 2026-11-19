@@ -127,7 +127,7 @@ type KVStore interface {
 
 Each generated module includes the contracts it needs for marked functions and their reachable helpers. The generator derives method types from Go, followed by the annotated law fields. Lean checks the fields during `lake build`. Callers take explicit contract arguments, and proofs can use fields such as `contract.get_after_put`.
 
-The contract models valid, non-nil interface handles and total method behavior on those handles. Methods accept supported Go value arguments and return one supported value or a handle of the same interface. Functional updates can return a new handle. Applying a caller proof to Go requires its actual dependency to satisfy the model, including the assumptions about side effects and panics.
+The contract models valid, non-nil interface handles and total method behavior on those handles. Methods accept supported Go value arguments and can return one supported value or a handle of the same interface. A method with no Go result returns Lean `Unit` in the contract. Strict effect traces record classified void calls just like calls with a result. Functional updates can return a new handle. Applying a caller proof to Go requires its actual dependency to satisfy the model, including the assumptions about side effects and panics. The [order service example](examples/provable/order_service/README.md) uses a void persistence port.
 
 The [lowering interfaces](internal/lower/contract.go) use this mechanism to describe checked SSA input and persistent lowering state.
 

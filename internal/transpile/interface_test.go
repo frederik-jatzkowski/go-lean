@@ -27,7 +27,7 @@ func Read(s Service) int64 {
 }
 `)
 	_, err := transpile.Generate(dir)
-	if err == nil || !strings.Contains(err.Error(), "interface contract methods require one result") {
+	if err == nil || !strings.Contains(err.Error(), "interface contract methods require at most one result") {
 		t.Fatalf("expected a result-arity diagnostic, got %v", err)
 	}
 }

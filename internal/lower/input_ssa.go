@@ -236,9 +236,11 @@ func (b *ssaInputBuilder) typ(t types.Type) *sourceType {
 			result.Laws = b.checked.InterfaceLaws(t)
 			for method := range typ.ExplicitMethods() {
 				sig := method.Signature()
+				resultType := &sourceType{Model: ir.Unit}
 				if sig.Results().Len() == 1 {
-					result.Methods = append(result.Methods, &sourceMethod{Name: method.Name(), Params: b.tuple(sig.Params()), Result: b.typ(sig.Results().At(0).Type())})
+					resultType = b.typ(sig.Results().At(0).Type())
 				}
+				result.Methods = append(result.Methods, &sourceMethod{Name: method.Name(), Params: b.tuple(sig.Params()), Result: resultType})
 			}
 		}
 	}

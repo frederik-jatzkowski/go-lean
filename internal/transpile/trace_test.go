@@ -17,6 +17,48 @@ type Repository interface {
 }
 `
 
+func TestVoidInterfaceEffectTrace(t *testing.T) {
+	dir := newModule(t)
+	writeFile(t, filepath.Join(dir, "input.go"), `package sample
+
+//golean:assume valid : True
+type Repository interface {
+	Persist(int64)
+}
+
+//golean:boundary Repository.Persist effect
+//golean:verify writes : True
+func Save(repo Repository, approved bool) bool {
+	if !approved {
+		return false
+	}
+	repo.Persist(7)
+	return true
+}
+`)
+	outputs, err := transpile.Generate(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := outputs[0].Source
+	for _, want := range []string{"→ Int64 → Unit", "example.test/sample.Repository.Persist"} {
+		if !strings.Contains(source, want) {
+			t.Errorf("generated model lacks %q", want)
+		}
+	}
+	checkInitializedLean(t, dir, outputs[0].Path, source+`
+namespace GoLean.«example.test/sample».input
+
+private def repo : InterfaceContracts.RepositoryContract Unit :=
+  ⟨fun _ _ => (), trivial⟩
+
+example : Save repo () false = (false, []) := rfl
+example : Save repo () true = (true, ["example.test/sample.Repository.Persist"]) := rfl
+
+end GoLean.«example.test/sample».input
+`)
+}
+
 func TestInterfaceEffectTraceIsolation(t *testing.T) {
 	dir := newModule(t)
 	writeFile(t, filepath.Join(dir, "boundary", "repository.go"), "package boundary\n"+traceRepository)

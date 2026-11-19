@@ -52,13 +52,16 @@ func (c *checker) checkInterface(fn *ssa.Function, pos token.Pos, t types.Type) 
 	}
 	for method := range iface.ExplicitMethods() {
 		sig := method.Signature()
-		if sig.Variadic() || sig.Results().Len() != 1 {
-			return diagnostic(fn, method.Pos(), "interface contract methods require one result and no variadic arguments")
+		if sig.Variadic() || sig.Results().Len() > 1 {
+			return diagnostic(fn, method.Pos(), "interface contract methods require at most one result and no variadic arguments")
 		}
 		for param := range sig.Params().Variables() {
 			if Type(param.Type()) == "" || interfaceRecord(param.Type()) {
 				return diagnostic(fn, param.Pos(), "interface contract method parameters require supported Go value types")
 			}
+		}
+		if sig.Results().Len() == 0 {
+			continue
 		}
 		result := sig.Results().At(0).Type()
 		if !types.Identical(result, t) && (Type(result) == "" || Type(result).Pointee() != "" || interfaceRecord(result)) {

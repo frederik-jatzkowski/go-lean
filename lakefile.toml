@@ -45,6 +45,7 @@ roots = [
   "narrow_signed.narrow_signed_gen", "narrow_signed.narrow_signed_proofs", "narrow_signed.narrow_signed_verify",
   "nine_mens_morris.morris_gen", "nine_mens_morris.morris_rules", "nine_mens_morris.morris_laws",
   "nine_mens_morris.morris_proofs", "nine_mens_morris.morris_verify",
+  "order_service.orders_gen", "order_service.orders_rules", "order_service.orders_laws", "order_service.orders_proofs", "order_service.orders_verify",
   "nil_dereference.nil_dereference_gen", "nil_dereference.nil_dereference_proofs", "nil_dereference.nil_dereference_verify",
   "range_fold.range_fold_gen", "range_fold.range_fold_proofs", "range_fold.range_fold_verify",
   "slice_bounds.slice_bounds_gen", "slice_bounds.slice_bounds_proofs", "slice_bounds.slice_bounds_verify",

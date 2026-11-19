@@ -2,6 +2,22 @@
 
 `go-lean` generates Lean 4 definitions for pure Go functions. The examples keep handwritten Lean proofs alongside the generated definitions. Applying those proofs to Go execution currently relies on the correctness of the transpiler.
 
+## Set up and verify a Go module
+
+Install Go and Lean, then run these commands from the Go module root with `go-lean` on PATH.
+
+```sh
+go-lean setup
+go-lean doctor
+go-lean verify
+```
+
+`setup` creates missing Lean workspace files and installs the go-lean skill at `.agents/skills/go-lean/SKILL.md`. It preserves existing files. `doctor` checks workspace files and whether `go`, `lake`, and `lean` are on PATH. Use `go-lean doctor --fix` to create missing workspace files before checking again.
+
+`verify` regenerates Lean modules and runs the workspace's default Lake build, forwarding its output and exit status. Use `go-lean verify ./pkg` for a single Go package or `go-lean verify ./pkg/...` to include its subpackages. Lake also builds any Lean modules imported by the selected targets. If those imports refer to generated modules outside the selection, generate them first with `go-lean transpile ./...`.
+
+Use `go-lean transpile <path>` to generate without running Lake. Both commands accept `.` for the root package and `./...` for the whole module. Use whole-module generation to clean up managed modules after deleting a Go file.
+
 ## Supported
 
 - Ordinary top-level functions with integer or `bool` parameters and one or more supported results. `byte` and `rune` use the same representations as `uint8` and `int32`. Statically resolved calls can cross package boundaries when the callee's Go body is available and within the supported subset.

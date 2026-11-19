@@ -95,8 +95,8 @@ func C(x int64) int64 { return x }
 			t.Errorf("expected no file at %s, got %v", path, err)
 		}
 	}
-	if err := run("transpile", "a.go"); err == nil || !strings.Contains(err.Error(), "transpile ./...") {
-		t.Fatalf("expected the tree command to be required, got %v", err)
+	if err := run("transpile", "a.go"); err == nil || !strings.Contains(err.Error(), "invalid package path") {
+		t.Fatalf("expected a package path error, got %v", err)
 	}
 
 	original := read(t, "a_gen.lean")

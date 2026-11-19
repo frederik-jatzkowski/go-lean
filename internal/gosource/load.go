@@ -36,20 +36,20 @@ type selectedFile struct {
 
 // Load finds marked functions in ./... and groups them by their source file.
 func Load(dir string) ([]Program, error) {
-	return load(dir, nil)
+	return load(dir, "./...", nil)
 }
 
 // LoadWithFiles also reports the active Go files, including files without directives.
-func LoadWithFiles(dir string) ([]Program, map[string]bool, error) {
+func LoadWithFiles(dir, pattern string) ([]Program, map[string]bool, error) {
 	active := make(map[string]bool)
-	programs, err := load(dir, active)
+	programs, err := load(dir, pattern, active)
 	return programs, active, err
 }
 
-func load(dir string, active map[string]bool) ([]Program, error) {
+func load(dir, pattern string, active map[string]bool) ([]Program, error) {
 	fset := token.NewFileSet()
 	cfg := &packages.Config{Mode: packages.LoadAllSyntax, Dir: dir, Fset: fset}
-	loaded, err := packages.Load(cfg, "./...")
+	loaded, err := packages.Load(cfg, pattern)
 	if err != nil {
 		return nil, err
 	}

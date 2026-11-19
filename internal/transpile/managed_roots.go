@@ -21,6 +21,7 @@ type managedRoots struct {
 	indent     string
 	newline    string
 	manual     map[string]bool
+	generated  []string
 }
 
 type rootMarker struct {
@@ -83,6 +84,8 @@ func parseManagedRoots(data []byte) (map[int]managedRoots, error) {
 			if !found {
 				if block.start == 0 || block.end != 0 {
 					block.manual[name] = true
+				} else {
+					block.generated = append(block.generated, name)
 				}
 				continue
 			}

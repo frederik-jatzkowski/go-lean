@@ -1,6 +1,7 @@
 package transpile
 
 import (
+	"bytes"
 	"fmt"
 	"io/fs"
 	"os"
@@ -19,6 +20,47 @@ type lakeLibrary struct {
 	Name   string `toml:"name"`
 	SrcDir string `toml:"srcDir"`
 	Globs  any    `toml:"globs"`
+}
+
+// CheckLakeTOML validates the Lake configuration used for module generation.
+func CheckLakeTOML(dir string) (managed bool, err error) {
+	config, _, data, blocks, err := workspaceLakeConfig(dir)
+	if err != nil {
+		return false, err
+	}
+	if len(bytes.TrimSpace(data)) == 0 || len(config.Libraries) == 0 {
+		return false, fmt.Errorf("lakefile.toml: configure a Lean library for the generated modules")
+	}
+	return len(blocks) != 0, nil
+}
+
+func workspaceLakeConfig(dir string) (lakeConfig, string, []byte, map[int]managedRoots, error) {
+	data, err := readLakeFile(dir)
+	if err != nil {
+		return lakeConfig{}, "", nil, nil, err
+	}
+	config, root, err := parseLakeConfig(dir, data)
+	if err != nil {
+		return config, root, nil, nil, err
+	}
+	if !bytes.Contains(data, []byte(beginRoots)) && !bytes.Contains(data, []byte(endRoots)) {
+		return config, root, data, nil, nil
+	}
+	blocks, err := parseManagedRoots(data)
+	if err == nil && len(blocks) != 0 {
+		var entry fs.FileInfo
+		entry, err = os.Lstat(filepath.Join(dir, "lakefile.toml"))
+		if err == nil && !entry.Mode().IsRegular() {
+			err = fmt.Errorf("expected a regular Lake configuration file")
+		}
+		if err == nil {
+			err = config.validateManagedLibraries(dir, root, blocks)
+		}
+	}
+	if err != nil {
+		return config, root, nil, nil, fmt.Errorf("%s: %w", filepath.Join(dir, "lakefile.toml"), err)
+	}
+	return config, root, data, blocks, nil
 }
 
 func readLakeFile(dir string) ([]byte, error) {
@@ -88,7 +130,7 @@ func modulePath(root, file, extension string) (string, error) {
 	return module, nil
 }
 
-func (config lakeConfig) staleOutputs(projectRoot, packageRoot string, blocks map[int]managedRoots, outputs []Output, active map[string]bool) ([]string, error) {
+func (config lakeConfig) staleOutputs(projectRoot, packageRoot string, blocks map[int]managedRoots, outputs []Output, active map[string]bool, focused bool) ([]string, error) {
 	expected := make(map[string]bool, len(outputs))
 	for _, output := range outputs {
 		expected[output.Path] = true
@@ -143,6 +185,9 @@ func (config lakeConfig) staleOutputs(projectRoot, packageRoot string, blocks ma
 		}
 		source := stem + ".go"
 		if !active[source] {
+			if focused {
+				return nil
+			}
 			if _, err := os.Lstat(source); err == nil {
 				return nil
 			} else if !os.IsNotExist(err) {

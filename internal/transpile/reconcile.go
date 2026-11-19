@@ -3,8 +3,10 @@ package transpile
 import (
 	"bytes"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/frederik-jatzkowski/go-lean/internal/gosource"
@@ -12,53 +14,72 @@ import (
 
 // Reconcile generates the tree and updates any opted-in Lake libraries.
 func Reconcile(dir string) error {
+	_, err := ReconcilePattern(dir, "./...")
+	return err
+}
+
+// ReconcilePattern generates the selected packages and returns focused Lake targets.
+func ReconcilePattern(dir, pattern string) ([]string, error) {
+	focused := pattern != "./..."
 	root, err := filepath.Abs(dir)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	data, err := readLakeFile(root)
+	config, packageRoot, data, blocks, err := workspaceLakeConfig(root)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if !bytes.Contains(data, []byte(beginRoots)) && !bytes.Contains(data, []byte(endRoots)) {
-		return generateAndWrite(root)
-	}
-	config, packageRoot, err := parseLakeConfig(root, data)
+	programs, active, err := gosource.LoadWithFiles(root, pattern)
 	if err != nil {
-		return err
-	}
-	lakefile := filepath.Join(root, "lakefile.toml")
-	blocks, err := parseManagedRoots(data)
-	if err != nil {
-		return fmt.Errorf("%s: %w", lakefile, err)
-	}
-	if len(blocks) == 0 {
-		return generateAndWrite(root)
-	}
-	entry, err := os.Lstat(lakefile)
-	if err != nil {
-		return err
-	}
-	if !entry.Mode().IsRegular() {
-		return fmt.Errorf("%s: expected a regular Lake configuration file", lakefile)
-	}
-	if err := config.validateManagedLibraries(root, packageRoot, blocks); err != nil {
-		return fmt.Errorf("%s: %w", lakefile, err)
-	}
-
-	programs, active, err := gosource.LoadWithFiles(root)
-	if err != nil {
-		return err
+		return nil, err
 	}
 	outputs, err := generate(programs, func(file string) (string, error) {
 		return config.goModule(packageRoot, file)
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
+	var targets []string
+	if focused {
+		targets, err = config.verificationTargets(packageRoot, outputs)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(blocks) == 0 {
+		return targets, Write(outputs)
+	}
+	return targets, reconcileManaged(root, packageRoot, config, data, blocks, outputs, active, focused)
+}
+
+func reconcileManaged(root, packageRoot string, config lakeConfig, data []byte, blocks map[int]managedRoots, outputs []Output, active map[string]bool, focused bool) error {
+	lakefile := filepath.Join(root, "lakefile.toml")
 	names, err := config.managedModuleNames(packageRoot, blocks, outputs)
 	if err != nil {
 		return err
+	}
+	if focused {
+		var selected []Output
+		for source := range active {
+			stem := strings.TrimSuffix(source, ".go")
+			for _, suffix := range []string{"_gen.lean", "_laws.lean", "_verify.lean"} {
+				selected = append(selected, Output{Path: stem + suffix})
+			}
+		}
+		selectedNames, err := config.managedModuleNames(packageRoot, blocks, selected)
+		if err != nil {
+			return err
+		}
+		for i, block := range blocks {
+			if names[i] == nil {
+				names[i] = make(map[string]bool)
+			}
+			for _, name := range block.generated {
+				if !selectedNames[i][name] {
+					names[i][name] = true
+				}
+			}
+		}
 	}
 	updated, err := updateManagedRoots(data, blocks, names)
 	if err != nil {
@@ -71,7 +92,7 @@ func Reconcile(dir string) error {
 	if err != nil {
 		return err
 	}
-	stale, err := config.staleOutputs(root, packageRoot, blocks, outputs, active)
+	stale, err := config.staleOutputs(root, packageRoot, blocks, outputs, active, focused)
 	if err != nil {
 		return err
 	}
@@ -103,12 +124,26 @@ func Reconcile(dir string) error {
 	return nil
 }
 
-func generateAndWrite(dir string) error {
-	outputs, err := Generate(dir)
-	if err != nil {
-		return err
+func (config lakeConfig) verificationTargets(packageRoot string, outputs []Output) ([]string, error) {
+	files := make(map[string]string)
+	for _, output := range outputs {
+		stem, check := strings.CutSuffix(output.Path, "_verify.lean")
+		if check {
+			files[stem] = output.Path
+		} else if stem, model := strings.CutSuffix(output.Path, "_gen.lean"); model && files[stem] == "" {
+			files[stem] = output.Path
+		}
 	}
-	return Write(outputs)
+	targets := make(map[string]bool)
+	for _, file := range files {
+		root, _ := config.sourceLibrary(packageRoot, file)
+		module, err := modulePath(root, file, ".lean")
+		if err != nil {
+			return nil, err
+		}
+		targets["+"+lakeRoot(module)] = true
+	}
+	return slices.Sorted(maps.Keys(targets)), nil
 }
 
 func (config lakeConfig) validateManagedLibraries(root, packageRoot string, blocks map[int]managedRoots) error {

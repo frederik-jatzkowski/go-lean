@@ -35,6 +35,14 @@ def on_files(files, config):
                 abs_src_path=str(source),
             )
         )
+    license_text = (root / "LICENSE").read_text(encoding="utf-8").rstrip()
+    files.append(
+        File.generated(
+            config,
+            "license.md",
+            content=f"# License\n\n```text\n{license_text}\n```\n",
+        )
+    )
     files.append(
         File.generated(
             config,
@@ -79,6 +87,10 @@ class SourceLinks(Treeprocessor):
             if not target.is_relative_to(context.root) or not target.exists():
                 continue
             relative = target.relative_to(context.root).as_posix()
+            if relative == "LICENSE":
+                path = Path(href.path).with_name("license.md").as_posix()
+                anchor.set("href", urlunsplit(("", "", path, href.query, href.fragment)))
+                continue
             if context.files.get_file_from_path(relative):
                 continue
             view = "tree" if target.is_dir() else "blob"

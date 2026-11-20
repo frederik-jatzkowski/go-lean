@@ -1,8 +1,12 @@
-# Working in the go-lean checkout
+# Contributing
 
-Run the commands on this page from the repository root. The `go` directive in [go.mod](go.mod) sets the minimum Go version. [lean-toolchain](lean-toolchain) selects the default Lean version. With Elan on your PATH, run `lake --version` to confirm the selected version.
+## How you can contribute
+
+go-lean is an early prototype and does not currently accept pull requests. Please open a [GitHub issue](https://github.com/frederik-jatzkowski/go-lean/issues) to report a potential soundness issue or translation bug, or to share feedback on the developer experience.
 
 ## Build and check the repository
+
+Run the commands on this page from the repository root. The `go` directive in [go.mod](go.mod) sets the minimum Go version. [lean-toolchain](lean-toolchain) selects the default Lean version. With Elan on your PATH, run `lake --version` to confirm the selected version.
 
 The repository pins Go Task as a Go tool.
 
@@ -29,7 +33,7 @@ With Python 3.12 available, install the docs dependency and run MkDocs from the 
 
 ```sh
 python -m pip install -r requirements-docs.txt
-python -m mkdocs serve --watch README.md --watch CONTRIBUTING.md
+python -m mkdocs serve --watch README.md --watch CONTRIBUTING.md --watch LICENSE
 ```
 
 MkDocs prints the local preview URL. It builds the homepage from the root README and picks up Markdown pages under `docs/` automatically. Run `python -m mkdocs build --strict` to check the production build.

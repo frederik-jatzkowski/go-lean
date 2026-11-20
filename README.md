@@ -39,4 +39,8 @@ The proof suite is tested with Lean 4.35.0 and 4.36.0. Setup creates a missing `
 - **Discharging a dependency contract.** Prove that a translated implementation supplies the read-your-writes law a caller needs. [Key-value store](examples/provable/kv_store_contract_impl/kv_store_contract_impl_proofs.lean)
 - **State-machine histories.** Explore proofs over sequences of actions. [Grid game](examples/provable/grid_game) and [Nine Men’s Morris](examples/provable/nine_mens_morris)
 
-For commands that run from a checkout of this repository, see [Working in the go-lean checkout](CONTRIBUTING.md).
+For commands that run from a checkout of this repository, see [Contributing](CONTRIBUTING.md).
+
+## License
+
+Copyright © 2026 Frederik Jatzkowski. go-lean is licensed under the [GNU General Public License, version 3](LICENSE).

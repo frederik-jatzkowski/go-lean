@@ -446,6 +446,7 @@ const (
 	fieldRangeSteps
 	fieldRangeStructured
 	fieldRangeExcluded
+	fieldRangeAppendTo
 )
 
 func rangeFields(f sourceFields, value *sourceRange) {
@@ -457,6 +458,7 @@ func rangeFields(f sourceFields, value *sourceRange) {
 	referenceListField(f, fieldRangeSteps, &value.Steps, valueFields)
 	referenceField(f, fieldRangeStructured, &value.Structured, loopFields)
 	referenceField(f, fieldRangeExcluded, &value.Excluded, valueFields)
+	referenceField(f, fieldRangeAppendTo, &value.AppendTo, valueFields)
 }
 
 const (

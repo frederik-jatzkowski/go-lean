@@ -106,6 +106,9 @@ func (b *ssaInputBuilder) fillFunction(fn *ssa.Function) {
 	if l := b.checked.RangeFold(fn); l != nil {
 		f.Range = &sourceRange{Initial: b.value(l.Initial), Next: b.value(l.Next), Source: b.value(l.Source),
 			Steps: b.valuesOf(l.Steps), Structured: b.loop(l.Structured), Excluded: b.value(l.Excluded)}
+		if l.AppendTo != nil {
+			f.Range.AppendTo = b.value(l.AppendTo)
+		}
 		if l.Element != nil {
 			f.Range.Element = b.value(l.Element)
 		}
@@ -371,9 +374,15 @@ func (b *ssaInputBuilder) instruction(ins ssa.Instruction) *sourceValue {
 	case *ssa.Extract:
 		v.Kind, v.X, v.OperandIndex = extractValue, b.value(i.Tuple), i.Index
 	case *ssa.Call:
+		if fold := b.checked.RangeFold(i.Parent()); fold != nil {
+			if element := fold.Appends[i]; element != nil {
+				v.Kind, v.X, v.Y = appendValue, b.value(i.Call.Args[0]), b.value(element)
+				break
+			}
+		}
 		v.Kind, v.Call = callValue, &sourceCall{Args: b.valuesOf(i.Call.Args), Value: b.value(i.Call.Value),
 			Target: b.function(i.Call.StaticCallee()), Length: subset.IsLength(i), Clone: subset.IsSliceClone(i),
-			Extremum: subset.IntegerExtremum(i), Capacity: subset.IsStringSliceCapacity(i)}
+			Extremum: subset.IntegerExtremum(i), Capacity: subset.IsSliceCapacity(i)}
 		if i.Call.IsInvoke() {
 			v.Call.Method = i.Call.Method.Name()
 		}

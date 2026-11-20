@@ -7,6 +7,7 @@ name = "ExampleProofs"
 srcDir = "examples/provable"
 roots = [
   "bowling.bowling_rules",
+  "expression_parser.expression_rules",
   "nine_mens_morris.morris_rules",
   "order_service.orders_rules",
   # BEGIN go-lean managed roots
@@ -71,6 +72,10 @@ roots = [
   'embedded_struct.embedded_struct_gen',
   'embedded_struct.embedded_struct_proofs',
   'embedded_struct.embedded_struct_verify',
+  'expression_parser.expression_parser_gen',
+  'expression_parser.expression_parser_laws',
+  'expression_parser.expression_parser_proofs',
+  'expression_parser.expression_parser_verify',
   'filter_and_count.filter_and_count_gen',
   'filter_and_count.filter_and_count_proofs',
   'filter_and_count.filter_and_count_verify',

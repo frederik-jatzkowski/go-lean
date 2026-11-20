@@ -131,6 +131,7 @@ const (
 	emptySliceValue
 	stringSliceValue
 	concreteErrorValue
+	appendValue
 	makeMap
 	mapUpdate
 	mapLookup
@@ -197,9 +198,9 @@ type sourceCounted struct {
 	Structured                                 *sourceLoop
 }
 type sourceRange struct {
-	Initial, State, Next, Source, Element, Excluded *sourceValue
-	Steps                                           []*sourceValue
-	Structured                                      *sourceLoop
+	Initial, State, Next, Source, Element, Excluded, AppendTo *sourceValue
+	Steps                                                     []*sourceValue
+	Structured                                                *sourceLoop
 }
 type sourceBuild struct {
 	Destination, Copy, Source, Element, Value, Callback *sourceValue
@@ -232,4 +233,31 @@ type sourceIteration struct {
 }
 type sourceStore struct {
 	Instruction, Value *sourceValue
+}
+
+func capacitySliceTypes(functions []*sourceFunction) map[ir.Type]bool {
+	result := make(map[ir.Type]bool)
+	visited := make(map[*sourceBlock]bool)
+	var scan func(*sourceBlock)
+	scan = func(block *sourceBlock) {
+		if block == nil || visited[block] {
+			return
+		}
+		visited[block] = true
+		for _, ins := range block.Instructions {
+			if ins.Kind == callValue && ins.Call.Capacity {
+				result[ins.Call.Args[0].Type.Model] = true
+			}
+		}
+		for _, next := range block.Succs {
+			scan(next)
+		}
+	}
+	for _, fn := range functions {
+		if fn.Range != nil && fn.Range.AppendTo != nil {
+			result[fn.Range.AppendTo.Type.Model] = true
+		}
+		scan(fn.Entry)
+	}
+	return result
 }

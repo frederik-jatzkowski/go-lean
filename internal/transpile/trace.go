@@ -115,7 +115,7 @@ func checkTraceCallbacks(fn *ssa.Function, seen map[*ssa.Function]bool) error {
 				return fmt.Errorf("callbacks and closures are unsupported in strict proofs (%s)", fn.Name())
 			case *ssa.Call:
 				if ins.Call.IsInvoke() || subset.IsLength(ins) ||
-					subset.IntegerExtremum(ins) != "" || subset.IsStringSliceCapacity(ins) {
+					subset.IntegerExtremum(ins) != "" || subset.IsSliceCapacity(ins) {
 					continue
 				}
 				target := ins.Call.StaticCallee()

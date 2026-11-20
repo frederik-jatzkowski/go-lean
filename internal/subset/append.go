@@ -1,0 +1,221 @@
+package subset
+
+import (
+	"slices"
+
+	"github.com/frederik-jatzkowski/go-lean/internal/ir"
+	"golang.org/x/tools/go/ssa"
+)
+
+// matchAppendFold validates the preheader and checks ownership of the optional
+// slice accumulator. The ordinary fold path still accepts just the range length.
+func matchAppendFold(fn *ssa.Function, blocks loopBlocks, iter *rangeIteration,
+	phis []*ssa.Phi, skip map[ssa.Instruction]bool) (*ssa.MakeSlice, map[*ssa.Call]ssa.Value, bool) {
+	var dst *ssa.MakeSlice
+	for _, ins := range blocks.entry.Instrs[:len(blocks.entry.Instrs)-1] {
+		if ins == iter.Length {
+			continue
+		}
+		switch ins := ins.(type) {
+		case *ssa.Call:
+			if !lengthOf(ins, iter.Source) {
+				return nil, nil, false
+			}
+		case *ssa.MakeSlice:
+			elem := Type(ins.Type()).SliceElem()
+			if dst != nil || !IsZero(ins.Len) || !lengthOf(ins.Cap, iter.Source) ||
+				!(elem.IsInteger() || elem == ir.Bool || elem == ir.Bytes || elem == ir.Float32 || elem == ir.Float64) {
+				return nil, nil, false
+			}
+			dst = ins
+		default:
+			return nil, nil, false
+		}
+	}
+	if dst == nil {
+		for _, ins := range blocks.entry.Instrs[:len(blocks.entry.Instrs)-1] {
+			if ins != iter.Length {
+				return nil, nil, false
+			}
+		}
+		return nil, nil, true
+	}
+	for _, ins := range blocks.entry.Instrs[:len(blocks.entry.Instrs)-1] {
+		if ins != iter.Length && ins != dst && ins != dst.Cap.(*ssa.Call) {
+			return nil, nil, false
+		}
+	}
+	var output *ssa.Phi
+	for _, phi := range phis {
+		if phi.Edges[blocks.incoming] == dst {
+			if output != nil {
+				return nil, nil, false
+			}
+			output = phi
+		}
+	}
+	if output == nil || len(blocks.exit.Instrs) != 1 {
+		return nil, nil, false
+	}
+	ret := blocks.exit.Instrs[0].(*ssa.Return)
+	if slices.Index(ret.Results, ssa.Value(output)) < 0 {
+		return nil, nil, false
+	}
+	for _, result := range ret.Results {
+		if Type(result.Type()).SliceElem() != "" && result != output {
+			return nil, nil, false
+		}
+		if key, _ := Type(result.Type()).MapShape(); key != "" {
+			return nil, nil, false
+		}
+	}
+	if len(*dst.Referrers()) != 1 || (*dst.Referrers())[0] != output {
+		return nil, nil, false
+	}
+	appends := make(map[*ssa.Call]ssa.Value)
+	merges := make(map[*ssa.Phi]bool)
+	for _, block := range fn.Blocks {
+		if block == blocks.entry || block == blocks.header || block == blocks.exit {
+			continue
+		}
+		for index, ins := range block.Instrs {
+			if phi, ok := ins.(*ssa.Phi); ok && Type(phi.Type()).SliceElem() != "" {
+				if Type(phi.Type()) != Type(output.Type()) {
+					return nil, nil, false
+				}
+				merges[phi] = true
+			}
+			call, ok := ins.(*ssa.Call)
+			if !ok || !builtinNamed(call, "append") {
+				continue
+			}
+			if index < 4 {
+				return nil, nil, false
+			}
+			steps := block.Instrs[index-4 : index+1]
+			store, ok := steps[2].(*ssa.Store)
+			if !ok || !supportedValue(store.Val) || matchSingleAppend(steps, output, store.Val) != call {
+				return nil, nil, false
+			}
+			// Each temporary is used exclusively to package this append argument.
+			for i, want := range []int{2, 1, 0, 1} {
+				if value, ok := steps[i].(ssa.Value); ok && len(*value.Referrers()) != want {
+					return nil, nil, false
+				}
+				skip[steps[i]] = true
+			}
+			appends[call] = store.Val
+		}
+	}
+	if len(appends) == 0 || !validateAppendPaths(blocks, output, appends, merges) {
+		return nil, nil, false
+	}
+	// No calls, stores, or other observations may use the owned slice. Phi
+	// edges are checked against the actual slice state separately.
+	ownedUses := func(value ssa.Value) bool {
+		for _, use := range *value.Referrers() {
+			switch use := use.(type) {
+			case *ssa.Phi:
+				if use != output && !merges[use] {
+					return false
+				}
+			case *ssa.Call:
+				if value != output || appends[use] == nil || use.Call.Args[0] != value {
+					return false
+				}
+			case *ssa.Return:
+				if use != ret || value != output || slices.Contains(ret.Results[slices.Index(ret.Results, value)+1:], value) {
+					return false
+				}
+			default:
+				return false
+			}
+		}
+		return true
+	}
+	if !ownedUses(output) {
+		return nil, nil, false
+	}
+	for call := range appends {
+		if !ownedUses(call) {
+			return nil, nil, false
+		}
+	}
+	for phi := range merges {
+		if !ownedUses(phi) {
+			return nil, nil, false
+		}
+	}
+	return dst, appends, true
+}
+
+func validateAppendPaths(blocks loopBlocks, output *ssa.Phi, appends map[*ssa.Call]ssa.Value, merges map[*ssa.Phi]bool) bool {
+	type path struct {
+		block, pred *ssa.BasicBlock
+		current     ssa.Value
+		appended    bool
+	}
+	seen := make(map[path]bool)
+	var visit func(path) bool
+	visit = func(p path) bool {
+		edge := slices.Index(p.block.Preds, p.pred)
+		if p.block == blocks.header {
+			return output.Edges[edge] == p.current
+		}
+		if seen[p] {
+			return true
+		}
+		seen[p] = true
+		for _, ins := range p.block.Instrs {
+			switch ins := ins.(type) {
+			case *ssa.Phi:
+				if merges[ins] {
+					if ins.Edges[edge] != p.current {
+						return false
+					}
+					p.current = ins
+				}
+			case *ssa.Call:
+				if appends[ins] != nil {
+					if p.appended || p.current != output {
+						return false
+					}
+					p.current, p.appended = ins, true
+				}
+			}
+		}
+		for _, successor := range p.block.Succs {
+			if !visit(path{successor, p.block, p.current, p.appended}) {
+				return false
+			}
+		}
+		return true
+	}
+	return visit(path{blocks.body, blocks.header, output, false})
+}
+
+func builtinNamed(call *ssa.Call, name string) bool {
+	builtin, ok := call.Call.Value.(*ssa.Builtin)
+	return ok && builtin.Name() == name
+}
+
+func (c *checker) checkAppendFold(fn *ssa.Function, fold *RangeFold) error {
+	spec := fold.Structured
+	for _, block := range fn.Blocks {
+		if block == fn.Blocks[0] || block == spec.Iteration.Header {
+			continue
+		}
+		for _, ins := range block.Instrs {
+			if spec.Iteration.Skip[ins] {
+				continue
+			}
+			if call, ok := ins.(*ssa.Call); ok && fold.Appends[call] != nil {
+				continue
+			}
+			if err := c.instruction(fn, ins); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}

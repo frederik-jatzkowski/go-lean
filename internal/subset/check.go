@@ -80,6 +80,20 @@ func Check(program gosource.Program) (Checked, error) {
 			return Checked{}, err
 		}
 	}
+	if len(c.stateful) != 0 {
+		for _, fn := range c.ordered {
+			if fold := c.ranges[fn]; fold != nil && fold.AppendTo != nil {
+				return Checked{}, diagnostic(fn, fn.Pos(), "fresh append folds cannot share a generated module with stateful methods")
+			}
+			for _, block := range fn.Blocks {
+				for _, ins := range block.Instrs {
+					if call, ok := ins.(*ssa.Call); ok && IsSliceCapacity(call) && Type(call.Call.Args[0].Type()).SliceElem() != ir.Bytes {
+						return Checked{}, diagnostic(fn, ins.Pos(), "slice capacity tracking cannot share a generated module with stateful methods")
+					}
+				}
+			}
+		}
+	}
 	knownEffects := make(map[*ssa.Function]bool)
 	for _, build := range c.builds {
 		for _, callback := range build.Callbacks {
@@ -183,6 +197,11 @@ func (c *checker) function(fn *ssa.Function) error {
 		}
 	}
 	collection := matchCollectionFold(fn)
+	if collection == nil && hasSliceResult(sig.Results()) {
+		if fold := matchStructuredFold(fn); fold != nil && fold.AppendTo != nil {
+			collection = fold
+		}
+	}
 	chain := checkChainRecursion(fn)
 	for _, param := range fn.Params {
 		if constructor && interfaceRecord(param.Type()) {
@@ -206,6 +225,11 @@ func (c *checker) function(fn *ssa.Function) error {
 	}
 	c.visiting[fn] = true
 	if collection != nil {
+		if collection.AppendTo != nil {
+			if err := c.checkAppendFold(fn, collection); err != nil {
+				return err
+			}
+		}
 		c.ranges[fn] = collection
 	} else if build != nil {
 		if build.Exit != nil {
@@ -453,7 +477,7 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 			}
 			return diagnostic(fn, ins.Pos(), "len requires a supported Go string or slice")
 		}
-		if IsStringSliceCapacity(ins) {
+		if IsSliceCapacity(ins) {
 			return nil
 		}
 		if name := IntegerExtremum(ins); name != "" {

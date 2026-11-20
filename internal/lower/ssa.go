@@ -27,6 +27,7 @@ func FromSSAWithAbstractCalls(input Input, sourceStem string, wordBits int64, ab
 		functions = append(functions, reader.decodeFunction(input.FunctionAt(i)))
 	}
 	nullableSlices := usesNullableSlices(functions)
+	capacitySlices := capacitySliceTypes(functions)
 	for _, fn := range functions {
 		if fn.Origin != "" {
 			instances[fn] = fn.Origin + "$instance" + strconv.Itoa(len(instances))
@@ -35,7 +36,7 @@ func FromSSAWithAbstractCalls(input Input, sourceStem string, wordBits int64, ab
 			root: input.PackagePath(), input: input, file: file, state: stateSnapshot{}, binders: new([]ir.Binder), facts: facts,
 			records: program.Records, instances: instances,
 			contracts: program.Contracts, usedContracts: make(map[ir.Type]bool),
-			nullableSlices: nullableSlices && fn.Stateful == nil,
+			nullableSlices: nullableSlices && fn.Stateful == nil, capacitySlices: capacitySlices,
 		}
 		if method := fn.Stateful; method != nil {
 			program.Functions = append(program.Functions, l.lowerStateful(fn, method)...)
@@ -304,6 +305,7 @@ type lowerer struct {
 	canPanic       bool
 	usesWord       bool
 	nullableSlices bool
+	capacitySlices map[ir.Type]bool
 	records        map[ir.Type]ir.Record
 	instances      map[*sourceFunction]string
 	contracts      map[ir.Type]ir.Contract
@@ -435,6 +437,9 @@ func (l *lowerer) instructions(block, predecessor *sourceBlock, start int) ir.Bo
 		case concreteErrorValue:
 			value := ir.Some{Value: ir.StringLiteral(ins.Text)}
 			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: value})
+		case appendValue:
+			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins),
+				Value: ir.SliceAppend{Slice: l.value(ins.X), Element: l.value(ins.Y)}})
 		case emptySliceValue:
 			value := l.freshSlice(ir.EmptySlice{}, ins.Type.Model)
 			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: value})
@@ -732,7 +737,7 @@ func (l *lowerer) valueType(t *sourceType) ir.Type {
 			record := ir.Record{Symbol: l.typeSymbol(t, "")}
 			handles := make(map[ir.Type]bool)
 			for _, field := range t.Fields {
-				fieldType := stateType(l.valueType(field.Type))
+				fieldType := l.recordFieldType(l.valueType(field.Type))
 				record.Fields = append(record.Fields, ir.Field{Name: field.Name, Type: fieldType})
 				if field.Type.IsInterface {
 					handles[fieldType] = true
@@ -758,13 +763,24 @@ func (l *lowerer) ordinaryType(t *sourceType) ir.Type {
 	}
 	typ := l.valueType(t)
 	if l.nullableSlice(typ) {
-		return stateType(typ)
+		return l.recordFieldType(typ)
 	}
 	return typ
 }
 
+func (l *lowerer) hasCapacity(typ ir.Type) bool {
+	return typ.SliceElem() == ir.Bytes || l.capacitySlices[typ]
+}
+
+func (l *lowerer) recordFieldType(typ ir.Type) ir.Type {
+	if l.hasCapacity(typ) {
+		return ir.OptionType(ir.ProductType(typ, ir.Nat))
+	}
+	return stateType(typ)
+}
+
 func (l *lowerer) nullableSlice(typ ir.Type) bool {
-	return typ.SliceElem() != "" && (l.nullableSlices || typ.SliceElem() == ir.Bytes)
+	return typ.SliceElem() != "" && (l.nullableSlices || l.hasCapacity(typ))
 }
 
 func (l *lowerer) sliceList(value *sourceValue) ir.Expr {
@@ -772,7 +788,7 @@ func (l *lowerer) sliceList(value *sourceValue) ir.Expr {
 }
 
 func (l *lowerer) sliceElements(value ir.Expr, typ ir.Type) ir.Expr {
-	if typ.SliceElem() == ir.Bytes {
+	if l.hasCapacity(typ) {
 		return ir.PairField{Value: ir.OptionGetD{Value: value, Default: emptyCapacitySlice()}}
 	}
 	if l.nullableSlice(typ) {
@@ -786,7 +802,7 @@ func emptyCapacitySlice() ir.Expr {
 }
 
 func (l *lowerer) freshSlice(elements ir.Expr, typ ir.Type) ir.Expr {
-	if typ.SliceElem() == ir.Bytes {
+	if l.hasCapacity(typ) {
 		return ir.Some{Value: ir.Pair{Left: elements, Right: ir.ListLength{List: elements}}}
 	}
 	if l.nullableSlice(typ) {
@@ -927,8 +943,14 @@ func (l *lowerer) sliceCallback(value *sourceValue, effectful bool) ir.Expr {
 func (l *lowerer) lowerStructuredFold(fold *sourceRange) ir.StructuredFold {
 	spec := fold.Structured
 	iter := spec.Iteration
-	result := ir.StructuredFold{Sequence: l.sliceList(fold.Source), Initial: packResults(spec.Initial, l.value),
-		Element: l.bind(fold.Element)}
+	sequence := l.sliceList(fold.Source)
+	initial := func(value *sourceValue) ir.Expr {
+		if value == fold.AppendTo {
+			return ir.Some{Value: ir.Pair{Left: ir.EmptySlice{}, Right: ir.ListLength{List: sequence}}}
+		}
+		return l.value(value)
+	}
+	result := ir.StructuredFold{Sequence: sequence, Initial: packResults(spec.Initial, initial), Element: l.bind(fold.Element)}
 	typ := l.loopStateType(spec.States)
 	result.State = l.freshBinder("state", typ)
 	bindings := l.unpackLoopState(spec.States, result.State)
@@ -953,9 +975,9 @@ func (l *lowerer) freshBinder(name string, typ ir.Type) ir.Binder {
 
 func (l *lowerer) loopStateType(states []*sourceValue) ir.Type {
 	last := len(states) - 1
-	typ := l.valueType(states[last].Type)
+	typ := l.ordinaryType(states[last].Type)
 	for i := last - 1; i >= 0; i-- {
-		typ = ir.ProductType(l.valueType(states[i].Type), typ)
+		typ = ir.ProductType(l.ordinaryType(states[i].Type), typ)
 	}
 	return typ
 }

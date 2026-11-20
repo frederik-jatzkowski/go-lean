@@ -453,6 +453,9 @@ func (r renderer) renderExpr(expr ir.Expr) string {
    (some (result.1.reverse, keys.length), result.2))`, sequence, word, excluded)
 	case ir.NatZero:
 		return "0"
+	case ir.SliceAppend:
+		return fmt.Sprintf("(Option.map (fun slice => (slice.1 ++ [%s], slice.2)) %s)",
+			r.renderExpr(expr.Element), r.renderExpr(expr.Slice))
 	case ir.SliceCapacity:
 		return fmt.Sprintf("(%s.ofNat ((%s).getD ([], 0)).2)", r.leanType(ir.IntWord), r.renderExpr(expr.Slice))
 	case ir.StringLiteral:

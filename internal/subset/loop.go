@@ -30,6 +30,8 @@ type RangeFold struct {
 	Source     ssa.Value
 	Element    *ssa.UnOp
 	Excluded   ssa.Value
+	AppendTo   *ssa.MakeSlice
+	Appends    map[*ssa.Call]ssa.Value
 	Structured *LoopState
 }
 
@@ -443,16 +445,20 @@ func matchStructuredFold(fn *ssa.Function) *RangeFold {
 	if iter == nil {
 		return nil
 	}
-	for _, ins := range blocks.entry.Instrs[:len(blocks.entry.Instrs)-1] {
-		if ins != iter.Length {
-			return nil
-		}
-	}
 	skip := map[ssa.Instruction]bool{iter.Element: true, iter.Element.X.(*ssa.IndexAddr): true}
 	omitted := map[ssa.Value]bool{iter.Counter: true, iter.Index: true, iter.Length: true, iter.Element.X: true}
 	if iter.LatchStep != nil {
 		skip[iter.LatchStep] = true
 		omitted[iter.LatchStep] = true
+	}
+	destination, appends, owned := matchAppendFold(fn, blocks, iter, phis, skip)
+	if !owned {
+		return nil
+	}
+	for _, value := range appends {
+		if omitted[value] {
+			return nil
+		}
 	}
 	fold := &LoopState{Exit: blocks.exit, Next: make(map[*ssa.BasicBlock][]ssa.Value),
 		Iteration: &TraversalIteration{Entry: blocks.body, Header: blocks.header, Skip: skip}}
@@ -462,14 +468,15 @@ func matchStructuredFold(fn *ssa.Function) *RangeFold {
 		}
 		initial := phi.Edges[blocks.incoming]
 		typ := Type(phi.Type())
-		if !typ.IsInteger() && typ != ir.Bool || !invariant(initial, typ) {
+		ownedSlice := destination != nil && initial == destination
+		if !ownedSlice && (!typ.IsInteger() && typ != ir.Bool || !invariant(initial, typ)) {
 			return nil
 		}
 		fold.States = append(fold.States, phi)
 		fold.Initial = append(fold.Initial, initial)
 		for _, edge := range blocks.backs {
 			next := phi.Edges[edge]
-			if !hasType(next, typ) || omitted[next] {
+			if !ownedSlice && !hasType(next, typ) || omitted[next] {
 				return nil
 			}
 			pred := blocks.header.Preds[edge]
@@ -494,7 +501,7 @@ func matchStructuredFold(fn *ssa.Function) *RangeFold {
 			}
 		}
 	}
-	return &RangeFold{Source: iter.Source, Element: iter.Element, Structured: fold}
+	return &RangeFold{Source: iter.Source, Element: iter.Element, Structured: fold, AppendTo: destination, Appends: appends}
 }
 
 func (c *checker) checkLoopState(fn *ssa.Function, spec *LoopState) error {

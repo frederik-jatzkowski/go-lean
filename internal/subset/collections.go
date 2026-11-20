@@ -111,8 +111,7 @@ func matchSingleAppend(steps []ssa.Instruction, dst, element ssa.Value) *ssa.Cal
 	return call
 }
 
-func IsStringSliceCapacity(call *ssa.Call) bool {
-	builtin, ok := call.Call.Value.(*ssa.Builtin)
-	return ok && builtin.Name() == "cap" && len(call.Call.Args) == 1 &&
-		hasType(call.Call.Args[0], ir.SliceType(ir.Bytes))
+func IsSliceCapacity(call *ssa.Call) bool {
+	return builtinNamed(call, "cap") && len(call.Call.Args) == 1 &&
+		Type(call.Call.Args[0].Type()).SliceElem() != "" && supportedValue(call.Call.Args[0])
 }

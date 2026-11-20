@@ -25,6 +25,9 @@ func (l *lowerer) statePayload(results []*sourceType) ir.Type {
 }
 
 func stateType(typ ir.Type) ir.Type {
+	if typ.SliceElem() == ir.Bytes {
+		return ir.OptionType(ir.ProductType(typ, ir.Nat))
+	}
 	if typ.SliceElem() != "" {
 		return ir.OptionType(typ)
 	}
@@ -190,7 +193,7 @@ func (s *statefulLowerer) body(block, predecessor *sourceBlock) ir.Body {
 			s.call(&body, ins)
 		case convertValue:
 			binder := s.bind(ins)
-			body.Bindings = append(body.Bindings, ir.Binding{Binder: binder, Value: ir.Convert{Value: s.value(ins.X), To: binder.Type}})
+			body.Bindings = append(body.Bindings, ir.Binding{Binder: binder, Value: ir.Convert{Value: s.value(ins.X), From: ins.X.Type.Model, To: binder.Type}})
 		case changeType:
 			body.Bindings = append(body.Bindings, ir.Binding{Binder: s.bind(ins), Value: s.value(ins.X)})
 		case phiValue:

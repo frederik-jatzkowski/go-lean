@@ -105,7 +105,10 @@ func (b *ssaInputBuilder) fillFunction(fn *ssa.Function) {
 	}
 	if l := b.checked.RangeFold(fn); l != nil {
 		f.Range = &sourceRange{Initial: b.value(l.Initial), Next: b.value(l.Next), Source: b.value(l.Source),
-			Element: b.value(l.Element), Steps: b.valuesOf(l.Steps), Structured: b.loop(l.Structured)}
+			Steps: b.valuesOf(l.Steps), Structured: b.loop(l.Structured), Excluded: b.value(l.Excluded)}
+		if l.Element != nil {
+			f.Range.Element = b.value(l.Element)
+		}
 		if l.State != nil {
 			f.Range.State = b.value(l.State)
 		}
@@ -354,6 +357,11 @@ func (b *ssaInputBuilder) instruction(ins ssa.Instruction) *sourceValue {
 		v.IndexInBounds = subset.ArrayIndexInBounds(i.X, i.Index, i)
 	case *ssa.Slice:
 		v.Kind = emptySliceValue
+		if subset.IsStringSlice(i) {
+			v.Kind, v.X, v.Y, v.IndexValue = stringSliceValue, b.value(i.X), b.value(i.Low), b.value(i.High)
+		}
+	case *ssa.MakeInterface:
+		v.Kind, v.Text = concreteErrorValue, subset.ConcreteErrorType(i)
 	case *ssa.MakeMap:
 		v.Kind = makeMap
 	case *ssa.MapUpdate:
@@ -364,7 +372,8 @@ func (b *ssaInputBuilder) instruction(ins ssa.Instruction) *sourceValue {
 		v.Kind, v.X, v.OperandIndex = extractValue, b.value(i.Tuple), i.Index
 	case *ssa.Call:
 		v.Kind, v.Call = callValue, &sourceCall{Args: b.valuesOf(i.Call.Args), Value: b.value(i.Call.Value),
-			Target: b.function(i.Call.StaticCallee()), Length: subset.IsLength(i), Clone: subset.IsSliceClone(i)}
+			Target: b.function(i.Call.StaticCallee()), Length: subset.IsLength(i), Clone: subset.IsSliceClone(i),
+			Extremum: subset.IntegerExtremum(i), Capacity: subset.IsStringSliceCapacity(i)}
 		if i.Call.IsInvoke() {
 			v.Call.Method = i.Call.Method.Name()
 		}

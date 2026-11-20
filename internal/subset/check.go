@@ -141,7 +141,7 @@ func (c *checker) function(fn *ssa.Function) error {
 	}
 	for entry := range sig.Results().Variables() {
 		result := entry.Type()
-		if isInterfaceValue(result) {
+		if isInterfaceValue(result) && !isBuiltinError(result) {
 			if err := c.checkInterface(fn, fn.Pos(), result); err != nil {
 				return err
 			}
@@ -182,6 +182,7 @@ func (c *checker) function(fn *ssa.Function) error {
 			build = matchSliceIteration(fn)
 		}
 	}
+	collection := matchCollectionFold(fn)
 	chain := checkChainRecursion(fn)
 	for _, param := range fn.Params {
 		if constructor && interfaceRecord(param.Type()) {
@@ -204,7 +205,9 @@ func (c *checker) function(fn *ssa.Function) error {
 		}
 	}
 	c.visiting[fn] = true
-	if build != nil {
+	if collection != nil {
+		c.ranges[fn] = collection
+	} else if build != nil {
 		if build.Exit != nil {
 			if err := c.checkResultOwnership(fn, build.Destination); err != nil {
 				return err
@@ -393,10 +396,15 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 			(isNilSlice(ins.X) && supportedValue(ins.Y) || isNilSlice(ins.Y) && supportedValue(ins.X)) {
 			return nil
 		}
+		if typ == ir.Error && (ins.Op == token.EQL || ins.Op == token.NEQ) &&
+			(hasType(ins.X, ir.Error) && isNilError(ins.Y) || isNilError(ins.X) && hasType(ins.Y, ir.Error)) {
+			return nil
+		}
 		if supported && supportedValue(ins.X) && hasType(ins.Y, typ) &&
 			(typ.IsInteger() ||
 				typ == ir.Bool && (ins.Op == token.EQL || ins.Op == token.NEQ) ||
-				(typ == ir.Bytes || typ == ir.Float32) && ins.Op == token.ADD ||
+				typ == ir.Bytes && (ins.Op == token.ADD || ins.Op == token.EQL || ins.Op == token.NEQ) ||
+				typ == ir.Float32 && ins.Op == token.ADD ||
 				typ == ir.Float64 && op >= ir.Equal) {
 			return nil
 		}
@@ -421,7 +429,7 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		return diagnostic(fn, ins.Pos(), "unsupported unary operation %s on %s", ins.Op, ins.X.Type())
 	case *ssa.Convert:
 		from, to := Type(ins.X.Type()), Type(ins.Type())
-		if from.IsWord() && to.IsWord() && supportedValue(ins.X) {
+		if from.IsInteger() && to.IsInteger() && supportedValue(ins.X) {
 			return nil
 		}
 		return diagnostic(fn, ins.Pos(), "unsupported conversion from %s to %s", ins.X.Type(), ins.Type())
@@ -444,6 +452,18 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 				return nil
 			}
 			return diagnostic(fn, ins.Pos(), "len requires a supported Go string or slice")
+		}
+		if IsStringSliceCapacity(ins) {
+			return nil
+		}
+		if name := IntegerExtremum(ins); name != "" {
+			typ := Type(ins.Type())
+			for _, arg := range ins.Call.Args {
+				if !hasType(arg, typ) {
+					return diagnostic(fn, ins.Pos(), "%s requires supported integer operands", name)
+				}
+			}
+			return nil
 		}
 		callee := ins.Call.StaticCallee()
 		if callee == nil {
@@ -509,7 +529,7 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		}
 		return diagnostic(fn, ins.Pos(), "index requires a supported array value and integer index")
 	case *ssa.Slice:
-		if IsEmptySliceLiteral(ins) {
+		if IsEmptySliceLiteral(ins) || IsStringSlice(ins) {
 			return nil
 		}
 		return diagnostic(fn, ins.Pos(), "reslicing is unsupported")
@@ -517,7 +537,7 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		if supportedMapLookup(ins) {
 			return nil
 		}
-		return diagnostic(fn, ins.Pos(), "map lookup requires a supported integer map")
+		return diagnostic(fn, ins.Pos(), "map lookup requires supported string or integer keys and integer values")
 	case *ssa.Extract:
 		if lookup, ok := ins.Tuple.(*ssa.Lookup); ok && lookup.CommaOk {
 			if ins.Index == 0 || ins.Index == 1 {
@@ -553,7 +573,12 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 			return nil
 		}
 		return diagnostic(fn, ins.Cond.Pos(), "branch condition must be a supported bool value")
-	case *ssa.MakeInterface, *ssa.ChangeInterface:
+	case *ssa.MakeInterface:
+		if ConcreteErrorType(ins) != "" {
+			return nil
+		}
+		return diagnostic(fn, ins.Pos(), "unsupported SSA instruction %T: interface conversions are unsupported", ins)
+	case *ssa.ChangeInterface:
 		return diagnostic(fn, ins.Pos(), "unsupported SSA instruction %T: interface conversions are unsupported", ins)
 	case *ssa.TypeAssert:
 		return diagnostic(fn, ins.Pos(), "type assertions are unsupported")
@@ -593,6 +618,50 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 	}
 }
 
+// IntegerExtremum identifies runtime min and max on modeled integers.
+func IntegerExtremum(call *ssa.Call) string {
+	builtin, ok := call.Call.Value.(*ssa.Builtin)
+	if ok && (builtin.Name() == "min" || builtin.Name() == "max") && Type(call.Type()).IsInteger() {
+		return builtin.Name()
+	}
+	return ""
+}
+
+func IsStringSlice(ins *ssa.Slice) bool {
+	return ins.Max == nil && hasType(ins.X, ir.Bytes) &&
+		(ins.Low == nil || supportedIndex(ins.Low)) &&
+		(ins.High == nil || supportedIndex(ins.High))
+}
+
+func isBuiltinError(t types.Type) bool {
+	return types.Identical(t, types.Universe.Lookup("error").Type())
+}
+
+func isNilError(value ssa.Value) bool {
+	constant, ok := value.(*ssa.Const)
+	return ok && constant.IsNil() && isBuiltinError(value.Type())
+}
+
+// ConcreteErrorType recognizes boxing a zero-field named value into error.
+func ConcreteErrorType(ins *ssa.MakeInterface) string {
+	if !isBuiltinError(ins.Type()) {
+		return ""
+	}
+	value, ok := ins.X.(*ssa.Const)
+	if !ok || value.Value != nil {
+		return ""
+	}
+	named, ok := types.Unalias(value.Type()).(*types.Named)
+	if !ok || named.Obj().Pkg() == nil || named.Obj().Parent() != named.Obj().Pkg().Scope() || named.TypeParams().Len() != 0 {
+		return ""
+	}
+	fields, ok := named.Underlying().(*types.Struct)
+	if !ok || fields.NumFields() != 0 {
+		return ""
+	}
+	return named.Obj().Pkg().Path() + "." + named.Obj().Name()
+}
+
 func IsLength(call *ssa.Call) bool {
 	builtin, ok := call.Call.Value.(*ssa.Builtin)
 	return ok && builtin.Name() == "len"
@@ -609,12 +678,14 @@ func supportedValue(value ssa.Value) bool {
 	}
 	switch value := value.(type) {
 	case *ssa.Slice:
-		return IsEmptySliceLiteral(value)
+		return IsEmptySliceLiteral(value) || IsStringSlice(value)
+	case *ssa.MakeInterface:
+		return ConcreteErrorType(value) != ""
 	case *ssa.Const:
 		if value.Value == nil {
 			key, _ := typ.MapShape()
 			array, _ := typ.ArrayShape()
-			return typ.Pointee() != "" || typ.SliceElem() != "" || key != "" ||
+			return typ == ir.Error || typ.Pointee() != "" || typ.SliceElem() != "" || key != "" ||
 				array != "" && concreteArrayElement(arrayType(value.Type())) ||
 				typ.IsRecord() && !interfaceRecord(value.Type())
 		}
@@ -636,6 +707,9 @@ func Type(t types.Type) ir.Type {
 
 func typeWithRecords(t types.Type, active map[*types.Named]bool) ir.Type {
 	t = types.Unalias(t)
+	if isBuiltinError(t) {
+		return ir.Error
+	}
 	if m, ok := t.(*types.Map); ok {
 		return mapType(m)
 	}

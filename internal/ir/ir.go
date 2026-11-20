@@ -88,6 +88,7 @@ const (
 	UIntWord Type = "uint"
 	Bool     Type = "Bool"
 	Bytes    Type = "ByteArray"
+	Error    Type = "(Option String)"
 	Float32  Type = "Float32"
 	Float64  Type = "Float"
 )
@@ -334,9 +335,27 @@ type ArraySet struct {
 	IndexType              Type
 }
 
+type CollectionFold struct{ Sequence, Excluded Expr }
+
+type SliceCapacity struct{ Slice Expr }
+
+type NatZero struct{}
+
+type StringLiteral string
+
+type CheckedStringSlice struct {
+	Bytes, Low, High  Expr
+	LowType, HighType Type
+}
+
 type Convert struct {
-	Value Expr
-	To    Type
+	Value    Expr
+	From, To Type
+}
+
+type IntegerExtremum struct {
+	Args []Expr
+	Max  bool
 }
 
 type Call struct {
@@ -395,6 +414,12 @@ func (CheckedIndex) expr()       {}
 func (ArrayReplicate) expr()     {}
 func (ArrayGet) expr()           {}
 func (ArraySet) expr()           {}
+func (CollectionFold) expr()     {}
+func (NatZero) expr()            {}
+func (SliceCapacity) expr()      {}
+func (StringLiteral) expr()      {}
+func (CheckedStringSlice) expr() {}
+func (IntegerExtremum) expr()    {}
 func (Convert) expr()            {}
 func (Binary) expr()             {}
 

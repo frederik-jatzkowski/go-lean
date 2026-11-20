@@ -418,7 +418,7 @@ func TestRejectUnsupportedSSA(t *testing.T) {
 		{"map literal with potentially duplicate keys", "func f(a, b int64) map[int64]int64 { return map[int64]int64{a: 1, b: 2} }", "map results require a fresh local allocation"},
 		{"map return from different allocations", "func f(flag bool) map[int64]int64 { m := make(map[int64]int64); if flag { return make(map[int64]int64) }; return m }", "map results require a fresh local allocation"},
 		{"map nil test", "func f(m map[int64]int64) bool { return m == nil }", "unsupported runtime operation =="},
-		{"noninteger map key", "func f(m map[string]int64) int64 { v, _ := m[\"key\"]; return v }", "parameter must have a supported"},
+		{"unsupported map key", "func f(m map[bool]int64) int64 { v, _ := m[true]; return v }", "parameter must have a supported"},
 		{"array escape", "func f(xs [4]int64) int64 { saved = &xs; return xs[0] }; var saved *[4]int64", "local array address must not escape"},
 		{"array field element escape", "func f(x data) int64 { saved = &x.values[0]; return x.values[0] }; type data struct { values [4]int64 }; var saved *int64", "element addresses must stay local"},
 		{"caller slice escape", "func f(xs []int64) []int64 { return xs }", "slice results require a validated fresh construction"},

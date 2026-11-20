@@ -368,6 +368,8 @@ const (
 	fieldCallMethod
 	fieldCallLength
 	fieldCallClone
+	fieldCallExtremum
+	fieldCallCapacity
 )
 
 func callFields(f sourceFields, value *sourceCall) {
@@ -377,6 +379,8 @@ func callFields(f sourceFields, value *sourceCall) {
 	textField(f, fieldCallMethod, &value.Method)
 	booleanField(f, fieldCallLength, &value.Length)
 	booleanField(f, fieldCallClone, &value.Clone)
+	textField(f, fieldCallExtremum, &value.Extremum)
+	booleanField(f, fieldCallCapacity, &value.Capacity)
 }
 
 const (
@@ -441,6 +445,7 @@ const (
 	fieldRangeElement
 	fieldRangeSteps
 	fieldRangeStructured
+	fieldRangeExcluded
 )
 
 func rangeFields(f sourceFields, value *sourceRange) {
@@ -451,6 +456,7 @@ func rangeFields(f sourceFields, value *sourceRange) {
 	referenceField(f, fieldRangeElement, &value.Element, valueFields)
 	referenceListField(f, fieldRangeSteps, &value.Steps, valueFields)
 	referenceField(f, fieldRangeStructured, &value.Structured, loopFields)
+	referenceField(f, fieldRangeExcluded, &value.Excluded, valueFields)
 }
 
 const (

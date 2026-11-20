@@ -29,6 +29,7 @@ type RangeFold struct {
 	AccumulatorLoop
 	Source     ssa.Value
 	Element    *ssa.UnOp
+	Excluded   ssa.Value
 	Structured *LoopState
 }
 

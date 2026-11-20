@@ -11,7 +11,7 @@ import (
 
 func mapType(m *types.Map) ir.Type {
 	key, value := Type(m.Key()), Type(m.Elem())
-	if key.IsInteger() && value.IsInteger() {
+	if (key.IsInteger() || key == ir.Bytes) && value.IsInteger() {
 		return ir.MapType(key, value)
 	}
 	return ""

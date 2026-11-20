@@ -69,7 +69,9 @@ func FromSSAWithAbstractCalls(input Input, sourceStem string, wordBits int64, ab
 				l.lowerCountedLoop(&result, loop)
 			}
 		} else if fold := fn.Range; fold != nil {
-			if fold.Structured != nil {
+			if fold.Excluded != nil {
+				result.Body.Result = ir.Return{Value: ir.CollectionFold{Sequence: l.sliceList(fold.Source), Excluded: l.value(fold.Excluded)}}
+			} else if fold.Structured != nil {
 				result.Body.Result = l.lowerStructuredFold(fold)
 			} else {
 				result.Body.Result = l.lowerRangeFold(fold)
@@ -80,16 +82,14 @@ func FromSSAWithAbstractCalls(input Input, sourceStem string, wordBits int64, ab
 			} else if build.Element == nil {
 				l.canPanic = true
 				value := l.sliceList(build.Source)
-				if l.nullableSlices {
-					value = ir.Some{Value: value}
-				}
+				value = l.freshSlice(value, fn.Results[0].Model)
 				result.Body.Result = ir.Return{Value: value}
 			} else {
 				traversal := l.lowerSliceBuild(build)
-				if l.nullableSlices {
+				if l.nullableSlice(fn.Results[0].Model) {
 					destination := l.freshBinder("slice", l.valueType(fn.Results[0]))
 					traversal.Destination = &destination
-					traversal.Continuation = &ir.Body{Result: ir.Return{Value: ir.Some{Value: ir.Ref(destination)}}}
+					traversal.Continuation = &ir.Body{Result: ir.Return{Value: l.freshSlice(ir.Ref(destination), fn.Results[0].Model)}}
 				}
 				result.Body.Result = traversal
 			}
@@ -204,9 +204,7 @@ func (l *lowerer) lowerSliceResults(build *sourceBuild) ir.Body {
 	if build.Element == nil {
 		l.canPanic = true
 		value := l.sliceList(build.Source)
-		if l.nullableSlices {
-			value = ir.Some{Value: value}
-		}
+		value = l.freshSlice(value, build.Destination.Type.Model)
 		body.Bindings = append(body.Bindings, ir.Binding{Binder: destination, Value: value})
 		exit := l.instructions(build.Exit, nil, build.ExitStart)
 		body.Bindings = append(body.Bindings, exit.Bindings...)
@@ -215,10 +213,10 @@ func (l *lowerer) lowerSliceResults(build *sourceBuild) ir.Body {
 		result := l.lowerSliceBuild(build)
 		exit := l.instructions(build.Exit, nil, build.ExitStart)
 		result.Destination, result.Continuation = &destination, &exit
-		if l.nullableSlices {
+		if l.nullableSlice(build.Destination.Type.Model) {
 			raw := l.freshBinder("slice", l.valueType(build.Destination.Type))
 			result.Destination = &raw
-			exit.Bindings = append([]ir.Binding{{Binder: destination, Value: ir.Some{Value: ir.Ref(raw)}}}, exit.Bindings...)
+			exit.Bindings = append([]ir.Binding{{Binder: destination, Value: l.freshSlice(ir.Ref(raw), build.Destination.Type.Model)}}, exit.Bindings...)
 		}
 		body.Result = result
 	}
@@ -424,11 +422,21 @@ func (l *lowerer) instructions(block, predecessor *sourceBlock, start int) ir.Bo
 				}
 			}
 			result.Bindings = append(result.Bindings, l.checkedIndex(ins, ins.X, ins.IndexValue))
-		case emptySliceValue:
-			var value ir.Expr = ir.EmptySlice{}
-			if l.nullableSlices {
-				value = ir.Some{Value: value}
+		case stringSliceValue:
+			value := ir.CheckedStringSlice{Bytes: l.value(ins.X)}
+			if ins.Y != nil {
+				value.Low, value.LowType = l.value(ins.Y), l.valueType(ins.Y.Type)
 			}
+			if ins.IndexValue != nil {
+				value.High, value.HighType = l.value(ins.IndexValue), l.valueType(ins.IndexValue.Type)
+			}
+			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: value, CanPanic: true})
+			l.canPanic = true
+		case concreteErrorValue:
+			value := ir.Some{Value: ir.StringLiteral(ins.Text)}
+			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: value})
+		case emptySliceValue:
+			value := l.freshSlice(ir.EmptySlice{}, ins.Type.Model)
 			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: value})
 		case makeMap:
 			l.canPanic = true // Keep the fresh map result in the panic-result model.
@@ -482,6 +490,18 @@ func (l *lowerer) instructions(block, predecessor *sourceBlock, start int) ir.Bo
 				result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: length})
 				continue
 			}
+			if ins.Call.Capacity {
+				result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: ir.SliceCapacity{Slice: l.value(ins.Call.Args[0])}})
+				continue
+			}
+			if ins.Call.Extremum != "" {
+				value := ir.IntegerExtremum{Max: ins.Call.Extremum == "max"}
+				for _, arg := range ins.Call.Args {
+					value.Args = append(value.Args, l.value(arg))
+				}
+				result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: value})
+				continue
+			}
 			target := ins.Call.Target
 			call := ir.Call{Callee: l.symbol(target)}
 			abstract := l.abstract[call.Callee]
@@ -515,7 +535,7 @@ func (l *lowerer) instructions(block, predecessor *sourceBlock, start int) ir.Bo
 		case convertValue:
 			binder := l.bind(ins)
 			result.Bindings = append(result.Bindings, ir.Binding{
-				Binder: binder, Value: ir.Convert{Value: l.value(ins.X), To: binder.Type},
+				Binder: binder, Value: ir.Convert{Value: l.value(ins.X), From: l.valueType(ins.X.Type), To: binder.Type},
 			})
 		case changeType:
 			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: l.value(ins.X)})
@@ -594,8 +614,8 @@ func (l *lowerer) checkedIndex(value, sequence, index *sourceValue) ir.Binding {
 	elem := typ.SliceElem()
 	if elem == "" {
 		elem, _ = typ.ArrayShape()
-	} else if l.nullableSlices {
-		input = l.sliceList(sequence)
+	} else {
+		input = l.sliceElements(input, typ)
 	}
 	if value.IndexInBounds && value.Kind == indexValue {
 		return ir.Binding{Binder: l.bindAs(value, elem), Value: ir.ArrayGet{
@@ -622,7 +642,7 @@ func (l *lowerer) value(value *sourceValue) ir.Expr {
 			return ir.NilPointer{}
 		}
 		if typ.SliceElem() != "" {
-			if l.nullableSlices {
+			if l.nullableSlice(typ) {
 				return ir.NilPointer{}
 			}
 			return ir.EmptySlice{}
@@ -733,21 +753,46 @@ func (l *lowerer) valueType(t *sourceType) ir.Type {
 }
 
 func (l *lowerer) ordinaryType(t *sourceType) ir.Type {
-	if !l.nullableSlices {
-		return l.valueType(t)
-	}
 	if t.IsTuple {
 		return productType(t.Tuple, l.ordinaryType)
 	}
-	return stateType(l.valueType(t))
+	typ := l.valueType(t)
+	if l.nullableSlice(typ) {
+		return stateType(typ)
+	}
+	return typ
+}
+
+func (l *lowerer) nullableSlice(typ ir.Type) bool {
+	return typ.SliceElem() != "" && (l.nullableSlices || typ.SliceElem() == ir.Bytes)
 }
 
 func (l *lowerer) sliceList(value *sourceValue) ir.Expr {
-	expr := l.value(value)
-	if l.nullableSlices {
-		return ir.OptionGetD{Value: expr, Default: ir.EmptySlice{}}
+	return l.sliceElements(l.value(value), value.Type.Model)
+}
+
+func (l *lowerer) sliceElements(value ir.Expr, typ ir.Type) ir.Expr {
+	if typ.SliceElem() == ir.Bytes {
+		return ir.PairField{Value: ir.OptionGetD{Value: value, Default: emptyCapacitySlice()}}
 	}
-	return expr
+	if l.nullableSlice(typ) {
+		return ir.OptionGetD{Value: value, Default: ir.EmptySlice{}}
+	}
+	return value
+}
+
+func emptyCapacitySlice() ir.Expr {
+	return ir.Pair{Left: ir.EmptySlice{}, Right: ir.NatZero{}}
+}
+
+func (l *lowerer) freshSlice(elements ir.Expr, typ ir.Type) ir.Expr {
+	if typ.SliceElem() == ir.Bytes {
+		return ir.Some{Value: ir.Pair{Left: elements, Right: ir.ListLength{List: elements}}}
+	}
+	if l.nullableSlice(typ) {
+		return ir.Some{Value: elements}
+	}
+	return elements
 }
 
 func (l *lowerer) typeSymbol(t *sourceType, suffix string) ir.Symbol {
@@ -839,6 +884,8 @@ func (l *lowerer) zeroValue(t *sourceType) ir.Expr {
 		return ir.NilPointer{}
 	}
 	switch typ {
+	case ir.Error:
+		return ir.NilPointer{}
 	case ir.Bool:
 		return ir.BoolLiteral(false)
 	case ir.Bytes:

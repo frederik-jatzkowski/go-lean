@@ -442,6 +442,32 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 			return "true"
 		}
 		return "false"
+	case ir.CollectionFold:
+		sequence, excluded := r.renderExpr(expr.Sequence), r.renderExpr(expr.Excluded)
+		word := r.leanType(ir.IntWord)
+		return fmt.Sprintf(`(let keys := %s
+   let result := keys.foldl (fun (acc : List ByteArray × List (ByteArray × %s)) key =>
+     if key == %s then acc else
+       let count := (List.lookup key acc.2).getD 0 + 1
+       (key :: acc.1, (key, count) :: acc.2.filter (fun entry => !(key == entry.1)))) ([], [])
+   (some (result.1.reverse, keys.length), result.2))`, sequence, word, excluded)
+	case ir.NatZero:
+		return "0"
+	case ir.SliceCapacity:
+		return fmt.Sprintf("(%s.ofNat ((%s).getD ([], 0)).2)", r.leanType(ir.IntWord), r.renderExpr(expr.Slice))
+	case ir.StringLiteral:
+		return strconv.Quote(string(expr))
+	case ir.CheckedStringSlice:
+		bytes := r.renderExpr(expr.Bytes)
+		low, high := "(0 : Int)", fmt.Sprintf("(Int.ofNat (%s).size)", bytes)
+		if expr.Low != nil {
+			low = r.integerAsInt(expr.Low, expr.LowType)
+		}
+		if expr.High != nil {
+			high = r.integerAsInt(expr.High, expr.HighType)
+		}
+		return fmt.Sprintf("(let low := %s; let high := %s; if 0 ≤ low ∧ low ≤ high ∧ high ≤ Int.ofNat (%s).size then some ((%s).extract low.toNat high.toNat) else none)",
+			low, high, bytes, bytes)
 	case ir.BytesLiteral:
 		bytes := make([]string, len(expr))
 		for i := range bytes {
@@ -514,11 +540,44 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 	case ir.Not:
 		return "(!" + r.renderExpr(expr.Value) + ")"
 	case ir.Convert:
-		return fmt.Sprintf("(%s).to%s", r.renderExpr(expr.Value), r.leanType(expr.To))
+		value := r.renderExpr(expr.Value)
+		target := r.leanType(expr.To)
+		if expr.From.IsWord() && expr.To.IsWord() {
+			return fmt.Sprintf("(%s).to%s", value, target)
+		}
+		if expr.From.IsUnsigned() {
+			if expr.To.IsUnsigned() {
+				return fmt.Sprintf("(%s.ofNat (%s).toNat)", target, value)
+			}
+			return fmt.Sprintf("(%s.ofInt (Int.ofNat (%s).toNat))", target, value)
+		}
+		if expr.To.IsUnsigned() {
+			signed := strings.TrimPrefix(target, "U")
+			return fmt.Sprintf("(%s.ofInt (%s).toInt).to%s", signed, value, target)
+		}
+		return fmt.Sprintf("(%s.ofInt (%s).toInt)", target, value)
+	case ir.IntegerExtremum:
+		value := r.renderExpr(expr.Args[0])
+		operator := "<"
+		if expr.Max {
+			operator = ">"
+		}
+		for _, arg := range expr.Args[1:] {
+			next := r.renderExpr(arg)
+			value = fmt.Sprintf("(let best := %s; if %s %s best then %s else best)", value, next, operator, next)
+		}
+		return value
 	case ir.Binary:
 		left, right := r.renderExpr(expr.Left), r.renderExpr(expr.Right)
 		if expr.OperandType == ir.Bytes {
-			return fmt.Sprintf("(%s ++ %s)", left, right)
+			switch expr.Op {
+			case ir.Equal:
+				return fmt.Sprintf("((%s).data == (%s).data)", left, right)
+			case ir.NotEqual:
+				return fmt.Sprintf("(!((%s).data == (%s).data))", left, right)
+			default:
+				return fmt.Sprintf("(%s ++ %s)", left, right)
+			}
 		}
 		if expr.OperandType == ir.Float64 {
 			return renderFloatComparison(expr.Op, left, right)
@@ -574,6 +633,14 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 	default:
 		panic("unexpected IR expression")
 	}
+}
+
+func (r renderer) integerAsInt(value ir.Expr, typ ir.Type) string {
+	rendered := r.renderExpr(value)
+	if typ.IsUnsigned() {
+		return fmt.Sprintf("(Int.ofNat (%s).toNat)", rendered)
+	}
+	return fmt.Sprintf("(%s).toInt", rendered)
 }
 
 func (r *renderer) indexNat(index ir.Expr, typ ir.Type) string {

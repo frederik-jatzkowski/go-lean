@@ -129,6 +129,8 @@ const (
 	indexAddress
 	indexValue
 	emptySliceValue
+	stringSliceValue
+	concreteErrorValue
 	makeMap
 	mapUpdate
 	mapLookup
@@ -173,11 +175,11 @@ type sourceOperand struct {
 }
 
 type sourceCall struct {
-	Args          []*sourceValue
-	Value         *sourceValue
-	Target        *sourceFunction
-	Method        string
-	Length, Clone bool
+	Args                    []*sourceValue
+	Value                   *sourceValue
+	Target                  *sourceFunction
+	Method, Extremum        string
+	Length, Clone, Capacity bool
 }
 
 type sourceStateful struct {
@@ -195,9 +197,9 @@ type sourceCounted struct {
 	Structured                                 *sourceLoop
 }
 type sourceRange struct {
-	Initial, State, Next, Source, Element *sourceValue
-	Steps                                 []*sourceValue
-	Structured                            *sourceLoop
+	Initial, State, Next, Source, Element, Excluded *sourceValue
+	Steps                                           []*sourceValue
+	Structured                                      *sourceLoop
 }
 type sourceBuild struct {
 	Destination, Copy, Source, Element, Value, Callback *sourceValue

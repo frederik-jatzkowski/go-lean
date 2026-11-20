@@ -2,6 +2,15 @@ import filter_and_count.filter_and_count_gen
 
 namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/filter_and_count».filter_and_count.Proofs
 
+-- Lean 4.35 provides ByteArray equality without the LawfulBEq instance.
+local instance : LawfulBEq ByteArray where
+  rfl {a} := by
+    change (a.data == a.data) = true
+    exact beq_self_eq_true a.data
+  eq_of_beq {a b} h := by
+    change (a.data == b.data) = true at h
+    exact ByteArray.ext (eq_of_beq h)
+
 private def emptyKey := ByteArray.mk #[]
 
 private abbrev Counts := List (ByteArray × GoTypes.Int)

@@ -6,6 +6,8 @@ Lean checks the laws against the generated model. Applying a theorem to a Go exe
 
 ## Use go-lean in a Go module
 
+Use Go 1.26.0 or later and install Elan to provide `lean` and `lake` on PATH.
+
 From your Go module root, add go-lean as a project tool and set up Lean:
 
 ```sh
@@ -14,7 +16,9 @@ go tool go-lean setup
 go tool go-lean doctor
 ```
 
-Commit the resulting `go.mod` and `go.sum` so contributors and CI use the same version through `go tool`. To choose a specific revision at setup, replace `@latest` with a tag or commit. After adding laws and proofs, run `go tool go-lean verify` for the whole workspace or `go tool go-lean verify ./pkg` for one package. Elan provides `lean` and `lake` on PATH.
+Commit the resulting `go.mod` and `go.sum` so contributors and CI use the same version through `go tool`. To choose a specific go-lean revision, replace `@latest` with a tag or commit. After adding laws and proofs, run `go tool go-lean verify` for the whole workspace or `go tool go-lean verify ./pkg` for one package.
+
+The proof suite is tested with Lean 4.35.0 and 4.36.0. Setup creates a missing `lean-toolchain` with Lean 4.36.0 and keeps an existing one. To use Lean 4.35.0, put `leanprover/lean4:v4.35.0` in your project's `lean-toolchain` and run verification from the module root.
 
 ## Documentation
 

@@ -14,7 +14,7 @@ const lakeBlock = "  # BEGIN go-lean managed roots\n  # END go-lean managed root
 
 func TestManagedRootsReconcile(t *testing.T) {
 	t.Chdir(t.TempDir())
-	write(t, "go.mod", "module example.test/tree\n\ngo 1.27.0\n")
+	write(t, "go.mod", "module example.test/tree\n\ngo 1.26.0\n")
 	const first = `name = "Example"
 srcDir = "src"
 defaultTargets = ["Proofs", "Nested"]
@@ -130,7 +130,7 @@ func TestManagedRootsLakeBuildAfterRename(t *testing.T) {
 	toolchain := read(t, "../../lean-toolchain")
 	t.Chdir(t.TempDir())
 	write(t, "lean-toolchain", toolchain)
-	write(t, "go.mod", "module example.test/tree\n\ngo 1.27.0\n")
+	write(t, "go.mod", "module example.test/tree\n\ngo 1.26.0\n")
 	write(t, "lakefile.toml", "name = \"Example\"\ndefaultTargets = [\"Proofs\"]\n"+
 		"[[lean_lib]]\nname = \"Proofs\"\nroots = [\n"+lakeBlock+"]\n")
 	build := func(args ...string) {
@@ -183,7 +183,7 @@ func TestManagedRootsValidationBeforeWrites(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Chdir(t.TempDir())
-			write(t, "go.mod", "module example.test/tree\n\ngo 1.27.0\n")
+			write(t, "go.mod", "module example.test/tree\n\ngo 1.26.0\n")
 			write(t, "a.go", "package sample\n\n//golean:export\nfunc A() int64 { return 1 }\n")
 			write(t, "lakefile.toml", test.config)
 			old := lean.GeneratedHeader + "\n-- obsolete\n"

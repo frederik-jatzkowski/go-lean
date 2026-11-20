@@ -60,7 +60,7 @@ func TestExamplesMatchGeneratedOutput(t *testing.T) {
 
 func TestTranspileTree(t *testing.T) {
 	t.Chdir(t.TempDir())
-	write(t, "go.mod", "module example.test/tree\n\ngo 1.27.0\n")
+	write(t, "go.mod", "module example.test/tree\n\ngo 1.26.0\n")
 	write(t, "a.go", `package tree
 //golean:verify
 func A(x int64) int64 { return helper(x) }

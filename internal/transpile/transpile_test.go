@@ -23,7 +23,7 @@ func writeFile(t *testing.T, path, content string) {
 func newModule(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "go.mod"), "module example.test/sample\n\ngo 1.27.0\n")
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.test/sample\n\ngo 1.26.0\n")
 	return dir
 }
 

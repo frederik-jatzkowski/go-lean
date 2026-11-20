@@ -17,7 +17,7 @@ func TestSetupAndDoctor(t *testing.T) {
 		t.Fatal("setup accepted a directory without go.mod")
 	}
 	requireMissing(t, "lean-toolchain")
-	write(t, "go.mod", "module example.test/workspace\n\ngo 1.27.0\n")
+	write(t, "go.mod", "module example.test/workspace\n\ngo 1.26.0\n")
 	write(t, "lakefile.lean", "import Lake\n")
 	write(t, "lean-toolchain", "existing/toolchain:stable\n")
 
@@ -76,7 +76,7 @@ func TestSetupAndDoctor(t *testing.T) {
 
 func TestFocusedTranspilePreservesOtherPackages(t *testing.T) {
 	t.Chdir(t.TempDir())
-	write(t, "go.mod", "module example.test/workspace\n\ngo 1.27.0\n")
+	write(t, "go.mod", "module example.test/workspace\n\ngo 1.26.0\n")
 	if err := run("setup"); err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +115,7 @@ func TestFocusedTranspilePreservesOtherPackages(t *testing.T) {
 
 func TestVerifyRunsLakeAfterGeneration(t *testing.T) {
 	t.Chdir(t.TempDir())
-	write(t, "go.mod", "module example.test/workspace\n\ngo 1.27.0\n")
+	write(t, "go.mod", "module example.test/workspace\n\ngo 1.26.0\n")
 	write(t, "pkg/model.go", "package model\n//golean:export\nfunc Model(x int64) int64 { return x }\n")
 	if err := run("setup"); err != nil {
 		t.Fatal(err)

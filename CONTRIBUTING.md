@@ -1,6 +1,6 @@
 # Working in the go-lean checkout
 
-Run the commands on this page from the repository root. Use the Go version in [go.mod](go.mod) and the Lean version in [lean-toolchain](lean-toolchain). With Elan on your PATH, run `lake --version` to check that it can load the selected toolchain.
+Run the commands on this page from the repository root. The `go` directive in [go.mod](go.mod) sets the minimum Go version. [lean-toolchain](lean-toolchain) selects the default Lean version. With Elan on your PATH, run `lake --version` to confirm the selected version.
 
 ## Build and check the repository
 
@@ -22,6 +22,31 @@ go test ./...
 go vet ./...
 lake build
 ```
+
+## Reproduce the toolchain checks
+
+Run these commands with Go 1.26.0 and again with Go 1.27.1. Use a separate clean checkout for each run, put the selected Go binary first on PATH, and use the same target architecture for both runs.
+
+```sh
+export GOTOOLCHAIN=local
+go version
+go tool task build
+go tool task generate
+go test ./...
+go vet ./...
+git diff --exit-code -- '*.lean' lakefile.toml
+```
+
+Run the proof build and integration tests in a separate clean checkout for each Lean version. Set `ELAN_TOOLCHAIN` for the entire shell session because the integration tests invoke Lake themselves. Repeat the commands with `leanprover/lean4:v4.35.0` after checking 4.36.0.
+
+```sh
+export ELAN_TOOLCHAIN=leanprover/lean4:v4.36.0
+lake --version
+lake build
+go test -count=1 -v ./cmd/go-lean ./internal/transpile
+```
+
+In PowerShell, replace the two `export` commands with `$env:GOTOOLCHAIN = 'local'` and `$env:ELAN_TOOLCHAIN = 'leanprover/lean4:v4.36.0'`.
 
 ## Check the clamp proof
 

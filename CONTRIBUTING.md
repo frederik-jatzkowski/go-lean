@@ -23,6 +23,21 @@ go vet ./...
 lake build
 ```
 
+## Preview the documentation site
+
+With Python 3.12 available, install the docs dependency and run MkDocs from the repository root. These commands work in a virtual environment.
+
+```sh
+python -m pip install -r requirements-docs.txt
+python -m mkdocs serve --watch README.md --watch CONTRIBUTING.md
+```
+
+MkDocs prints the local preview URL. It builds the homepage from the root README and picks up Markdown pages under `docs/` automatically. Run `python -m mkdocs build --strict` to check the production build.
+
+### Enable GitHub Pages deployment
+
+Set the Pages source to **GitHub Actions** in the repository settings. For a private repository, confirm **Private** site visibility is available before enabling Pages and select it before enabling deployment. Once publishing is authorized, set the repository Actions variable `DEPLOY_DOCS_PAGES` to `true`. The next push to `main` deploys the site after a strict build.
+
 ## Reproduce the toolchain checks
 
 Run these commands with Go 1.26.0 and again with Go 1.27.1. Use a separate clean checkout for each run, put the selected Go binary first on PATH, and use the same target architecture for both runs.

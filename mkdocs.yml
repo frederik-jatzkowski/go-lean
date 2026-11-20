@@ -1,0 +1,20 @@
+site_name: go-lean
+repo_url: https://github.com/frederik-jatzkowski/go-lean
+theme:
+  name: readthedocs
+  navigation_depth: 3
+  highlightjs: false
+extra_css:
+  - styles/code.css
+plugins:
+  - search
+markdown_extensions:
+  - fenced_code
+  - codehilite:
+      guess_lang: false
+hooks:
+  - scripts/docs_site.py
+validation:
+  links:
+    anchors: warn
+    unrecognized_links: warn

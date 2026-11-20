@@ -1,3 +1,6 @@
 /.lake/
 /go-lean.exe
 /go-lean
+/.docs-venv/
+/site/
+/scripts/__pycache__/

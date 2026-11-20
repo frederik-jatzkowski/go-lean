@@ -1,8 +1,12 @@
 # go-lean
 
+![A Go gopher sends a Go method through go-lean to produce a Lean theorem.](docs/images/go-lean-hero.png)
+
 go-lean translates selected Go functions and methods into Lean so you can prove properties of their behavior. Mark an operation with a `//golean:verify` law, generate its Lean model, then prove the law in a handwritten Lean file. The translator follows reachable helpers and checks them against its supported Go subset.
 
-Lean checks the laws against the generated model. Applying a theorem to a Go execution depends on the translation preserving Go semantics, the law's preconditions holding, and modeled dependencies meeting their contracts.
+> **Verification limitations**
+>
+> Lean checks the laws against the generated model. Applying a theorem to a Go execution depends on the translation preserving Go semantics, the law's preconditions holding, and modeled dependencies meeting their contracts.
 
 ## Use go-lean in a Go module
 

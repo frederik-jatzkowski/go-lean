@@ -52,12 +52,13 @@ type Function struct {
 
 // CountedLoop repeats the SSA update once per unit of natural-number fuel.
 type CountedLoop struct {
-	Symbol Symbol
-	Params []Binder
-	State  Binder
-	Body   *Body
-	Steps  []Binding
-	Next   Expr
+	Symbol   Symbol
+	Params   []Binder
+	State    Binder
+	Body     *Body
+	CanPanic bool
+	Steps    []Binding
+	Next     Expr
 }
 
 type Symbol struct {

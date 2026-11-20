@@ -160,14 +160,23 @@ func (r renderer) renderCountedLoop(out *strings.Builder, loop ir.CountedLoop) {
 	state, typ := binderName(loop.State), r.leanType(loop.State.Type)
 	fmt.Fprintf(out, "\nnamespace %s\n\ndef %s", ns, name)
 	r.renderParams(out, loop.Params)
-	fmt.Fprintf(out, " : Nat → %s → %s\n", typ, typ)
-	fmt.Fprintf(out, "  | 0, %s => %s\n", state, state)
-	fmt.Fprintf(out, "  | fuel + 1, %s =>\n", state)
-	if loop.Body != nil {
-		fmt.Fprintln(out, "    let nextState :=")
-		r.renderBody(out, *loop.Body, "      ", false)
+	if loop.CanPanic {
+		fmt.Fprintf(out, " : Nat → %s → Option (%s)\n", typ, typ)
+		fmt.Fprintf(out, "  | 0, %s => some %s\n", state, state)
+		fmt.Fprintf(out, "  | fuel + 1, %s => do\n", state)
+		fmt.Fprintln(out, "    let nextState ← (do")
+		r.renderBody(out, *loop.Body, "      ", true)
+		fmt.Fprintln(out, "    )")
 	} else {
-		r.renderBindings(out, loop.Steps, "    ")
+		fmt.Fprintf(out, " : Nat → %s → %s\n", typ, typ)
+		fmt.Fprintf(out, "  | 0, %s => %s\n", state, state)
+		fmt.Fprintf(out, "  | fuel + 1, %s =>\n", state)
+		if loop.Body != nil {
+			fmt.Fprintln(out, "    let nextState :=")
+			r.renderBody(out, *loop.Body, "      ", false)
+		} else {
+			r.renderBindings(out, loop.Steps, "    ")
+		}
 	}
 	fmt.Fprintf(out, "    %s", name)
 	for _, param := range loop.Params {

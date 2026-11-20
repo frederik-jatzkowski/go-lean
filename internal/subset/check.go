@@ -351,6 +351,9 @@ func (c *checker) checkBody(fn *ssa.Function) error {
 		return nil
 	}
 	if loop := matchStructuredCountedLoop(fn); loop != nil {
+		if err := c.checkLocalMemory(fn); err != nil {
+			return err
+		}
 		if err := c.checkLoopState(fn, loop.Structured); err != nil {
 			return err
 		}

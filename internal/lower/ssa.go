@@ -1023,10 +1023,11 @@ func (l *lowerer) lowerStructuredCountedLoop(fn *ir.Function, loop *sourceCounte
 	body := l.body(iter.Entry, iter.Header)
 	body.Bindings = append(initialBindings, body.Bindings...)
 	helper.Body = &body
+	helper.CanPanic = l.canPanic
 	l.iteration = nil
 	l.state = restoreBindings(wrapperBindings, l.state)
 	final := l.freshBinder("final", typ)
-	fn.Body.Bindings = append(fn.Body.Bindings, ir.Binding{Binder: final, Value: call})
+	fn.Body.Bindings = append(fn.Body.Bindings, ir.Binding{Binder: final, Value: call, CanPanic: helper.CanPanic})
 	fn.Body.Bindings = append(fn.Body.Bindings, l.unpackLoopState(spec.States, final)...)
 	continuation := l.body(spec.Exit, iter.Header)
 	fn.Body.Bindings = append(fn.Body.Bindings, continuation.Bindings...)

@@ -4,6 +4,7 @@ import (
 	"go/types"
 
 	"github.com/frederik-jatzkowski/go-lean/internal/ir"
+	"github.com/frederik-jatzkowski/go-lean/internal/structure"
 	"golang.org/x/tools/go/ssa"
 )
 
@@ -24,11 +25,11 @@ type SliceBuild struct {
 	Iteration   *TraversalIteration
 }
 
-func checkSliceBuild(blocks loopBlocks) *SliceBuild {
+func checkSliceBuild(blocks structure.LoopRegion) *SliceBuild {
 	iter := matchRangeIteration(blocks, 1)
-	dst := sliceDestination(blocks.exit)
+	dst := sliceDestination(blocks.Exit)
 	allocated := dst != nil
-	if iter == nil || !allocated || dst.Block() != blocks.entry {
+	if iter == nil || !allocated || dst.Block() != blocks.Entry {
 		return nil
 	}
 	dstElem := Type(dst.Type()).SliceElem()
@@ -37,7 +38,7 @@ func checkSliceBuild(blocks loopBlocks) *SliceBuild {
 		return nil
 	}
 	// The preheader can only measure the input length and allocate this result.
-	for _, ins := range blocks.entry.Instrs[:len(blocks.entry.Instrs)-1] {
+	for _, ins := range blocks.Entry.Instrs[:len(blocks.Entry.Instrs)-1] {
 		if ins == dst {
 			continue
 		}
@@ -45,7 +46,7 @@ func checkSliceBuild(blocks loopBlocks) *SliceBuild {
 			return nil
 		}
 	}
-	body := blocks.body.Instrs
+	body := blocks.Body.Instrs
 	if len(body) < 5 {
 		return nil
 	}
@@ -68,7 +69,7 @@ func checkSliceBuild(blocks loopBlocks) *SliceBuild {
 			len(call.Call.Args) == 1 && call.Call.Args[0] == iter.Element {
 			if callback, ok := call.Call.Value.(*ssa.Parameter); ok &&
 				callbackType(callback.Type(), Type(iter.Element.Type()), dstElem) != "" {
-				return sliceContinuation(&SliceBuild{Source: iter.Source, Element: iter.Element, Steps: []ssa.Value{call}, Value: call, Callback: callback}, dst, blocks.exit, 0, nil)
+				return sliceContinuation(&SliceBuild{Source: iter.Source, Element: iter.Element, Steps: []ssa.Value{call}, Value: call, Callback: callback}, dst, blocks.Exit, 0, nil)
 			}
 		}
 	}
@@ -77,7 +78,7 @@ func checkSliceBuild(blocks loopBlocks) *SliceBuild {
 	if !ok || !loopValue(store.Val, available) {
 		return nil
 	}
-	return sliceContinuation(&SliceBuild{Source: iter.Source, Element: iter.Element, Steps: steps, Value: store.Val}, dst, blocks.exit, 0, nil)
+	return sliceContinuation(&SliceBuild{Source: iter.Source, Element: iter.Element, Steps: steps, Value: store.Val}, dst, blocks.Exit, 0, nil)
 }
 
 // CallbackType represents the function parameter validated by the slice build.
@@ -228,13 +229,13 @@ type TraversalIteration struct {
 }
 
 func matchSliceIteration(fn *ssa.Function) *SliceBuild {
-	blocks, ok := matchLoopRegion(fn)
+	blocks, ok := structure.MatchLoopRegion(fn)
 	if !ok {
 		return nil
 	}
 	iter := matchRangeIteration(blocks, 1)
-	dst := sliceDestination(blocks.exit)
-	if iter == nil || dst == nil || dst.Block() != blocks.entry || Type(dst.Type()).SliceElem() == "" ||
+	dst := sliceDestination(blocks.Exit)
+	if iter == nil || dst == nil || dst.Block() != blocks.Entry || Type(dst.Type()).SliceElem() == "" ||
 		!lengthOf(dst.Len, iter.Source) || !lengthOf(dst.Cap, iter.Source) {
 		return nil
 	}
@@ -244,7 +245,7 @@ func matchSliceIteration(fn *ssa.Function) *SliceBuild {
 		skip[iter.LatchStep] = true
 		omitted[iter.LatchStep] = true
 	}
-	for _, ins := range blocks.entry.Instrs[:len(blocks.entry.Instrs)-1] {
+	for _, ins := range blocks.Entry.Instrs[:len(blocks.Entry.Instrs)-1] {
 		if ins == dst {
 			continue
 		}
@@ -257,11 +258,11 @@ func matchSliceIteration(fn *ssa.Function) *SliceBuild {
 	omitted[iter.Length] = true
 	stores := make(map[ssa.Instruction]ssa.Value)
 	for _, use := range *dst.Referrers() {
-		if ret, ok := use.(*ssa.Return); ok && ret.Block() == blocks.exit {
+		if ret, ok := use.(*ssa.Return); ok && ret.Block() == blocks.Exit {
 			continue
 		}
 		addr, ok := use.(*ssa.IndexAddr)
-		if !ok || addr.X != dst || addr.Index != iter.Index || addr.Block() == blocks.header {
+		if !ok || addr.X != dst || addr.Index != iter.Index || addr.Block() == blocks.Header {
 			return nil
 		}
 		skip[addr], omitted[addr] = true, true
@@ -273,7 +274,7 @@ func matchSliceIteration(fn *ssa.Function) *SliceBuild {
 			stores[store], skip[store] = store.Val, true
 		}
 	}
-	if !writesOncePerIteration(blocks.body, blocks.header, stores) {
+	if !writesOncePerIteration(blocks.Body, blocks.Header, stores) {
 		return nil
 	}
 	for _, value := range stores {
@@ -282,7 +283,7 @@ func matchSliceIteration(fn *ssa.Function) *SliceBuild {
 		}
 	}
 	for _, block := range fn.Blocks {
-		if block == blocks.entry || block == blocks.header || block == blocks.exit {
+		if block == blocks.Entry || block == blocks.Header || block == blocks.Exit {
 			continue
 		}
 		for _, ins := range block.Instrs {
@@ -300,7 +301,7 @@ func matchSliceIteration(fn *ssa.Function) *SliceBuild {
 		}
 	}
 	return sliceContinuation(&SliceBuild{Source: iter.Source, Element: iter.Element,
-		Iteration: &TraversalIteration{Entry: blocks.body, Header: blocks.header, Skip: skip, Stores: stores}}, dst, blocks.exit, 0, nil)
+		Iteration: &TraversalIteration{Entry: blocks.Body, Header: blocks.Header, Skip: skip, Stores: stores}}, dst, blocks.Exit, 0, nil)
 }
 
 // The loop region is already known to be acyclic up to its header. Validate

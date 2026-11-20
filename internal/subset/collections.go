@@ -6,36 +6,37 @@ import (
 	"go/types"
 
 	"github.com/frederik-jatzkowski/go-lean/internal/ir"
+	"github.com/frederik-jatzkowski/go-lean/internal/structure"
 	"golang.org/x/tools/go/ssa"
 )
 
 // matchCollectionFold consumes the entire function. The only uses of the two
 // allocations are the checked loop operations and the final return.
 func matchCollectionFold(fn *ssa.Function) *RangeFold {
-	blocks, ok := matchLoopRegion(fn)
-	if !ok || len(fn.Blocks) != 5 || len(blocks.entry.Instrs) != 5 ||
-		len(blocks.body.Instrs) != 4 || len(blocks.exit.Instrs) != 1 ||
-		len(blocks.backs) != 2 {
+	blocks, ok := structure.MatchLoopRegion(fn)
+	if !ok || len(fn.Blocks) != 5 || len(blocks.Entry.Instrs) != 5 ||
+		len(blocks.Body.Instrs) != 4 || len(blocks.Exit.Instrs) != 1 ||
+		len(blocks.Backs) != 2 {
 		return nil
 	}
 	iter := matchRangeIteration(blocks, 2)
 	if iter == nil || Type(iter.Source.Type()) != ir.SliceType(ir.Bytes) ||
-		iter.Length != blocks.entry.Instrs[3] {
+		iter.Length != blocks.Entry.Instrs[3] {
 		return nil
 	}
-	capacity, ok := blocks.entry.Instrs[0].(*ssa.Call)
+	capacity, ok := blocks.Entry.Instrs[0].(*ssa.Call)
 	if !ok || !IsLength(capacity) || len(capacity.Call.Args) != 1 || capacity.Call.Args[0] != iter.Source {
 		return nil
 	}
-	dst, ok := blocks.entry.Instrs[1].(*ssa.MakeSlice)
+	dst, ok := blocks.Entry.Instrs[1].(*ssa.MakeSlice)
 	if !ok || dst.Cap != capacity || !IsZero(dst.Len) || Type(dst.Type()) != Type(iter.Source.Type()) {
 		return nil
 	}
-	counts, ok := blocks.entry.Instrs[2].(*ssa.MakeMap)
+	counts, ok := blocks.Entry.Instrs[2].(*ssa.MakeMap)
 	if !ok || counts.Reserve != nil || Type(counts.Type()) != ir.MapType(ir.Bytes, ir.IntWord) {
 		return nil
 	}
-	condition, ok := blocks.body.Instrs[2].(*ssa.BinOp)
+	condition, ok := blocks.Body.Instrs[2].(*ssa.BinOp)
 	if !ok || condition.Op != token.EQL || condition.X != iter.Element {
 		return nil
 	}
@@ -43,30 +44,30 @@ func matchCollectionFold(fn *ssa.Function) *RangeFold {
 	if !ok || excluded.Value == nil || excluded.Value.Kind() != constant.String {
 		return nil
 	}
-	branch, ok := blocks.body.Instrs[3].(*ssa.If)
-	if !ok || branch.Cond != condition || blocks.body.Succs[0] != blocks.header {
+	branch, ok := blocks.Body.Instrs[3].(*ssa.If)
+	if !ok || branch.Cond != condition || blocks.Body.Succs[0] != blocks.Header {
 		return nil
 	}
-	update := blocks.body.Succs[1]
-	if len(update.Instrs) != 9 || len(update.Preds) != 1 || update.Preds[0] != blocks.body ||
-		len(update.Succs) != 1 || update.Succs[0] != blocks.header || !endsInJump(update) {
+	update := blocks.Body.Succs[1]
+	if len(update.Instrs) != 9 || len(update.Preds) != 1 || update.Preds[0] != blocks.Body ||
+		len(update.Succs) != 1 || update.Succs[0] != blocks.Header || !endsInJump(update) {
 		return nil
 	}
-	ret := blocks.exit.Instrs[0].(*ssa.Return)
+	ret := blocks.Exit.Instrs[0].(*ssa.Return)
 	if len(ret.Results) != 2 || ret.Results[1] != counts {
 		return nil
 	}
 	state, ok := ret.Results[0].(*ssa.Phi)
-	if !ok || state.Block() != blocks.header || state == iter.Counter || state.Edges[blocks.incoming] != dst {
+	if !ok || state.Block() != blocks.Header || state == iter.Counter || state.Edges[blocks.Incoming] != dst {
 		return nil
 	}
 	appendCall := matchSingleAppend(update.Instrs[:5], state, iter.Element)
 	if appendCall == nil {
 		return nil
 	}
-	for _, back := range blocks.backs {
-		pred := blocks.header.Preds[back]
-		if pred == blocks.body && state.Edges[back] == state ||
+	for _, back := range blocks.Backs {
+		pred := blocks.Header.Preds[back]
+		if pred == blocks.Body && state.Edges[back] == state ||
 			pred == update && state.Edges[back] == appendCall {
 			continue
 		}

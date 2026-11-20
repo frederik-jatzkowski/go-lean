@@ -3,9 +3,9 @@ package subset
 import (
 	"go/constant"
 	"go/token"
-	"slices"
 
 	"github.com/frederik-jatzkowski/go-lean/internal/ir"
+	"github.com/frederik-jatzkowski/go-lean/internal/structure"
 	"golang.org/x/tools/go/ssa"
 )
 
@@ -35,13 +35,6 @@ type RangeFold struct {
 	Structured *LoopState
 }
 
-type loopBlocks struct {
-	entry, header, body, latch, exit *ssa.BasicBlock
-	result                           ssa.Value
-	incoming, back                   int
-	backs                            []int
-}
-
 type rangeIteration struct {
 	Source    ssa.Value
 	Index     ssa.Value
@@ -56,10 +49,10 @@ type rangeIteration struct {
 // it is executed only when the counter is strictly below that bound.
 func checkCountedLoop(fn *ssa.Function) *CountedLoop {
 	blocks, ok := matchLoopBlocks(fn)
-	if !ok || blocks.result == nil || len(blocks.header.Instrs) != 4 {
+	if !ok || blocks.Result == nil || len(blocks.Header.Instrs) != 4 {
 		return nil
 	}
-	header, body, incoming, back := blocks.header, blocks.body, blocks.incoming, blocks.back
+	header, body, incoming, back := blocks.Header, blocks.Body, blocks.Incoming, blocks.Back
 	first, firstOK := header.Instrs[0].(*ssa.Phi)
 	second, secondOK := header.Instrs[1].(*ssa.Phi)
 	cond, condOK := header.Instrs[2].(*ssa.BinOp)
@@ -78,7 +71,7 @@ func checkCountedLoop(fn *ssa.Function) *CountedLoop {
 	counterType := Type(counter.Type())
 	start := counter.Edges[incoming]
 	beforeAvailable := make(map[ssa.Value]bool)
-	before, ok := invariantIntegerSteps(blocks.entry.Instrs[:len(blocks.entry.Instrs)-1], beforeAvailable)
+	before, ok := invariantIntegerSteps(blocks.Entry.Instrs[:len(blocks.Entry.Instrs)-1], beforeAvailable)
 	initial := state.Edges[incoming]
 	if !ok || index != counter || !counterType.IsInteger() || !loopOperand(start, beforeAvailable, counterType) ||
 		Type(state.Type()) != ir.Int64 || !loopOperand(bound, beforeAvailable, counterType) ||
@@ -89,8 +82,8 @@ func checkCountedLoop(fn *ssa.Function) *CountedLoop {
 	for _, value := range before {
 		afterAvailable[value] = true
 	}
-	after, ok := invariantIntegerSteps(blocks.exit.Instrs[:len(blocks.exit.Instrs)-1], afterAvailable)
-	if !ok || !loopOperand(blocks.result, afterAvailable, Type(blocks.result.Type())) {
+	after, ok := invariantIntegerSteps(blocks.Exit.Instrs[:len(blocks.Exit.Instrs)-1], afterAvailable)
+	if !ok || !loopOperand(blocks.Result, afterAvailable, Type(blocks.Result.Type())) {
 		return nil
 	}
 	last := len(body.Instrs) - 1
@@ -100,7 +93,7 @@ func checkCountedLoop(fn *ssa.Function) *CountedLoop {
 		return nil
 	}
 	loop := &CountedLoop{
-		Start: start, Bound: bound, Before: before, After: after, Result: blocks.result,
+		Start: start, Bound: bound, Before: before, After: after, Result: blocks.Result,
 		AccumulatorLoop: AccumulatorLoop{Initial: initial, State: state, Next: state.Edges[back]},
 	}
 	available := map[ssa.Value]bool{state: true}
@@ -114,44 +107,44 @@ func checkCountedLoop(fn *ssa.Function) *CountedLoop {
 
 func checkRangeFold(fn *ssa.Function) *RangeFold {
 	blocks, ok := matchLoopBlocks(fn)
-	if !ok || blocks.result == nil || len(blocks.exit.Instrs) != 1 {
+	if !ok || blocks.Result == nil || len(blocks.Exit.Instrs) != 1 {
 		return nil
 	}
 	iter := matchRangeIteration(blocks, 2)
 	if iter == nil || Type(iter.Source.Type()) != ir.SliceType(ir.Int64) {
 		return nil
 	}
-	for _, ins := range blocks.entry.Instrs[:len(blocks.entry.Instrs)-1] {
+	for _, ins := range blocks.Entry.Instrs[:len(blocks.Entry.Instrs)-1] {
 		if ins != iter.Length {
 			return nil
 		}
 	}
-	state, ok := blocks.result.(*ssa.Phi)
-	if !ok || state == iter.Counter || state.Block() != blocks.header || Type(state.Type()) != ir.Int64 ||
-		!invariant(state.Edges[blocks.incoming], ir.Int64) {
+	state, ok := blocks.Result.(*ssa.Phi)
+	if !ok || state == iter.Counter || state.Block() != blocks.Header || Type(state.Type()) != ir.Int64 ||
+		!invariant(state.Edges[blocks.Incoming], ir.Int64) {
 		return nil
 	}
 	available := map[ssa.Value]bool{state: true, iter.Element: true}
-	body := blocks.body.Instrs
+	body := blocks.Body.Instrs
 	steps, ok := pureInt64Steps(body[2:len(body)-1], iter.LatchStep, available)
-	next := state.Edges[blocks.back]
+	next := state.Edges[blocks.Back]
 	if !ok || !loopValue(next, available) {
 		return nil
 	}
 	return &RangeFold{
 		Source: iter.Source, Element: iter.Element,
-		AccumulatorLoop: AccumulatorLoop{Initial: state.Edges[blocks.incoming], State: state, Steps: steps, Next: next},
+		AccumulatorLoop: AccumulatorLoop{Initial: state.Edges[blocks.Incoming], State: state, Steps: steps, Next: next},
 	}
 }
 
 // matchRangeIteration verifies that the counter starts at -1, advances once
 // per iteration, and indexes the same slice whose length bounds the loop.
 // A Go slice's length fits in an int, so the counter cannot wrap.
-func matchRangeIteration(blocks loopBlocks, phiCount int) *rangeIteration {
+func matchRangeIteration(blocks structure.LoopRegion, phiCount int) *rangeIteration {
 	if iter := matchIndexedIteration(blocks, phiCount); iter != nil {
 		return iter
 	}
-	header, body := blocks.header.Instrs, blocks.body.Instrs
+	header, body := blocks.Header.Instrs, blocks.Body.Instrs
 	if len(header) != phiCount+3 || len(body) < 3 {
 		return nil
 	}
@@ -168,7 +161,7 @@ func matchRangeIteration(blocks loopBlocks, phiCount int) *rangeIteration {
 		return nil
 	}
 	length, ok := cond.Y.(*ssa.Call)
-	if !ok || length.Block() != blocks.entry || !IsLength(length) || len(length.Call.Args) != 1 {
+	if !ok || length.Block() != blocks.Entry || !IsLength(length) || len(length.Call.Args) != 1 {
 		return nil
 	}
 	source := length.Call.Args[0]
@@ -177,8 +170,8 @@ func matchRangeIteration(blocks loopBlocks, phiCount int) *rangeIteration {
 		return nil
 	}
 	counter, ok := step.X.(*ssa.Phi)
-	if !ok || counter.Block() != blocks.header || Type(counter.Type()) != ir.IntWord ||
-		!intConstant(counter.Edges[blocks.incoming], -1) || !allBackEdges(counter, blocks, step) {
+	if !ok || counter.Block() != blocks.Header || Type(counter.Type()) != ir.IntWord ||
+		!intConstant(counter.Edges[blocks.Incoming], -1) || !allBackEdges(counter, blocks, step) {
 		return nil
 	}
 	addr, addrOK := body[0].(*ssa.IndexAddr)
@@ -192,9 +185,9 @@ func matchRangeIteration(blocks loopBlocks, phiCount int) *rangeIteration {
 // matchIndexedIteration recognizes an ordinary zero-based for loop whose
 // guard bounds indexing into the same slice. Only the unit increment is
 // omitted when lowering the body to a traversal.
-func matchIndexedIteration(blocks loopBlocks, phiCount int) *rangeIteration {
-	header, body := blocks.header.Instrs, blocks.body.Instrs
-	if len(blocks.backs) != 1 || len(header) < phiCount+2 || len(header) > phiCount+3 || len(body) < 3 || len(blocks.latch.Instrs) < 2 {
+func matchIndexedIteration(blocks structure.LoopRegion, phiCount int) *rangeIteration {
+	header, body := blocks.Header.Instrs, blocks.Body.Instrs
+	if len(blocks.Backs) != 1 || len(header) < phiCount+2 || len(header) > phiCount+3 || len(body) < 3 || len(blocks.Latch.Instrs) < 2 {
 		return nil
 	}
 	branch, ok := header[len(header)-1].(*ssa.If)
@@ -206,23 +199,23 @@ func matchIndexedIteration(blocks loopBlocks, phiCount int) *rangeIteration {
 		return nil
 	}
 	counter, ok := cond.X.(*ssa.Phi)
-	if !ok || counter.Block() != blocks.header || Type(counter.Type()) != ir.IntWord ||
-		!intConstant(counter.Edges[blocks.incoming], 0) {
+	if !ok || counter.Block() != blocks.Header || Type(counter.Type()) != ir.IntWord ||
+		!intConstant(counter.Edges[blocks.Incoming], 0) {
 		return nil
 	}
-	step, ok := counter.Edges[blocks.back].(*ssa.BinOp)
-	if !ok || step != blocks.latch.Instrs[len(blocks.latch.Instrs)-2] || step.Op != token.ADD || step.X != counter || !intConstant(step.Y, 1) {
+	step, ok := counter.Edges[blocks.Back].(*ssa.BinOp)
+	if !ok || step != blocks.Latch.Instrs[len(blocks.Latch.Instrs)-2] || step.Op != token.ADD || step.X != counter || !intConstant(step.Y, 1) {
 		return nil
 	}
 	length, ok := cond.Y.(*ssa.Call)
 	if !ok || !IsLength(length) || len(length.Call.Args) != 1 {
 		return nil
 	}
-	if length.Block() == blocks.header {
+	if length.Block() == blocks.Header {
 		if len(header) != phiCount+3 || header[phiCount] != length {
 			return nil
 		}
-	} else if length.Block() != blocks.entry || len(header) != phiCount+2 {
+	} else if length.Block() != blocks.Entry || len(header) != phiCount+2 {
 		return nil
 	}
 	for _, ins := range header[:phiCount] {
@@ -297,85 +290,16 @@ func integerStep(ins ssa.Instruction, available map[ssa.Value]bool, typ ir.Type)
 	return nil
 }
 
-func matchLoopBlocks(fn *ssa.Function) (loopBlocks, bool) {
+func matchLoopBlocks(fn *ssa.Function) (structure.LoopRegion, bool) {
 	if len(fn.Blocks) != 4 {
-		return loopBlocks{}, false
+		return structure.LoopRegion{}, false
 	}
-	blocks, ok := matchLoopRegion(fn)
-	return blocks, ok && len(blocks.backs) == 1 && blocks.body == blocks.latch
+	blocks, ok := structure.MatchLoopRegion(fn)
+	return blocks, ok && len(blocks.Backs) == 1 && blocks.Body == blocks.Latch
 }
 
-// matchLoopRegion identifies a single-entry loop whose false guard edge exits
-// directly. Every iteration path returns to the header without another cycle.
-func matchLoopRegion(fn *ssa.Function) (loopBlocks, bool) {
-	if len(fn.Blocks) < 4 || fn.Parent() != nil || fn.Signature.TypeParams().Len() != 0 {
-		return loopBlocks{}, false
-	}
-	entry := fn.Blocks[0]
-	if len(entry.Preds) != 0 || len(entry.Succs) != 1 || !endsInJump(entry) {
-		return loopBlocks{}, false
-	}
-	header := entry.Succs[0]
-	if len(header.Preds) < 2 || len(header.Succs) != 2 {
-		return loopBlocks{}, false
-	}
-	body, exit := header.Succs[0], header.Succs[1]
-	incoming := slices.Index(header.Preds, entry)
-	if incoming < 0 || body == header || body == exit || len(body.Preds) != 1 || body.Preds[0] != header ||
-		len(exit.Preds) != 1 || exit.Preds[0] != header || len(exit.Succs) != 0 || len(exit.Instrs) == 0 {
-		return loopBlocks{}, false
-	}
-	var backs []int
-	for i := range header.Preds {
-		if i != incoming {
-			backs = append(backs, i)
-		}
-	}
-	back := backs[0]
-	latch := header.Preds[back]
-	if len(backs) == 1 && (len(latch.Succs) != 1 || latch.Succs[0] != header || !endsInJump(latch)) {
-		return loopBlocks{}, false
-	}
-	ret, ok := exit.Instrs[len(exit.Instrs)-1].(*ssa.Return)
-	if !ok || len(ret.Results) == 0 {
-		return loopBlocks{}, false
-	}
-	seen := make(map[*ssa.BasicBlock]bool)
-	active := make(map[*ssa.BasicBlock]bool)
-	var visit func(*ssa.BasicBlock) bool
-	visit = func(block *ssa.BasicBlock) bool {
-		if block == header {
-			return true
-		}
-		if block == entry || block == exit || active[block] || len(block.Succs) == 0 {
-			return false
-		}
-		if seen[block] {
-			return true
-		}
-		seen[block] = true
-		active[block] = true
-		for _, successor := range block.Succs {
-			if !visit(successor) {
-				return false
-			}
-		}
-		delete(active, block)
-		return true
-	}
-	if !visit(body) || len(seen)+3 != len(fn.Blocks) {
-		return loopBlocks{}, false
-	}
-	blocks := loopBlocks{entry: entry, header: header, body: body, latch: latch, exit: exit,
-		incoming: incoming, back: back, backs: backs}
-	if len(ret.Results) == 1 {
-		blocks.result = ret.Results[0]
-	}
-	return blocks, true
-}
-
-func allBackEdges(phi *ssa.Phi, blocks loopBlocks, want ssa.Value) bool {
-	for _, edge := range blocks.backs {
+func allBackEdges(phi *ssa.Phi, blocks structure.LoopRegion, want ssa.Value) bool {
+	for _, edge := range blocks.Backs {
 		if phi.Edges[edge] != want {
 			return false
 		}
@@ -408,13 +332,7 @@ func intConstant(value ssa.Value, want int64) bool {
 	return exact && n == want
 }
 
-func endsInJump(block *ssa.BasicBlock) bool {
-	if len(block.Instrs) == 0 {
-		return false
-	}
-	_, ok := block.Instrs[len(block.Instrs)-1].(*ssa.Jump)
-	return ok
-}
+func endsInJump(block *ssa.BasicBlock) bool { return structure.EndsInJump(block) }
 
 // LoopState carries the header phi values through a bounded slice traversal.
 type LoopState struct {
@@ -426,12 +344,12 @@ type LoopState struct {
 }
 
 func matchStructuredFold(fn *ssa.Function) *RangeFold {
-	blocks, ok := matchLoopRegion(fn)
+	blocks, ok := structure.MatchLoopRegion(fn)
 	if !ok {
 		return nil
 	}
 	var phis []*ssa.Phi
-	for _, ins := range blocks.header.Instrs {
+	for _, ins := range blocks.Header.Instrs {
 		phi, ok := ins.(*ssa.Phi)
 		if !ok {
 			break
@@ -460,13 +378,13 @@ func matchStructuredFold(fn *ssa.Function) *RangeFold {
 			return nil
 		}
 	}
-	fold := &LoopState{Exit: blocks.exit, Next: make(map[*ssa.BasicBlock][]ssa.Value),
-		Iteration: &TraversalIteration{Entry: blocks.body, Header: blocks.header, Skip: skip}}
+	fold := &LoopState{Exit: blocks.Exit, Next: make(map[*ssa.BasicBlock][]ssa.Value),
+		Iteration: &TraversalIteration{Entry: blocks.Body, Header: blocks.Header, Skip: skip}}
 	for _, phi := range phis {
 		if phi == iter.Counter {
 			continue
 		}
-		initial := phi.Edges[blocks.incoming]
+		initial := phi.Edges[blocks.Incoming]
 		typ := Type(phi.Type())
 		ownedSlice := destination != nil && initial == destination
 		if !ownedSlice && (!typ.IsInteger() && typ != ir.Bool || !invariant(initial, typ)) {
@@ -474,17 +392,17 @@ func matchStructuredFold(fn *ssa.Function) *RangeFold {
 		}
 		fold.States = append(fold.States, phi)
 		fold.Initial = append(fold.Initial, initial)
-		for _, edge := range blocks.backs {
+		for _, edge := range blocks.Backs {
 			next := phi.Edges[edge]
 			if !ownedSlice && !hasType(next, typ) || omitted[next] {
 				return nil
 			}
-			pred := blocks.header.Preds[edge]
+			pred := blocks.Header.Preds[edge]
 			fold.Next[pred] = append(fold.Next[pred], next)
 		}
 	}
 	for _, block := range fn.Blocks {
-		if block == blocks.entry || block == blocks.header {
+		if block == blocks.Entry || block == blocks.Header {
 			continue
 		}
 		for _, ins := range block.Instrs {
@@ -495,7 +413,7 @@ func matchStructuredFold(fn *ssa.Function) *RangeFold {
 				return nil
 			}
 			for _, operand := range ins.Operands(nil) {
-				if operand != nil && (omitted[*operand] || block == blocks.exit && *operand == iter.Element) {
+				if operand != nil && (omitted[*operand] || block == blocks.Exit && *operand == iter.Element) {
 					return nil
 				}
 			}
@@ -520,11 +438,11 @@ func (c *checker) checkLoopState(fn *ssa.Function, spec *LoopState) error {
 }
 
 func matchStructuredCountedLoop(fn *ssa.Function) *CountedLoop {
-	blocks, ok := matchLoopRegion(fn)
+	blocks, ok := structure.MatchLoopRegion(fn)
 	if !ok {
 		return nil
 	}
-	header := blocks.header.Instrs
+	header := blocks.Header.Instrs
 	if len(header) < 3 {
 		return nil
 	}
@@ -538,55 +456,87 @@ func matchStructuredCountedLoop(fn *ssa.Function) *CountedLoop {
 		index, bound = bound, index
 	}
 	counter, ok := index.(*ssa.Phi)
-	if !ok || counter.Block() != blocks.header || !Type(counter.Type()).IsInteger() {
+	if !ok || counter.Block() != blocks.Header || !Type(counter.Type()).IsInteger() {
 		return nil
 	}
 	available := make(map[ssa.Value]bool)
-	before, ok := invariantIntegerSteps(blocks.entry.Instrs[:len(blocks.entry.Instrs)-1], available)
-	start := counter.Edges[blocks.incoming]
+	entry := blocks.Entry.Instrs[:len(blocks.Entry.Instrs)-1]
+	// The ordinary array lowering substitutes an immutable copy's initializer.
+	pure := make([]ssa.Instruction, 0, len(entry))
+	copies := make(map[*ssa.Alloc]*ssa.Store)
+	for _, ins := range entry {
+		switch ins := ins.(type) {
+		case *ssa.Alloc:
+			if typ := arrayValueType(ins); typ != "" {
+				if init := arrayInitializer(ins, typ); init != nil && !arrayHasIndexedStore(ins) {
+					copies[ins] = init
+					continue
+				}
+			}
+		case *ssa.Store:
+			if cell, ok := ins.Addr.(*ssa.Alloc); ok && copies[cell] == ins {
+				continue
+			}
+		}
+		pure = append(pure, ins)
+	}
+	before, ok := invariantIntegerSteps(pure, available)
+	start := counter.Edges[blocks.Incoming]
 	if !ok || !loopOperand(start, available, Type(counter.Type())) || !loopOperand(bound, available, Type(counter.Type())) {
 		return nil
 	}
-	for _, edge := range blocks.backs {
+	for _, edge := range blocks.Backs {
 		step, ok := counter.Edges[edge].(*ssa.BinOp)
 		if !ok || step.Op != token.ADD || step.X != counter || !intConstant(step.Y, 1) {
 			return nil
 		}
 	}
-	spec := &LoopState{Exit: blocks.exit, Next: make(map[*ssa.BasicBlock][]ssa.Value),
-		Iteration: &TraversalIteration{Entry: blocks.body, Header: blocks.header}}
+	spec := &LoopState{Exit: blocks.Exit, Next: make(map[*ssa.BasicBlock][]ssa.Value),
+		Iteration: &TraversalIteration{Entry: blocks.Body, Header: blocks.Header}}
 	for _, ins := range header[:len(header)-2] {
 		phi, ok := ins.(*ssa.Phi)
 		if !ok {
 			return nil
 		}
 		typ := Type(phi.Type())
-		initial := phi.Edges[blocks.incoming]
+		initial := phi.Edges[blocks.Incoming]
 		if !typ.IsInteger() && typ != ir.Bool || !loopOperand(initial, available, typ) {
 			return nil
 		}
 		spec.States = append(spec.States, phi)
 		spec.Initial = append(spec.Initial, initial)
-		for _, edge := range blocks.backs {
+		for _, edge := range blocks.Backs {
 			next := phi.Edges[edge]
 			if !hasType(next, typ) {
 				return nil
 			}
-			pred := blocks.header.Preds[edge]
+			pred := blocks.Header.Preds[edge]
 			spec.Next[pred] = append(spec.Next[pred], next)
 		}
 	}
 	for _, block := range fn.Blocks {
-		if block == blocks.entry || block == blocks.header || block == blocks.exit {
+		if block == blocks.Entry || block == blocks.Header || block == blocks.Exit {
 			continue
 		}
 		for _, ins := range block.Instrs {
 			switch ins := ins.(type) {
+			case *ssa.Index:
+				// Checked array reads use the ordinary instruction checker and lowering.
+			case *ssa.IndexAddr:
+				if cell, ok := ins.X.(*ssa.Alloc); !ok || copies[cell] == nil {
+					return nil
+				}
 			case *ssa.Call:
 				return nil
 			case *ssa.UnOp:
 				if ins.Op == token.MUL {
-					return nil
+					address, ok := ins.X.(*ssa.IndexAddr)
+					if !ok {
+						return nil
+					}
+					if cell, ok := address.X.(*ssa.Alloc); !ok || copies[cell] == nil {
+						return nil
+					}
 				}
 			case *ssa.BinOp:
 				if op, _ := Binary(ins.Op); op.PanicsOnZeroDivisor() {

@@ -4,15 +4,16 @@ import (
 	"slices"
 
 	"github.com/frederik-jatzkowski/go-lean/internal/ir"
+	"github.com/frederik-jatzkowski/go-lean/internal/structure"
 	"golang.org/x/tools/go/ssa"
 )
 
 // matchAppendFold validates the preheader and checks ownership of the optional
 // slice accumulator. The ordinary fold path still accepts just the range length.
-func matchAppendFold(fn *ssa.Function, blocks loopBlocks, iter *rangeIteration,
+func matchAppendFold(fn *ssa.Function, blocks structure.LoopRegion, iter *rangeIteration,
 	phis []*ssa.Phi, skip map[ssa.Instruction]bool) (*ssa.MakeSlice, map[*ssa.Call]ssa.Value, bool) {
 	var dst *ssa.MakeSlice
-	for _, ins := range blocks.entry.Instrs[:len(blocks.entry.Instrs)-1] {
+	for _, ins := range blocks.Entry.Instrs[:len(blocks.Entry.Instrs)-1] {
 		if ins == iter.Length {
 			continue
 		}
@@ -33,31 +34,31 @@ func matchAppendFold(fn *ssa.Function, blocks loopBlocks, iter *rangeIteration,
 		}
 	}
 	if dst == nil {
-		for _, ins := range blocks.entry.Instrs[:len(blocks.entry.Instrs)-1] {
+		for _, ins := range blocks.Entry.Instrs[:len(blocks.Entry.Instrs)-1] {
 			if ins != iter.Length {
 				return nil, nil, false
 			}
 		}
 		return nil, nil, true
 	}
-	for _, ins := range blocks.entry.Instrs[:len(blocks.entry.Instrs)-1] {
+	for _, ins := range blocks.Entry.Instrs[:len(blocks.Entry.Instrs)-1] {
 		if ins != iter.Length && ins != dst && ins != dst.Cap.(*ssa.Call) {
 			return nil, nil, false
 		}
 	}
 	var output *ssa.Phi
 	for _, phi := range phis {
-		if phi.Edges[blocks.incoming] == dst {
+		if phi.Edges[blocks.Incoming] == dst {
 			if output != nil {
 				return nil, nil, false
 			}
 			output = phi
 		}
 	}
-	if output == nil || len(blocks.exit.Instrs) != 1 {
+	if output == nil || len(blocks.Exit.Instrs) != 1 {
 		return nil, nil, false
 	}
-	ret := blocks.exit.Instrs[0].(*ssa.Return)
+	ret := blocks.Exit.Instrs[0].(*ssa.Return)
 	if slices.Index(ret.Results, ssa.Value(output)) < 0 {
 		return nil, nil, false
 	}
@@ -75,7 +76,7 @@ func matchAppendFold(fn *ssa.Function, blocks loopBlocks, iter *rangeIteration,
 	appends := make(map[*ssa.Call]ssa.Value)
 	merges := make(map[*ssa.Phi]bool)
 	for _, block := range fn.Blocks {
-		if block == blocks.entry || block == blocks.header || block == blocks.exit {
+		if block == blocks.Entry || block == blocks.Header || block == blocks.Exit {
 			continue
 		}
 		for index, ins := range block.Instrs {
@@ -149,7 +150,7 @@ func matchAppendFold(fn *ssa.Function, blocks loopBlocks, iter *rangeIteration,
 	return dst, appends, true
 }
 
-func validateAppendPaths(blocks loopBlocks, output *ssa.Phi, appends map[*ssa.Call]ssa.Value, merges map[*ssa.Phi]bool) bool {
+func validateAppendPaths(blocks structure.LoopRegion, output *ssa.Phi, appends map[*ssa.Call]ssa.Value, merges map[*ssa.Phi]bool) bool {
 	type path struct {
 		block, pred *ssa.BasicBlock
 		current     ssa.Value
@@ -159,7 +160,7 @@ func validateAppendPaths(blocks loopBlocks, output *ssa.Phi, appends map[*ssa.Ca
 	var visit func(path) bool
 	visit = func(p path) bool {
 		edge := slices.Index(p.block.Preds, p.pred)
-		if p.block == blocks.header {
+		if p.block == blocks.Header {
 			return output.Edges[edge] == p.current
 		}
 		if seen[p] {
@@ -191,7 +192,7 @@ func validateAppendPaths(blocks loopBlocks, output *ssa.Phi, appends map[*ssa.Ca
 		}
 		return true
 	}
-	return visit(path{blocks.body, blocks.header, output, false})
+	return visit(path{blocks.Body, blocks.Header, output, false})
 }
 
 func builtinNamed(call *ssa.Call, name string) bool {

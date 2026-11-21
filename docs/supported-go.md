@@ -2,6 +2,40 @@
 
 go-lean checks the operations you select and their reachable calls under the active Go build settings. Support depends on the types, control flow, and ownership of the values involved. The linked examples show shapes accepted by the checker.
 
+## Writing Go for verification
+
+Start with a caller-visible property and give it a named verification law. State the result, state change, rejection, or effect the caller relies on. Keep the expected behavior independent of the implementation and include the relevant failure paths. [Write a law](verification.md)
+
+### Keep writes local
+
+Use value receivers for domain transitions that return the next state and a domain result. A value receiver lets you change scalar fields, embedded value records, and array elements on its copy. Slice and map fields can still share storage with the caller. Read borrowed collection elements and allocate fresh storage for writes. Use the [tracked receiver model](#receiver-mutation) when in-place receiver updates are part of the API.
+
+Allocate a fresh builder before its loop and keep one current mutable storage view. Finish writes before publishing the collection through a helper call or another aggregate, then return the finished value. For append, use the returned view for subsequent operations:
+
+```go
+func FilterPositive(in []int64) []int64 {
+	out := make([]int64, 0, len(in))
+	for _, x := range in {
+		if x > 0 {
+			out = append(out, x)
+		}
+	}
+	return out
+}
+```
+
+The checker works on SSA values. Two source names can denote the same view. Keeping `previous := out` and reading `len(previous)` after `out = append(out, x)` keeps the old view live and is rejected. [Verified collection builders](../examples/provable/owned_collection/owned_collection.go)
+
+### Compose bounded traversals
+
+Use at most one supported bounded loop per function. Extract nested or sequential traversals into directly called checked helpers. Pass the current accumulator to the helper when the outer proof needs to preserve the order of updates. Supply an explicit ordered key slice for map traversal. Go leaves map iteration order unspecified. [Verified instruction folds](../examples/provable/instruction_fold/instruction_fold.go)
+
+For a signed index, check both `0 <= i` and `i < len(s)`, or establish those facts in the proof. Model failure explicitly where it matters. A zero divisor can panic, while ordinary integer overflow wraps at the modeled width. State and prove an overflow bound when the law depends on mathematical arithmetic. [Array bounds](../examples/provable/array_bounds/array_bounds.go) and [guarded division](../examples/provable/division_guarded/division_guarded.go)
+
+### Keep dependency contracts explicit
+
+Pass observations such as a timestamp as values when the rule only needs their contents. When the operation itself calls storage or another dependency, use a small named interface with `//golean:assume` laws for the needed return values. Add a named verification law and classify the reachable interface calls with `//golean:boundary` when the law concerns effects. The trace records effect calls in order, including repeats. Along each path, read-only calls must precede effects. The [checked order service](../examples/provable/order_service/orders.go) shows the domain transition, initialized repository field, and persistence law together.
+
 ## Data types and results
 
 | Go feature | Lean model |
@@ -41,4 +75,4 @@ A supported variant takes one directly called, non-nil unary Boolean callback wi
 
 ## Common rejections
 
-Mutable globals, writes to caller-owned slices or maps, escaping aliases, arbitrary indirect calls, unsupported loop and recursion shapes, reflection, and goroutines are examples of operations the checker can reject. Start from the reported Go location and follow the reachable calls from your selected root. [Rejection fixtures](../examples/reject)
+Keep mutable globals, concurrent operations such as goroutines or channel communication, unsafe pointer operations, reflection, and deferred cleanup in orchestration outside the checked call tree. The checker also rejects writes to caller-owned slice or map storage, escaping aliases, stored function values, and unsupported loop or recursion shapes. Start from the reported Go location and follow the reachable calls from your selected root. [Rejection fixtures](../examples/reject)

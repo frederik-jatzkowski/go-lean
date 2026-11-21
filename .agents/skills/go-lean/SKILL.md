@@ -7,6 +7,8 @@ description: Write, refactor, and verify idiomatic Go with go-lean. Use when cho
 
 go-lean's main purpose is to prove observable behavior at Go package boundaries. It translates marked Go functions and methods and their reachable supported helpers into Lean definitions. Lean checks the laws you state about those definitions. Applying a theorem to Go execution relies on the correctness of the translation, the stated input preconditions, and the behavior of any modeled dependencies.
 
+Keep the implementation in Go. For a behavior change, update the Go code on the path callers use, then regenerate its Lean model and check the relevant laws. Use handwritten Lean for specifications, reference models, and proofs. When a proof starts from a handwritten model, prove that the generated Go model satisfies the same contract before claiming the Go behavior is verified. If that connection is still open, report which production behavior remains unproved.
+
 Use Go 1.26.0 or later and install Elan using the [Lean installation guide](https://lean-lang.org/install/manual/). The proof suite is tested with Lean 4.35.0 and 4.36.0. Run Lean commands from the project root so Elan reads the project's `lean-toolchain`. Setup creates a missing toolchain file with Lean 4.36.0 and keeps an existing one. To use Lean 4.35.0, put `leanprover/lean4:v4.35.0` in that file.
 
 In a consuming Go module, use the Go version required by your go-lean dependency and record go-lean as a tool in your module:

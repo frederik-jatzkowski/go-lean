@@ -38,6 +38,7 @@ func FromSSAWithAbstractCalls(input Input, sourceStem string, wordBits int64, ab
 			contracts: program.Contracts, usedContracts: make(map[ir.Type]bool),
 			nullableSlices: nullableSlices && fn.Stateful == nil, capacitySlices: capacitySlices,
 		}
+		l.ownedCollections = fn.Range == nil && fn.Build == nil && (fn.Counted == nil || fn.Counted.Control)
 		if method := fn.Stateful; method != nil {
 			program.Functions = append(program.Functions, l.lowerStateful(fn, method)...)
 			if l.usesWord {
@@ -304,6 +305,8 @@ type iteration struct {
 }
 
 type lowerer struct {
+	ownedCollections bool
+
 	abstract       map[ir.Symbol]bool
 	iteration      *iteration
 	control        *sourceCounted
@@ -357,7 +360,7 @@ func (l *lowerer) body(block, predecessor *sourceBlock) ir.Body {
 		}
 		return ir.Body{Result: ir.AdvanceLoop{
 			Function: *l.controlNext,
-			State:    packResults(backEdgeValues(l.control.Structured.Next, predecessor), l.value),
+			State:    packResults(slices.Concat(backEdgeValues(l.control.Structured.Next, predecessor), l.control.Structured.Owned), l.value),
 		}}
 	}
 	if l.iteration != nil && block == l.iteration.header {
@@ -464,11 +467,20 @@ func (l *lowerer) lowerInstructions(block, predecessor *sourceBlock, instruction
 			value := ir.Some{Value: ir.StringLiteral(ins.Text)}
 			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: value})
 		case appendValue:
-			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins),
-				Value: ir.SliceAppend{Slice: l.value(ins.X), Element: l.value(ins.Y)}})
+			value := ir.SliceAppend{Slice: l.value(ins.X), Element: l.value(ins.Y),
+				WithoutCapacity: !l.hasCapacity(ins.Type.Model), Nullable: l.nullableSlice(ins.Type.Model)}
+			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(l.collectionValue(ins)), Value: value})
 		case emptySliceValue:
 			value := l.freshSlice(ir.EmptySlice{}, ins.Type.Model)
 			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: value})
+		case makeSlice:
+			typ := ins.Type.Model
+			l.usesWord = true
+			value := ir.MakeSlice{Length: l.value(ins.X), Capacity: l.value(ins.Y), Zero: l.zeroValue(ins.Type.Elem),
+				LengthType: l.valueType(ins.X.Type), CapacityType: l.valueType(ins.Y.Type),
+				Nullable: l.nullableSlice(typ), TracksCapacity: l.hasCapacity(typ)}
+			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: value, CanPanic: true})
+			l.canPanic = true
 		case makeMap:
 			l.canPanic = true // Keep the fresh map result in the panic-result model.
 			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: ir.EmptyMap{}})
@@ -476,7 +488,7 @@ func (l *lowerer) lowerInstructions(block, predecessor *sourceBlock, instruction
 			// The checker proved exclusive access, so a new binding can replace
 			// the map state without losing observations through other aliases.
 			update := ir.MapUpdate{Map: l.value(ins.X), Key: l.value(ins.Key), Value: l.value(ins.Value)}
-			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins.X), Value: update})
+			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(l.collectionValue(ins.X)), Value: update})
 		case mapLookup:
 			_, elem := l.valueType(ins.X.Type).MapShape()
 			typ := ir.OptionType(elem)
@@ -579,6 +591,14 @@ func (l *lowerer) lowerInstructions(block, predecessor *sourceBlock, instruction
 				})
 			}
 		case storeValue:
+			if address := ins.X; address.Kind == indexAddress && address.X.CollectionRoot != nil {
+				root := l.collectionValue(address.X)
+				typ := root.Type.Model
+				update := ir.SliceSet{Slice: l.value(root), Index: l.value(address.IndexValue), Value: l.value(ins.Value),
+					IndexType: l.valueType(address.IndexValue.Type), Nullable: l.nullableSlice(typ), TracksCapacity: l.hasCapacity(typ)}
+				result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(root), Value: update})
+				continue
+			}
 			root := ins.X
 			for root.Kind == fieldAddress || root.Kind == indexAddress {
 				root = root.X
@@ -670,6 +690,7 @@ func (l *lowerer) checkedIndex(value, sequence, index *sourceValue) ir.Binding {
 }
 
 func (l *lowerer) value(value *sourceValue) ir.Expr {
+	value = l.collectionValue(value)
 	if value.Kind == functionValue {
 		return ir.FunctionRef(l.symbol(value.Target))
 	}
@@ -706,6 +727,13 @@ func (l *lowerer) value(value *sourceValue) ir.Expr {
 		return ir.Ref(binder)
 	}
 	panic("missing binding for checked SSA value: " + value.Name)
+}
+
+func (l *lowerer) collectionValue(value *sourceValue) *sourceValue {
+	if l.ownedCollections && value.CollectionRoot != nil {
+		return value.CollectionRoot
+	}
+	return value
 }
 
 func (l *lowerer) binary(expr *sourceValue) ir.Binary {
@@ -1093,6 +1121,9 @@ func (l *lowerer) lowerBoundedControl(predecessor *sourceBlock) ir.Body {
 	spec := loop.Structured
 	header := spec.Iteration.Header
 	entryState := func(phi *sourceValue) ir.Expr {
+		if slices.Contains(spec.Owned, phi) {
+			return l.value(phi)
+		}
 		return l.phiValue(phi, predecessor, l.value)
 	}
 	var bound ir.Expr
@@ -1107,9 +1138,10 @@ func (l *lowerer) lowerBoundedControl(predecessor *sourceBlock) ir.Body {
 	}
 	// The bound is exact for the header guard. A break or return finishes
 	// along its own SSA path before the helper spends the remaining fuel.
+	states := slices.Concat(spec.States, spec.Owned)
 	result := ir.BoundedControl{
-		Initial: packResults(spec.States, entryState), Fuel: fuel, Result: l.controlResult,
-		State:    l.freshBinder("state", l.loopStateType(spec.States)),
+		Initial: packResults(states, entryState), Fuel: fuel, Result: l.controlResult,
+		State:    l.freshBinder("state", l.loopStateType(states)),
 		Function: l.freshBinder("loop", ir.Nat),
 	}
 	incoming := l.state
@@ -1117,7 +1149,7 @@ func (l *lowerer) lowerBoundedControl(predecessor *sourceBlock) ir.Body {
 	l.canPanic = false
 	instructions := header.Instructions[len(spec.States):]
 	lowerPath := func(successor *sourceBlock) ir.Body {
-		bindings := l.unpackLoopState(spec.States, result.State)
+		bindings := l.unpackLoopState(states, result.State)
 		body := l.lowerInstructions(header, nil, instructions, successor)
 		body.Bindings = append(bindings, body.Bindings...)
 		l.state = restoreBindings(incoming, l.state)

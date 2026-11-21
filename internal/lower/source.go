@@ -148,9 +148,11 @@ const (
 	functionValue
 	constantValue
 	closureValue
+	makeSlice
 )
 
 type sourceValue struct {
+	CollectionRoot                                              *sourceValue
 	ID                                                          int64
 	Kind                                                        valueKind
 	Name, Text, Field                                           string
@@ -223,6 +225,7 @@ type sourceLoop struct {
 	Exit            *sourceBlock
 	States, Initial []*sourceValue
 	Next            []*sourceBackEdge
+	Owned           []*sourceValue
 }
 type sourceBackEdge struct {
 	Block  *sourceBlock

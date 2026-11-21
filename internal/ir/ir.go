@@ -354,7 +354,22 @@ type ArraySet struct {
 
 type CollectionFold struct{ Sequence, Excluded Expr }
 
-type SliceAppend struct{ Slice, Element Expr }
+type SliceAppend struct {
+	Slice, Element            Expr
+	WithoutCapacity, Nullable bool
+}
+
+type MakeSlice struct {
+	Length, Capacity, Zero   Expr
+	LengthType, CapacityType Type
+	Nullable, TracksCapacity bool
+}
+
+type SliceSet struct {
+	Slice, Index, Value      Expr
+	IndexType                Type
+	Nullable, TracksCapacity bool
+}
 
 type SliceCapacity struct{ Slice Expr }
 
@@ -436,6 +451,8 @@ func (ArraySet) expr()           {}
 func (CollectionFold) expr()     {}
 func (NatZero) expr()            {}
 func (SliceAppend) expr()        {}
+func (MakeSlice) expr()          {}
+func (SliceSet) expr()           {}
 func (SliceCapacity) expr()      {}
 func (StringLiteral) expr()      {}
 func (CheckedStringSlice) expr() {}

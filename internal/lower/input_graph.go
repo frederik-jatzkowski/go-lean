@@ -309,6 +309,7 @@ const (
 	fieldValueHasCell
 	fieldValueMutableCell
 	fieldValueOperands
+	fieldValueCollectionRoot
 	fieldValueIndexInBounds
 )
 
@@ -348,6 +349,7 @@ func valueFields(f sourceFields, value *sourceValue) {
 	booleanField(f, fieldValueHasCell, &value.HasCell)
 	booleanField(f, fieldValueMutableCell, &value.MutableCell)
 	referenceListField(f, fieldValueOperands, &value.Operands, operandFields)
+	referenceField(f, fieldValueCollectionRoot, &value.CollectionRoot, valueFields)
 	booleanField(f, fieldValueIndexInBounds, &value.IndexInBounds)
 }
 
@@ -525,6 +527,7 @@ const (
 	fieldLoopStates
 	fieldLoopInitial
 	fieldLoopNext
+	fieldLoopOwned
 )
 
 func loopFields(f sourceFields, value *sourceLoop) {
@@ -533,6 +536,7 @@ func loopFields(f sourceFields, value *sourceLoop) {
 	referenceListField(f, fieldLoopStates, &value.States, valueFields)
 	referenceListField(f, fieldLoopInitial, &value.Initial, valueFields)
 	referenceListField(f, fieldLoopNext, &value.Next, backEdgeFields)
+	referenceListField(f, fieldLoopOwned, &value.Owned, valueFields)
 }
 
 const (

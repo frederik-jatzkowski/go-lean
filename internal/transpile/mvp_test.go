@@ -87,18 +87,18 @@ example : summarize (some ([invalidByte, emptyByte, invalidByte, invalidByte], 7
 
 func TestCollectionFoldRejectsUnownedOrLargerAppends(t *testing.T) {
 	for _, test := range []struct {
-		name, old, replacement, extra string
+		name, old, replacement, extra, want string
 	}{
-		{"escape", "counts[key]++", "counts[key]++; saved = counts", "var saved map[string]int"},
-		{"caller write", "counts[key]++", "counts[key]++; keys[0] = key", ""},
-		{"multiple appended values", "append(out, key)", "append(out, []string{0: key, 1: \"\"}...)", ""},
+		{"escape", "counts[key]++", "counts[key]++; saved = counts", "var saved map[string]int", "cannot write collection after publication"},
+		{"caller write", "counts[key]++", "counts[key]++; keys[0] = key", "", "slice elements are read-only"},
+		{"multiple appended values", "append(out, key)", "append(out, []string{0: key, 1: \"\"}...)", "", "local array address must not escape"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			dir := newModule(t)
 			source := strings.Replace(collectionSource, test.old, test.replacement, 1)
 			writeFile(t, filepath.Join(dir, "input.go"), "package sample\n//golean:export\n"+source+test.extra+"\n")
-			if _, err := transpile.Generate(dir); err == nil || !strings.Contains(err.Error(), "slice results require") {
-				t.Fatalf("expected rejection by the slice ownership checker, got %v", err)
+			if _, err := transpile.Generate(dir); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("expected %q, got %v", test.want, err)
 			}
 		})
 	}

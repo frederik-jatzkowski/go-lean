@@ -484,8 +484,35 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 	case ir.NatZero:
 		return "0"
 	case ir.SliceAppend:
+		if expr.WithoutCapacity {
+			slice, element := r.renderExpr(expr.Slice), r.renderExpr(expr.Element)
+			if expr.Nullable {
+				return fmt.Sprintf("(Option.map (fun s => s ++ [%s]) %s)", element, slice)
+			}
+			return fmt.Sprintf("(%s ++ [%s])", slice, element)
+		}
 		return fmt.Sprintf("(Option.map (fun slice => (slice.1 ++ [%s], slice.2)) %s)",
 			r.renderExpr(expr.Element), r.renderExpr(expr.Slice))
+	case ir.MakeSlice:
+		length := r.integerAsInt(expr.Length, expr.LengthType)
+		capacity := r.integerAsInt(expr.Capacity, expr.CapacityType)
+		value := "(List.replicate length.toNat " + r.renderExpr(expr.Zero) + ")"
+		if expr.TracksCapacity {
+			value = "(some (" + value + ", capacity.toNat))"
+		} else if expr.Nullable {
+			value = "(some " + value + ")"
+		}
+		maxInt := uint64(1)<<(r.wordBits-1) - 1
+		return fmt.Sprintf("(let length := %s; let capacity := %s; if 0 ≤ length ∧ length ≤ capacity ∧ capacity ≤ %d then some %s else none)", length, capacity, maxInt, value)
+	case ir.SliceSet:
+		sequence, index, value := r.renderExpr(expr.Slice), r.indexNat(expr.Index, expr.IndexType), r.renderExpr(expr.Value)
+		if expr.TracksCapacity {
+			return fmt.Sprintf("(Option.map (fun s => (s.1.set %s %s, s.2)) %s)", index, value, sequence)
+		}
+		if expr.Nullable {
+			return fmt.Sprintf("(Option.map (fun s => s.set %s %s) %s)", index, value, sequence)
+		}
+		return fmt.Sprintf("((%s).set %s %s)", sequence, index, value)
 	case ir.SliceCapacity:
 		return fmt.Sprintf("(%s.ofNat ((%s).getD ([], 0)).2)", r.leanType(ir.IntWord), r.renderExpr(expr.Slice))
 	case ir.StringLiteral:

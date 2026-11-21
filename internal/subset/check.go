@@ -25,7 +25,15 @@ type Checked struct {
 	builds    map[*ssa.Function]*SliceBuild
 	chains    map[*ssa.Function]*ChainRecursion
 	stateful  map[*ssa.Function]*StatefulMethod
+
+	owned               map[ssa.Value]ssa.Value
+	collectionAppends   map[*ssa.Call]ssa.Value
+	collectionPackaging map[ssa.Instruction]bool
 }
+
+func (c Checked) CollectionRoot(value ssa.Value) ssa.Value       { return c.owned[value] }
+func (c Checked) CollectionAppend(call *ssa.Call) ssa.Value      { return c.collectionAppends[call] }
+func (c Checked) IsCollectionPackaging(ins ssa.Instruction) bool { return c.collectionPackaging[ins] }
 
 func (c Checked) Root() *ssa.Package         { return c.root }
 func (c Checked) Functions() []*ssa.Function { return c.functions }
@@ -67,8 +75,11 @@ func Check(program gosource.Program) (Checked, error) {
 		ranges:            make(map[*ssa.Function]*RangeFold),
 		builds:            make(map[*ssa.Function]*SliceBuild),
 		chains:            make(map[*ssa.Function]*ChainRecursion),
-		freshMaps:         make(map[*ssa.MakeMap]bool),
 		stateful:          make(map[*ssa.Function]*StatefulMethod),
+
+		owned:               make(map[ssa.Value]ssa.Value),
+		collectionAppends:   make(map[*ssa.Call]ssa.Value),
+		collectionPackaging: make(map[ssa.Instruction]bool),
 	}
 	for _, fn := range program.Roots {
 		if !program.Directives[fn].Constructor && writesReceiver(fn, make(map[*ssa.Function]bool)) {
@@ -79,6 +90,31 @@ func Check(program gosource.Program) (Checked, error) {
 		}
 		if err := c.function(fn); err != nil {
 			return Checked{}, err
+		}
+	}
+	capacity := make(map[ir.Type]bool)
+	for _, fn := range c.ordered {
+		if fold := c.ranges[fn]; fold != nil && fold.AppendTo != nil {
+			capacity[Type(fold.AppendTo.Type())] = true
+		}
+		for _, block := range fn.Blocks {
+			for _, ins := range block.Instrs {
+				if call, ok := ins.(*ssa.Call); ok && IsSliceCapacity(call) {
+					capacity[Type(call.Call.Args[0].Type())] = true
+				}
+			}
+		}
+	}
+	for _, fn := range c.ordered {
+		for _, block := range fn.Blocks {
+			for _, ins := range block.Instrs {
+				if call, ok := ins.(*ssa.Call); ok && c.collectionAppends[call] != nil {
+					typ := Type(call.Type())
+					if capacity[typ] || typ.SliceElem() == ir.Bytes {
+						return Checked{}, diagnostic(fn, call.Pos(), "append with observable capacity requires a statically sized append fold")
+					}
+				}
+			}
 		}
 	}
 	if len(c.stateful) != 0 {
@@ -103,7 +139,8 @@ func Check(program gosource.Program) (Checked, error) {
 	}
 	return Checked{
 		contracts: c.contracts, root: program.Package, functions: c.ordered, records: c.records, arrays: c.arrays, loops: c.loops,
-		ranges: c.ranges, builds: c.builds, chains: c.chains, stateful: c.stateful,
+		ranges: c.ranges, builds: c.builds, chains: c.chains, stateful: c.stateful, owned: c.owned,
+		collectionAppends: c.collectionAppends, collectionPackaging: c.collectionPackaging,
 	}, nil
 }
 
@@ -122,8 +159,11 @@ type checker struct {
 	ranges            map[*ssa.Function]*RangeFold
 	builds            map[*ssa.Function]*SliceBuild
 	chains            map[*ssa.Function]*ChainRecursion
-	freshMaps         map[*ssa.MakeMap]bool
 	stateful          map[*ssa.Function]*StatefulMethod
+
+	owned               map[ssa.Value]ssa.Value
+	collectionAppends   map[*ssa.Call]ssa.Value
+	collectionPackaging map[ssa.Instruction]bool
 }
 
 func (c *checker) function(fn *ssa.Function) error {
@@ -228,6 +268,31 @@ func (c *checker) function(fn *ssa.Function) error {
 		}
 	}
 	c.visiting[fn] = true
+	ownership, err := analyzeCollections(fn)
+	if err != nil {
+		return err
+	}
+	for handle, root := range ownership.roots {
+		c.owned[handle] = root
+		if slice, ok := root.(*ssa.Slice); ok {
+			c.collectionPackaging[slice.X.(*ssa.Alloc)] = true
+		}
+	}
+	fold := collection
+	for _, block := range fn.Blocks {
+		for index, ins := range block.Instrs {
+			call, ok := ins.(*ssa.Call)
+			if !ok || c.owned[call] == nil || fold != nil && (fold.Excluded != nil || fold.Appends[call] != nil) {
+				continue
+			}
+			if element, packaging := singleAppendArgument(call, index); element != nil {
+				c.collectionAppends[call] = element
+				for _, temp := range packaging {
+					c.collectionPackaging[temp] = true
+				}
+			}
+		}
+	}
 	if collection != nil {
 		if collection.AppendTo != nil {
 			if err := c.checkAppendFold(fn, collection); err != nil {
@@ -301,23 +366,28 @@ func (c *checker) checkResultOwnership(fn *ssa.Function, destination *ssa.MakeSl
 	for index := 0; index < results.Len(); index++ {
 		result := Type(results.At(index).Type())
 		if key, _ := result.MapShape(); key != "" {
-			fresh := freshMapResult(fn, index)
-			if fresh != nil {
-				c.freshMaps[fresh] = true
+			if c.returnsOwnedCollection(fn, index) {
 				continue
 			}
 			if results.Len() == 1 || !returnsStaticResult(fn, index, nil) {
 				return diagnostic(fn, fn.Pos(), "map results require a fresh local allocation with local uses before return")
 			}
 		}
-		if result.SliceElem() != "" && !returnsStaticResult(fn, index, destination) {
+		if result.SliceElem() != "" && !c.returnsOwnedCollection(fn, index) && !returnsStaticResult(fn, index, destination) {
 			return diagnostic(fn, fn.Pos(), "slice results require a validated fresh construction")
 		}
 	}
 	for _, block := range fn.Blocks {
 		if ret, ok := block.Instrs[len(block.Instrs)-1].(*ssa.Return); ok {
 			seen := make(map[callResultSlot]bool)
+			owned := make(map[ssa.Value]bool)
 			for _, value := range ret.Results {
+				if root := c.owned[value]; root != nil {
+					if owned[root] {
+						return diagnostic(fn, ret.Pos(), "aggregate results must have distinct fresh sources")
+					}
+					owned[root] = true
+				}
 				typ := Type(value.Type())
 				key, _ := typ.MapShape()
 				if source, ok := staticResultSlot(value); ok && (typ.SliceElem() != "" || key != "") {
@@ -330,6 +400,15 @@ func (c *checker) checkResultOwnership(fn *ssa.Function, destination *ssa.MakeSl
 		}
 	}
 	return nil
+}
+
+func (c *checker) returnsOwnedCollection(fn *ssa.Function, index int) bool {
+	for _, block := range fn.Blocks {
+		if ret, ok := block.Instrs[len(block.Instrs)-1].(*ssa.Return); ok && c.owned[ret.Results[index]] == nil {
+			return false
+		}
+	}
+	return true
 }
 
 // Static callees are validated transitively and subject to the same ownership rules.
@@ -441,6 +520,9 @@ func checkAcyclic(fn *ssa.Function) error {
 }
 
 func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
+	if c.collectionPackaging[ins] {
+		return nil
+	}
 	switch ins := ins.(type) {
 	case *ssa.BinOp:
 		op, supported := Binary(ins.Op)
@@ -493,6 +575,9 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		}
 		return diagnostic(fn, ins.Pos(), "unsupported type change from %s to %s", ins.X.Type(), ins.Type())
 	case *ssa.Call:
+		if c.collectionAppends[ins] != nil {
+			return nil
+		}
 		if c.directives[fn].Constructor {
 			return diagnostic(fn, ins.Pos(), "calls are unsupported in verified constructors")
 		}
@@ -582,6 +667,9 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		}
 		return diagnostic(fn, ins.Pos(), "index requires a supported array value and integer index")
 	case *ssa.Slice:
+		if c.owned[ins] != nil {
+			return nil
+		}
 		if IsEmptySliceLiteral(ins) || IsStringSlice(ins) {
 			return nil
 		}
@@ -603,13 +691,18 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 			return nil
 		}
 		return diagnostic(fn, ins.Pos(), "only static call or comma-ok map lookup results may be extracted")
+	case *ssa.MakeSlice:
+		if c.owned[ins] != nil && supportedIndex(ins.Len) && supportedIndex(ins.Cap) {
+			return nil
+		}
+		return diagnostic(fn, ins.Pos(), "slice allocation requires supported length and capacity")
 	case *ssa.MakeMap:
-		if c.freshMaps[ins] {
+		if c.owned[ins] != nil {
 			return nil
 		}
 		return diagnostic(fn, ins.Pos(), "map allocation requires a validated fresh map result")
 	case *ssa.MapUpdate:
-		if fresh, ok := ins.Map.(*ssa.MakeMap); ok && c.freshMaps[fresh] {
+		if fresh := c.owned[ins.Map]; fresh != nil {
 			key, value := Type(fresh.Type()).MapShape()
 			if hasType(ins.Key, key) && hasType(ins.Value, value) {
 				return nil
@@ -731,7 +824,8 @@ func supportedValue(value ssa.Value) bool {
 	}
 	switch value := value.(type) {
 	case *ssa.Slice:
-		return IsEmptySliceLiteral(value) || IsStringSlice(value)
+		_, fixed := FixedSliceAllocation(value)
+		return fixed || IsEmptySliceLiteral(value) || IsStringSlice(value)
 	case *ssa.MakeInterface:
 		return ConcreteErrorType(value) != ""
 	case *ssa.Const:

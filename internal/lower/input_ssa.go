@@ -147,7 +147,7 @@ func (b *ssaInputBuilder) loop(loop *subset.LoopState) *sourceLoop {
 		return nil
 	}
 	result := &sourceLoop{Iteration: b.iteration(loop.Iteration), Exit: b.block(loop.Exit), Initial: b.valuesOf(loop.Initial),
-		States: mapped(loop.States, func(p *ssa.Phi) *sourceValue { return b.value(p) })}
+		States: mapped(loop.States, func(p *ssa.Phi) *sourceValue { return b.value(p) }), Owned: b.valuesOf(loop.Owned)}
 	blocks := make([]*ssa.BasicBlock, 0, len(loop.Next))
 	for block := range loop.Next {
 		blocks = append(blocks, block)
@@ -324,6 +324,9 @@ func (b *ssaInputBuilder) instruction(ins ssa.Instruction) *sourceValue {
 	}
 	v := &sourceValue{}
 	b.values[ins] = v
+	if b.checked.IsCollectionPackaging(ins) {
+		return v
+	}
 	if _, isPhi := ins.(*ssa.Phi); !isPhi {
 		var operands [8]*ssa.Value
 		for _, operand := range ins.Operands(operands[:0]) {
@@ -336,6 +339,7 @@ func (b *ssaInputBuilder) instruction(ins ssa.Instruction) *sourceValue {
 	}
 	if val, ok := ins.(ssa.Value); ok {
 		b.fillValue(v, val)
+		v.CollectionRoot = b.value(b.checked.CollectionRoot(val))
 	}
 	switch i := ins.(type) {
 	case *ssa.BinOp:
@@ -360,11 +364,20 @@ func (b *ssaInputBuilder) instruction(ins ssa.Instruction) *sourceValue {
 		v.IndexInBounds = subset.ArrayIndexInBounds(i.X, i.Index, i)
 	case *ssa.Slice:
 		v.Kind = emptySliceValue
-		if subset.IsStringSlice(i) {
+		if capacity, ok := subset.FixedSliceAllocation(i); ok && capacity > 0 && v.CollectionRoot != nil {
+			bound := ssa.NewConst(constant.MakeInt64(capacity), types.Typ[types.Int])
+			length := i.High
+			if length == nil {
+				length = bound
+			}
+			v.Kind, v.X, v.Y = makeSlice, b.value(length), b.value(bound)
+		} else if subset.IsStringSlice(i) {
 			v.Kind, v.X, v.Y, v.IndexValue = stringSliceValue, b.value(i.X), b.value(i.Low), b.value(i.High)
 		}
 	case *ssa.MakeInterface:
 		v.Kind, v.Text = concreteErrorValue, subset.ConcreteErrorType(i)
+	case *ssa.MakeSlice:
+		v.Kind, v.X, v.Y = makeSlice, b.value(i.Len), b.value(i.Cap)
 	case *ssa.MakeMap:
 		v.Kind = makeMap
 	case *ssa.MapUpdate:
@@ -374,6 +387,10 @@ func (b *ssaInputBuilder) instruction(ins ssa.Instruction) *sourceValue {
 	case *ssa.Extract:
 		v.Kind, v.X, v.OperandIndex = extractValue, b.value(i.Tuple), i.Index
 	case *ssa.Call:
+		if element := b.checked.CollectionAppend(i); element != nil {
+			v.Kind, v.X, v.Y = appendValue, b.value(i.Call.Args[0]), b.value(element)
+			break
+		}
 		if fold := b.checked.RangeFold(i.Parent()); fold != nil {
 			if element := fold.Appends[i]; element != nil {
 				v.Kind, v.X, v.Y = appendValue, b.value(i.Call.Args[0]), b.value(element)

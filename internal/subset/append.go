@@ -90,62 +90,18 @@ func matchAppendFold(fn *ssa.Function, blocks structure.LoopRegion, iter *rangeI
 			if !ok || !builtinNamed(call, "append") {
 				continue
 			}
-			if index < 4 {
+			element, packaging := singleAppendArgument(call, index)
+			if element == nil || call.Call.Args[0] != output {
 				return nil, nil, false
 			}
-			steps := block.Instrs[index-4 : index+1]
-			store, ok := steps[2].(*ssa.Store)
-			if !ok || !supportedValue(store.Val) || matchSingleAppend(steps, output, store.Val) != call {
-				return nil, nil, false
+			for _, temp := range packaging {
+				skip[temp] = true
 			}
-			// Each temporary is used exclusively to package this append argument.
-			for i, want := range []int{2, 1, 0, 1} {
-				if value, ok := steps[i].(ssa.Value); ok && len(*value.Referrers()) != want {
-					return nil, nil, false
-				}
-				skip[steps[i]] = true
-			}
-			appends[call] = store.Val
+			appends[call] = element
 		}
 	}
 	if len(appends) == 0 || !validateAppendPaths(blocks, output, appends, merges) {
 		return nil, nil, false
-	}
-	// No calls, stores, or other observations may use the owned slice. Phi
-	// edges are checked against the actual slice state separately.
-	ownedUses := func(value ssa.Value) bool {
-		for _, use := range *value.Referrers() {
-			switch use := use.(type) {
-			case *ssa.Phi:
-				if use != output && !merges[use] {
-					return false
-				}
-			case *ssa.Call:
-				if value != output || appends[use] == nil || use.Call.Args[0] != value {
-					return false
-				}
-			case *ssa.Return:
-				if use != ret || value != output || slices.Contains(ret.Results[slices.Index(ret.Results, value)+1:], value) {
-					return false
-				}
-			default:
-				return false
-			}
-		}
-		return true
-	}
-	if !ownedUses(output) {
-		return nil, nil, false
-	}
-	for call := range appends {
-		if !ownedUses(call) {
-			return nil, nil, false
-		}
-	}
-	for phi := range merges {
-		if !ownedUses(phi) {
-			return nil, nil, false
-		}
 	}
 	return dst, appends, true
 }
@@ -198,6 +154,24 @@ func validateAppendPaths(blocks structure.LoopRegion, output *ssa.Phi, appends m
 func builtinNamed(call *ssa.Call, name string) bool {
 	builtin, ok := call.Call.Value.(*ssa.Builtin)
 	return ok && builtin.Name() == name
+}
+
+// singleAppendArgument recognizes the compiler-owned variadic argument buffer.
+func singleAppendArgument(call *ssa.Call, index int) (ssa.Value, []ssa.Instruction) {
+	if !builtinNamed(call, "append") || index < 4 || len(call.Call.Args) != 2 {
+		return nil, nil
+	}
+	steps := call.Block().Instrs[index-4 : index+1]
+	store, ok := steps[2].(*ssa.Store)
+	if !ok || !supportedValue(store.Val) || matchSingleAppend(steps, call.Call.Args[0], store.Val) != call {
+		return nil, nil
+	}
+	for i, want := range []int{2, 1, 0, 1} {
+		if value, ok := steps[i].(ssa.Value); ok && len(*value.Referrers()) != want {
+			return nil, nil
+		}
+	}
+	return store.Val, steps[:4]
 }
 
 func (c *checker) checkAppendFold(fn *ssa.Function, fold *RangeFold) error {

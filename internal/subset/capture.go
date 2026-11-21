@@ -50,6 +50,9 @@ func (c *checker) checkLocalMemory(fn *ssa.Function) error {
 	}
 	for _, block := range fn.Blocks {
 		for _, ins := range block.Instrs {
+			if c.collectionPackaging[ins] {
+				continue
+			}
 			if cell, ok := ins.(*ssa.Alloc); ok {
 				if typ := arrayValueType(cell); typ != "" {
 					initial := arrayInitializer(cell, typ)
@@ -103,6 +106,9 @@ func (c *checker) checkLocalMemory(fn *ssa.Function) error {
 	}
 	for _, block := range fn.Blocks {
 		for _, ins := range block.Instrs {
+			if c.collectionPackaging[ins] {
+				continue
+			}
 			switch ins := ins.(type) {
 			case *ssa.IndexAddr:
 				for _, use := range *ins.Referrers() {
@@ -116,6 +122,9 @@ func (c *checker) checkLocalMemory(fn *ssa.Function) error {
 				}
 			case *ssa.Store:
 				if index, ok := ins.Addr.(*ssa.IndexAddr); ok {
+					if c.owned[index.X] != nil && hasType(ins.Val, Type(index.X.Type()).SliceElem()) {
+						continue
+					}
 					if c.isLocalArrayIndex(index) && hasType(ins.Val, Type(index.Type().Underlying().(*types.Pointer).Elem())) {
 						continue
 					}

@@ -352,6 +352,7 @@ type LoopState struct {
 	States    []*ssa.Phi
 	Initial   []ssa.Value
 	Next      map[*ssa.BasicBlock][]ssa.Value
+	Owned     []ssa.Value
 }
 
 func matchStructuredFold(fn *ssa.Function) *RangeFold {
@@ -667,7 +668,8 @@ func matchBoundedControlLoop(fn *ssa.Function) *CountedLoop {
 			return nil
 		}
 		typ := Type(phi.Type())
-		if !typ.IsInteger() && typ != ir.Bool {
+		key, _ := typ.MapShape()
+		if !typ.IsInteger() && typ != ir.Bool && typ.SliceElem() == "" && key == "" {
 			return nil
 		}
 		spec.States = append(spec.States, phi)
@@ -686,6 +688,12 @@ func (c *checker) checkBoundedControlLoop(fn *ssa.Function, loop *CountedLoop) e
 	header := loop.Structured.Iteration.Header
 	for _, block := range fn.Blocks {
 		for _, ins := range block.Instrs {
+			if c.collectionPackaging[ins] {
+				continue
+			}
+			if value, ok := ins.(ssa.Value); ok && c.owned[value] == value && block.Dominates(header) {
+				loop.Structured.Owned = append(loop.Structured.Owned, value)
+			}
 			if cell, ok := ins.(*ssa.Alloc); ok && c.records[cell].Mutable && header.Dominates(block) {
 				return diagnostic(fn, ins.Pos(), "mutable loop state must use modeled SSA values")
 			}
@@ -694,7 +702,7 @@ func (c *checker) checkBoundedControlLoop(fn *ssa.Function, loop *CountedLoop) e
 				if c.records[cell].Mutable {
 					return diagnostic(fn, ins.Pos(), "mutable loop state must use modeled SSA values")
 				}
-				if _, indexed := store.Addr.(*ssa.IndexAddr); indexed {
+				if address, indexed := store.Addr.(*ssa.IndexAddr); indexed && c.owned[address.X] == nil {
 					return diagnostic(fn, ins.Pos(), "indexed stores in bounded loops are unsupported")
 				}
 			}

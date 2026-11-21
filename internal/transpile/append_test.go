@@ -54,19 +54,18 @@ example : observe [11, 4] = some (100, 2, 2, true) := by decide
 
 func TestAppendFoldRejectsUnsupportedOwnership(t *testing.T) {
 	for _, test := range []struct {
-		name, old, replacement, extra string
+		name, old, replacement, extra, want string
 	}{
-		{"two appends", "append(out, value)", "append(append(out, value), value)", ""},
-		{"wrong capacity", "len(input)", "len(other)", ""},
-		{"caller write", "valid = false", "valid = false; input[0] = 3", ""},
-		{"escape", "out = append(out, value)", "out = append(out, value); saved = out", "var saved []uint16"},
+		{"observable growth", "len(input)", "len(other)", "//golean:export\nfunc capacity(input []uint8) int { out, _ := collect(input, nil); return cap(out) }", "append with observable capacity"},
+		{"caller write", "valid = false", "valid = false; input[0] = 3", "", "slice elements are read-only"},
+		{"escape", "out = append(out, value)", "out = append(out, value); saved = out", "var saved []uint16", "cannot write collection after publication"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			dir := newModule(t)
 			source := strings.Replace(appendFold, test.old, test.replacement, 1)
 			writeFile(t, filepath.Join(dir, "input.go"), "package sample\n//golean:export\n"+source+test.extra+"\n")
-			if _, err := transpile.Generate(dir); err == nil || !strings.Contains(err.Error(), "slice results require") {
-				t.Fatalf("expected rejection by the slice ownership checker, got %v", err)
+			if _, err := transpile.Generate(dir); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("expected %q, got %v", test.want, err)
 			}
 		})
 	}

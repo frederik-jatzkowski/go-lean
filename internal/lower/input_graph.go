@@ -527,7 +527,7 @@ const (
 	fieldLoopStates
 	fieldLoopInitial
 	fieldLoopNext
-	fieldLoopOwned
+	fieldLoopCarried
 )
 
 func loopFields(f sourceFields, value *sourceLoop) {
@@ -536,7 +536,7 @@ func loopFields(f sourceFields, value *sourceLoop) {
 	referenceListField(f, fieldLoopStates, &value.States, valueFields)
 	referenceListField(f, fieldLoopInitial, &value.Initial, valueFields)
 	referenceListField(f, fieldLoopNext, &value.Next, backEdgeFields)
-	referenceListField(f, fieldLoopOwned, &value.Owned, valueFields)
+	referenceListField(f, fieldLoopCarried, &value.Carried, valueFields)
 }
 
 const (

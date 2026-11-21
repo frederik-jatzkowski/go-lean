@@ -147,7 +147,7 @@ func (b *ssaInputBuilder) loop(loop *subset.LoopState) *sourceLoop {
 		return nil
 	}
 	result := &sourceLoop{Iteration: b.iteration(loop.Iteration), Exit: b.block(loop.Exit), Initial: b.valuesOf(loop.Initial),
-		States: mapped(loop.States, func(p *ssa.Phi) *sourceValue { return b.value(p) }), Owned: b.valuesOf(loop.Owned)}
+		States: mapped(loop.States, func(p *ssa.Phi) *sourceValue { return b.value(p) }), Carried: b.valuesOf(loop.Carried)}
 	blocks := make([]*ssa.BasicBlock, 0, len(loop.Next))
 	for block := range loop.Next {
 		blocks = append(blocks, block)

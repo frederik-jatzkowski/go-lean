@@ -360,7 +360,7 @@ func (l *lowerer) body(block, predecessor *sourceBlock) ir.Body {
 		}
 		return ir.Body{Result: ir.AdvanceLoop{
 			Function: *l.controlNext,
-			State:    packResults(slices.Concat(backEdgeValues(l.control.Structured.Next, predecessor), l.control.Structured.Owned), l.value),
+			State:    packResults(slices.Concat(backEdgeValues(l.control.Structured.Next, predecessor), l.control.Structured.Carried), l.value),
 		}}
 	}
 	if l.iteration != nil && block == l.iteration.header {
@@ -1038,11 +1038,18 @@ func (l *lowerer) freshBinder(name string, typ ir.Type) ir.Binder {
 
 func (l *lowerer) loopStateType(states []*sourceValue) ir.Type {
 	last := len(states) - 1
-	typ := l.ordinaryType(states[last].Type)
+	typ := l.loopValueType(states[last])
 	for i := last - 1; i >= 0; i-- {
-		typ = ir.ProductType(l.ordinaryType(states[i].Type), typ)
+		typ = ir.ProductType(l.loopValueType(states[i]), typ)
 	}
 	return typ
+}
+
+func (l *lowerer) loopValueType(value *sourceValue) ir.Type {
+	if value.MutableCell {
+		return l.valueType(value.Type.Elem)
+	}
+	return l.ordinaryType(value.Type)
 }
 
 func (l *lowerer) unpackLoopState(states []*sourceValue, state ir.Binder) []ir.Binding {
@@ -1121,7 +1128,7 @@ func (l *lowerer) lowerBoundedControl(predecessor *sourceBlock) ir.Body {
 	spec := loop.Structured
 	header := spec.Iteration.Header
 	entryState := func(phi *sourceValue) ir.Expr {
-		if slices.Contains(spec.Owned, phi) {
+		if slices.Contains(spec.Carried, phi) {
 			return l.value(phi)
 		}
 		return l.phiValue(phi, predecessor, l.value)
@@ -1138,7 +1145,7 @@ func (l *lowerer) lowerBoundedControl(predecessor *sourceBlock) ir.Body {
 	}
 	// The bound is exact for the header guard. A break or return finishes
 	// along its own SSA path before the helper spends the remaining fuel.
-	states := slices.Concat(spec.States, spec.Owned)
+	states := slices.Concat(spec.States, spec.Carried)
 	result := ir.BoundedControl{
 		Initial: packResults(states, entryState), Fuel: fuel, Result: l.controlResult,
 		State:    l.freshBinder("state", l.loopStateType(states)),

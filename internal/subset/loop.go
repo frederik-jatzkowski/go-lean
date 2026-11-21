@@ -352,7 +352,7 @@ type LoopState struct {
 	States    []*ssa.Phi
 	Initial   []ssa.Value
 	Next      map[*ssa.BasicBlock][]ssa.Value
-	Owned     []ssa.Value
+	Carried   []ssa.Value // Mutable values that do not have loop-header phis.
 }
 
 func matchStructuredFold(fn *ssa.Function) *RangeFold {
@@ -686,24 +686,34 @@ func (c *checker) checkBoundedControlLoop(fn *ssa.Function, loop *CountedLoop) e
 		return err
 	}
 	header := loop.Structured.Iteration.Header
-	for _, block := range fn.Blocks {
+	arrays := make(map[*ssa.Alloc]bool)
+	for _, block := range fn.DomPreorder() {
 		for _, ins := range block.Instrs {
 			if c.collectionPackaging[ins] {
 				continue
 			}
 			if value, ok := ins.(ssa.Value); ok && c.owned[value] == value && block.Dominates(header) {
-				loop.Structured.Owned = append(loop.Structured.Owned, value)
+				loop.Structured.Carried = append(loop.Structured.Carried, value)
 			}
-			if cell, ok := ins.(*ssa.Alloc); ok && c.records[cell].Mutable && header.Dominates(block) {
-				return diagnostic(fn, ins.Pos(), "mutable loop state must use modeled SSA values")
+			if cell, ok := ins.(*ssa.Alloc); ok && c.records[cell].Mutable {
+				if header.Dominates(block) {
+					return diagnostic(fn, ins.Pos(), "mutable loop state must use modeled SSA values")
+				}
+				if arrayValueType(cell) != "" && block.Dominates(header) {
+					loop.Structured.Carried = append(loop.Structured.Carried, cell)
+					arrays[cell] = true
+				}
 			}
 			if store, ok := ins.(*ssa.Store); ok && header.Dominates(block) {
 				cell, _ := recordAddressBase(store.Addr).(*ssa.Alloc)
-				if c.records[cell].Mutable {
+				if c.records[cell].Mutable && !arrays[cell] {
 					return diagnostic(fn, ins.Pos(), "mutable loop state must use modeled SSA values")
 				}
-				if address, indexed := store.Addr.(*ssa.IndexAddr); indexed && c.owned[address.X] == nil {
-					return diagnostic(fn, ins.Pos(), "indexed stores in bounded loops are unsupported")
+				if address, indexed := store.Addr.(*ssa.IndexAddr); indexed {
+					array, _ := address.X.(*ssa.Alloc)
+					if !arrays[array] && c.owned[address.X] == nil {
+						return diagnostic(fn, ins.Pos(), "indexed stores in bounded loops are unsupported")
+					}
 				}
 			}
 			if err := c.instruction(fn, ins); err != nil {

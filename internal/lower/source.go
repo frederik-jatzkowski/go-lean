@@ -225,7 +225,7 @@ type sourceLoop struct {
 	Exit            *sourceBlock
 	States, Initial []*sourceValue
 	Next            []*sourceBackEdge
-	Owned           []*sourceValue
+	Carried         []*sourceValue
 }
 type sourceBackEdge struct {
 	Block  *sourceBlock

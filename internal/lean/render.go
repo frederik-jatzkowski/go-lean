@@ -534,6 +534,8 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 			bytes[i] = fmt.Sprintf("%d", expr[i])
 		}
 		return "(ByteArray.mk #[" + strings.Join(bytes, ", ") + "])"
+	case ir.BytesToList:
+		return fmt.Sprintf("(%s).data.toList", r.renderExpr(expr.Value))
 	case ir.Float32Literal:
 		return fmt.Sprintf("(Float32.ofBits 0x%08x)", uint32(expr))
 	case ir.Float64Literal:

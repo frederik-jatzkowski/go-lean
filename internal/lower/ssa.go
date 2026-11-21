@@ -577,8 +577,14 @@ func (l *lowerer) lowerInstructions(block, predecessor *sourceBlock, instruction
 			l.canPanic = l.canPanic || canPanic
 		case convertValue:
 			binder := l.bind(ins)
+			from := l.valueType(ins.X.Type)
+			input := l.value(ins.X)
+			var value ir.Expr = ir.Convert{Value: input, From: from, To: binder.Type}
+			if from == ir.Bytes {
+				value = l.freshSlice(ir.BytesToList{Value: input}, ins.Type.Model)
+			}
 			result.Bindings = append(result.Bindings, ir.Binding{
-				Binder: binder, Value: ir.Convert{Value: l.value(ins.X), From: l.valueType(ins.X.Type), To: binder.Type},
+				Binder: binder, Value: value,
 			})
 		case changeType:
 			result.Bindings = append(result.Bindings, ir.Binding{Binder: l.bind(ins), Value: l.value(ins.X)})

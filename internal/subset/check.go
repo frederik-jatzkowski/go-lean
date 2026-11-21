@@ -108,6 +108,10 @@ func Check(program gosource.Program) (Checked, error) {
 	for _, fn := range c.ordered {
 		for _, block := range fn.Blocks {
 			for _, ins := range block.Instrs {
+				// The conversion guarantees a minimum capacity, but its exact value is unspecified.
+				if conv, ok := ins.(*ssa.Convert); ok && stringToBytes(conv) && capacity[Type(conv.Type())] {
+					return Checked{}, diagnostic(fn, conv.Pos(), "string-to-byte conversion with observable slice capacity is unsupported")
+				}
 				if call, ok := ins.(*ssa.Call); ok && c.collectionAppends[call] != nil {
 					typ := Type(call.Type())
 					if capacity[typ] || typ.SliceElem() == ir.Bytes {
@@ -564,7 +568,7 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 		return diagnostic(fn, ins.Pos(), "unsupported unary operation %s on %s", ins.Op, ins.X.Type())
 	case *ssa.Convert:
 		from, to := Type(ins.X.Type()), Type(ins.Type())
-		if from.IsInteger() && to.IsInteger() && supportedValue(ins.X) {
+		if (from.IsInteger() && to.IsInteger() || stringToBytes(ins)) && supportedValue(ins.X) {
 			return nil
 		}
 		return diagnostic(fn, ins.Pos(), "unsupported conversion from %s to %s", ins.X.Type(), ins.Type())

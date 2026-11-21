@@ -22,6 +22,61 @@ const collectionSource = `func collect(keys []string) ([]string, map[string]int)
 }
 `
 
+func TestStringToByteSlice(t *testing.T) {
+	dir := newModule(t)
+	writeFile(t, filepath.Join(dir, "input.go"), `package sample
+
+func decodeDigits(digits []byte, base uint64) (uint64, bool) {
+	var value uint64
+	for _, b := range digits {
+		if b < '0' || uint64(b-'0') >= base {
+			return 0, false
+		}
+		value = value*base + uint64(b-'0')
+	}
+	return value, true
+}
+
+//golean:export
+func decodeToken(digits string, base uint64) (uint64, bool) {
+	return decodeDigits([]byte(digits), base)
+}
+
+//golean:export
+func copies(s string) ([]byte, []byte, bool) {
+	a, b := []byte(s), []byte(s)
+	if len(a) != 0 {
+		a[0] = 42
+	}
+	return a, b, a == nil
+}
+`)
+	outputs, err := transpile.Generate(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkGeneratedLean(t, dir, outputs[0].Path, outputs[0].Source, `
+open GoLean.«example.test/sample».input
+example : decodeToken (ByteArray.mk #[49, 50]) 10 = some (12, true) := by decide
+example : decodeToken (ByteArray.mk #[49, 255]) 10 = some (0, false) := by decide
+example : copies (ByteArray.mk #[]) = some (some [], some [], false) := by decide
+example : copies (ByteArray.mk #[255, 0, 128]) =
+    some (some [42, 0, 128], some [255, 0, 128], false) := by decide
+`)
+}
+
+func TestStringToByteSliceCapacityRejected(t *testing.T) {
+	dir := newModule(t)
+	writeFile(t, filepath.Join(dir, "input.go"), `package sample
+func capacity(b []byte) int { return cap(b) }
+//golean:export
+func convert(s string) int { return capacity([]byte(s)) }
+`)
+	if _, err := transpile.Generate(dir); err == nil || !strings.Contains(err.Error(), "string-to-byte conversion with observable slice capacity") {
+		t.Fatalf("expected a capacity diagnostic, got %v", err)
+	}
+}
+
 func TestMVPTranslations(t *testing.T) {
 	dir := newModule(t)
 	writeFile(t, filepath.Join(dir, "input.go"), `package sample

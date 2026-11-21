@@ -34,6 +34,10 @@ def «github.com/frederik-jatzkowski/go-lean/examples/provable/string_bytes».«
   let «v1_t0» : ByteArray := ((ByteArray.mk #[255, 0]) ++ «v0_s»)
   «v1_t0»
 
+def «github.com/frederik-jatzkowski/go-lean/examples/provable/string_bytes».«string_bytes».«ToBytes» («v0_s» : ByteArray) : (List UInt8) :=
+  let «v1_t0» : (List UInt8) := («v0_s»).data.toList
+  «v1_t0»
+
 namespace «github.com/frederik-jatzkowski/go-lean/examples/provable/string_bytes».«string_bytes»
 
 run_cmd declareGoLaw `Laws.«joinBytes» "Prop" "∀ (a b : ByteArray),\n  (Join a b).data.toList = a.data.toList ++ b.data.toList" "string_bytes.go:3"
@@ -51,6 +55,12 @@ end «github.com/frederik-jatzkowski/go-lean/examples/provable/string_bytes».«
 namespace «github.com/frederik-jatzkowski/go-lean/examples/provable/string_bytes».«string_bytes»
 
 run_cmd declareGoLaw `Laws.«preservesRawBytes» "Prop" "(AddRawPrefix (ByteArray.mk #[128])).data.toList = [255, 0, 128]" "string_bytes.go:12"
+
+end «github.com/frederik-jatzkowski/go-lean/examples/provable/string_bytes».«string_bytes»
+
+namespace «github.com/frederik-jatzkowski/go-lean/examples/provable/string_bytes».«string_bytes»
+
+run_cmd declareGoLaw `Laws.«toBytesPreservesContents» "Prop" "∀ (s : ByteArray),\n  (ToBytes s).length = s.size ∧ ToBytes s = s.data.toList" "string_bytes.go:15"
 
 end «github.com/frederik-jatzkowski/go-lean/examples/provable/string_bytes».«string_bytes»
 

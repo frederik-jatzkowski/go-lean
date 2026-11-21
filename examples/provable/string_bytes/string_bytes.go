@@ -11,3 +11,7 @@ func ByteLen(s string) int { return len(s) }
 
 //golean:verify preservesRawBytes : (AddRawPrefix (ByteArray.mk #[128])).data.toList = [255, 0, 128]
 func AddRawPrefix(s string) string { return "\xff\x00" + s }
+
+//golean:verify toBytesPreservesContents : ∀ (s : ByteArray),
+//golean:verify+   (ToBytes s).length = s.size ∧ ToBytes s = s.data.toList
+func ToBytes(s string) []byte { return []byte(s) }

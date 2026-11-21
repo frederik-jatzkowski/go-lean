@@ -22,4 +22,8 @@ theorem lenCountsRawBytes : Laws.lenCountsRawBytes := by
   unfold Laws.lenCountsRawBytes
   decide
 
+theorem toBytesPreservesContents : Laws.toBytesPreservesContents := by
+  intro s
+  exact ⟨rfl, rfl⟩
+
 end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/string_bytes».string_bytes.Proofs

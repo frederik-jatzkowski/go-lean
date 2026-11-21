@@ -287,6 +287,7 @@ type Ref Binder
 type Negate struct{ Value Expr }
 type Not struct{ Value Expr }
 type ByteLen struct{ Value Expr }
+type BytesToList struct{ Value Expr }
 type LoopFuel struct {
 	Start, Bound      Expr
 	Signed, ZeroStart bool
@@ -433,6 +434,7 @@ func (Ref) expr()                {}
 func (Negate) expr()             {}
 func (Not) expr()                {}
 func (ByteLen) expr()            {}
+func (BytesToList) expr()        {}
 func (LoopFuel) expr()           {}
 func (RecordLiteral) expr()      {}
 func (RecordField) expr()        {}

@@ -4,8 +4,13 @@ import (
 	"go/constant"
 	"slices"
 
+	"github.com/frederik-jatzkowski/go-lean/internal/ir"
 	"golang.org/x/tools/go/ssa"
 )
+
+func stringToBytes(conv *ssa.Convert) bool {
+	return Type(conv.X.Type()) == ir.Bytes && Type(conv.Type()).SliceElem() == ir.UInt8
+}
 
 // collectionOwnership identifies the allocation whose contents a handle sees.
 type collectionOwnership struct {
@@ -18,6 +23,10 @@ func analyzeCollections(fn *ssa.Function) (collectionOwnership, error) {
 	for _, block := range fn.Blocks {
 		for _, ins := range block.Instrs {
 			switch ins := ins.(type) {
+			case *ssa.Convert:
+				if stringToBytes(ins) {
+					sites = append(sites, ins)
+				}
 			case *ssa.MakeSlice:
 				if Type(ins.Type()).SliceElem() != "" {
 					sites = append(sites, ins)

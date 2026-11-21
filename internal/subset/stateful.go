@@ -6,6 +6,7 @@ import (
 	"go/types"
 
 	"github.com/frederik-jatzkowski/go-lean/internal/ir"
+	"github.com/frederik-jatzkowski/go-lean/internal/structure"
 	"golang.org/x/tools/go/ssa"
 )
 
@@ -92,6 +93,9 @@ func writesReceiver(fn *ssa.Function, seen map[*ssa.Function]bool) bool {
 }
 
 func (c *checker) checkStateful(fn *ssa.Function) error {
+	if loop := structure.SecondSourceLoop(fn); loop != nil {
+		return diagnostic(fn, loop.Pos(), "only one loop per function is supported; extract another loop into a checked helper")
+	}
 	if c.stateful[fn] != nil {
 		return nil
 	}

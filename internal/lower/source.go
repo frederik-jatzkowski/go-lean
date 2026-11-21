@@ -196,11 +196,13 @@ type sourceCounted struct {
 	Initial, State, Next, Start, Bound, Result *sourceValue
 	Steps, Before, After                       []*sourceValue
 	Structured                                 *sourceLoop
+	Control, RangeGuard                        bool
 }
 type sourceRange struct {
 	Initial, State, Next, Source, Element, Excluded, AppendTo *sourceValue
 	Steps                                                     []*sourceValue
 	Structured                                                *sourceLoop
+	Prelude                                                   *sourceBlock
 }
 type sourceBuild struct {
 	Destination, Copy, Source, Element, Value, Callback *sourceValue

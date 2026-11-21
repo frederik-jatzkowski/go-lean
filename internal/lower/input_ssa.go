@@ -98,14 +98,14 @@ func (b *ssaInputBuilder) fillFunction(fn *ssa.Function) {
 	if l := b.checked.CountedLoop(fn); l != nil {
 		f.Counted = &sourceCounted{Initial: b.value(l.Initial), Next: b.value(l.Next), Start: b.value(l.Start),
 			Bound: b.value(l.Bound), Result: b.value(l.Result), Steps: b.valuesOf(l.Steps), Before: b.valuesOf(l.Before),
-			After: b.valuesOf(l.After), Structured: b.loop(l.Structured)}
+			After: b.valuesOf(l.After), Structured: b.loop(l.Structured), Control: l.Control, RangeGuard: l.RangeGuard}
 		if l.State != nil {
 			f.Counted.State = b.value(l.State)
 		}
 	}
 	if l := b.checked.RangeFold(fn); l != nil {
 		f.Range = &sourceRange{Initial: b.value(l.Initial), Next: b.value(l.Next), Source: b.value(l.Source),
-			Steps: b.valuesOf(l.Steps), Structured: b.loop(l.Structured), Excluded: b.value(l.Excluded)}
+			Steps: b.valuesOf(l.Steps), Structured: b.loop(l.Structured), Excluded: b.value(l.Excluded), Prelude: b.block(l.Prelude)}
 		if l.AppendTo != nil {
 			f.Range.AppendTo = b.value(l.AppendTo)
 		}

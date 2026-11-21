@@ -3,6 +3,7 @@ package subset
 import (
 	"go/constant"
 	"go/token"
+	"slices"
 
 	"github.com/frederik-jatzkowski/go-lean/internal/ir"
 	"github.com/frederik-jatzkowski/go-lean/internal/structure"
@@ -23,10 +24,13 @@ type CountedLoop struct {
 	Before, After []ssa.Value
 	Result        ssa.Value
 	Structured    *LoopState
+	Control       bool
+	RangeGuard    bool
 }
 
 type RangeFold struct {
 	AccumulatorLoop
+	Prelude    *ssa.BasicBlock
 	Source     ssa.Value
 	Element    *ssa.UnOp
 	Excluded   ssa.Value
@@ -166,7 +170,7 @@ func matchRangeIteration(blocks structure.LoopRegion, phiCount int) *rangeIterat
 	}
 	source := length.Call.Args[0]
 	typ := Type(source.Type())
-	if typ.SliceElem() == "" || !invariant(source, typ) {
+	if typ.SliceElem() == "" || !loopInvariantSource(source, blocks.Entry) {
 		return nil
 	}
 	counter, ok := step.X.(*ssa.Phi)
@@ -224,7 +228,7 @@ func matchIndexedIteration(blocks structure.LoopRegion, phiCount int) *rangeIter
 		}
 	}
 	source := length.Call.Args[0]
-	if typ := Type(source.Type()); typ.SliceElem() == "" || !invariant(source, typ) {
+	if typ := Type(source.Type()); typ.SliceElem() == "" || !loopInvariantSource(source, blocks.Entry) {
 		return nil
 	}
 	addr, addrOK := body[0].(*ssa.IndexAddr)
@@ -233,6 +237,13 @@ func matchIndexedIteration(blocks structure.LoopRegion, phiCount int) *rangeIter
 		return nil
 	}
 	return &rangeIteration{Source: source, Index: counter, LatchStep: step, Element: elem, Counter: counter, Length: length}
+}
+
+func loopInvariantSource(source ssa.Value, entry *ssa.BasicBlock) bool {
+	if definition, ok := source.(ssa.Instruction); ok {
+		return definition.Block() == entry
+	}
+	return invariant(source, Type(source.Type()))
 }
 
 func pureInt64Steps(instructions []ssa.Instruction, skip ssa.Instruction, available map[ssa.Value]bool) ([]ssa.Value, bool) {
@@ -369,9 +380,36 @@ func matchStructuredFold(fn *ssa.Function) *RangeFold {
 		skip[iter.LatchStep] = true
 		omitted[iter.LatchStep] = true
 	}
-	destination, appends, owned := matchAppendFold(fn, blocks, iter, phis, skip)
-	if !owned {
-		return nil
+	var destination *ssa.MakeSlice
+	var appends map[*ssa.Call]ssa.Value
+	var prelude *ssa.BasicBlock
+	for _, ins := range blocks.Entry.Instrs[:len(blocks.Entry.Instrs)-1] {
+		if ins == iter.Length {
+			continue
+		}
+		if _, allocation := ins.(*ssa.MakeSlice); allocation {
+			var owned bool
+			destination, appends, owned = matchAppendFold(fn, blocks, iter, phis, skip)
+			if !owned {
+				return nil
+			}
+			prelude = nil
+			break
+		}
+		if !foldInstruction(ins) {
+			return nil
+		}
+		prelude = blocks.Entry
+	}
+	if prelude != nil {
+		skip[iter.Length] = true
+		for _, ins := range prelude.Instrs {
+			for _, operand := range ins.Operands(nil) {
+				if operand != nil && *operand == iter.Length {
+					return nil
+				}
+			}
+		}
 	}
 	for _, value := range appends {
 		if omitted[value] {
@@ -409,7 +447,7 @@ func matchStructuredFold(fn *ssa.Function) *RangeFold {
 			if skip[ins] {
 				continue
 			}
-			if _, ok := ins.(*ssa.Return); !ok && !iterationInstruction(ins) {
+			if _, ok := ins.(*ssa.Return); !ok && !foldInstruction(ins) {
 				return nil
 			}
 			for _, operand := range ins.Operands(nil) {
@@ -419,7 +457,16 @@ func matchStructuredFold(fn *ssa.Function) *RangeFold {
 			}
 		}
 	}
-	return &RangeFold{Source: iter.Source, Element: iter.Element, Structured: fold, AppendTo: destination, Appends: appends}
+	return &RangeFold{Source: iter.Source, Element: iter.Element, Prelude: prelude, Structured: fold, AppendTo: destination, Appends: appends}
+}
+
+func foldInstruction(ins ssa.Instruction) bool {
+	switch ins.(type) {
+	case *ssa.Alloc, *ssa.Store, *ssa.FieldAddr:
+		return true
+	default:
+		return iterationInstruction(ins)
+	}
 }
 
 func (c *checker) checkLoopState(fn *ssa.Function, spec *LoopState) error {
@@ -550,4 +597,111 @@ func matchStructuredCountedLoop(fn *ssa.Function) *CountedLoop {
 		}
 	}
 	return &CountedLoop{Start: start, Bound: bound, Before: before, Structured: spec}
+}
+
+// matchBoundedControlLoop keeps the original SSA paths, including the paths
+// from a break to a return. It extracts the trip count and the back-edge transfers.
+// A unit increment executed strictly below the bound cannot wrap.
+func matchBoundedControlLoop(fn *ssa.Function) *CountedLoop {
+	header, backs := structure.SingleLoop(fn)
+	if header == nil || len(header.Succs) != 2 || len(header.Instrs) < 3 {
+		return nil
+	}
+	guard, ok := header.Instrs[len(header.Instrs)-2].(*ssa.BinOp)
+	branch, branchOK := header.Instrs[len(header.Instrs)-1].(*ssa.If)
+	if !ok || !branchOK || branch.Cond != guard || guard.Op != token.LSS && guard.Op != token.GTR {
+		return nil
+	}
+	index, bound := guard.X, guard.Y
+	if guard.Op == token.GTR {
+		index, bound = bound, index
+	}
+	counter, plain := index.(*ssa.Phi)
+	var headerStep *ssa.BinOp
+	if !plain {
+		headerStep, ok = index.(*ssa.BinOp)
+		if !ok || headerStep.Block() != header || headerStep.Op != token.ADD || !intConstant(headerStep.Y, 1) {
+			return nil
+		}
+		counter, ok = headerStep.X.(*ssa.Phi)
+		if !ok {
+			return nil
+		}
+	}
+	if counter.Block() != header || !Type(counter.Type()).IsInteger() || !hasType(bound, Type(counter.Type())) {
+		return nil
+	}
+	boundInstruction, _ := bound.(ssa.Instruction)
+	if definition := boundInstruction; definition != nil && header.Dominates(definition.Block()) {
+		length, ok := definition.(*ssa.Call)
+		if !ok || length.Block() != header || !IsLength(length) || len(length.Call.Args) != 1 {
+			return nil
+		}
+		input, defined := length.Call.Args[0].(ssa.Instruction)
+		if defined && header.Dominates(input.Block()) || Type(length.Call.Args[0].Type()).SliceElem() == "" {
+			return nil
+		}
+	}
+	for _, edge := range backs {
+		step, ok := counter.Edges[edge].(*ssa.BinOp)
+		if !ok || step.Op != token.ADD || step.X != counter || !intConstant(step.Y, 1) ||
+			!plain && step != headerStep || plain && step.Block() == header {
+			return nil
+		}
+	}
+	if !plain {
+		for edge, start := range counter.Edges {
+			if !slices.Contains(backs, edge) && !intConstant(start, -1) {
+				return nil
+			}
+		}
+	}
+	spec := &LoopState{Exit: header.Succs[1], Next: make(map[*ssa.BasicBlock][]ssa.Value),
+		Iteration: &TraversalIteration{Entry: header.Succs[0], Header: header}}
+	for _, ins := range header.Instrs[:len(header.Instrs)-2] {
+		phi, ok := ins.(*ssa.Phi)
+		if !ok {
+			if ins == headerStep || ins == boundInstruction {
+				continue
+			}
+			return nil
+		}
+		typ := Type(phi.Type())
+		if !typ.IsInteger() && typ != ir.Bool {
+			return nil
+		}
+		spec.States = append(spec.States, phi)
+		for _, edge := range backs {
+			pred := header.Preds[edge]
+			spec.Next[pred] = append(spec.Next[pred], phi.Edges[edge])
+		}
+	}
+	return &CountedLoop{AccumulatorLoop: AccumulatorLoop{State: counter}, Bound: bound, Structured: spec, Control: true, RangeGuard: !plain}
+}
+
+func (c *checker) checkBoundedControlLoop(fn *ssa.Function, loop *CountedLoop) error {
+	if err := c.checkLocalMemory(fn); err != nil {
+		return err
+	}
+	header := loop.Structured.Iteration.Header
+	for _, block := range fn.Blocks {
+		for _, ins := range block.Instrs {
+			if cell, ok := ins.(*ssa.Alloc); ok && c.records[cell].Mutable && header.Dominates(block) {
+				return diagnostic(fn, ins.Pos(), "mutable loop state must use modeled SSA values")
+			}
+			if store, ok := ins.(*ssa.Store); ok && header.Dominates(block) {
+				cell, _ := recordAddressBase(store.Addr).(*ssa.Alloc)
+				if c.records[cell].Mutable {
+					return diagnostic(fn, ins.Pos(), "mutable loop state must use modeled SSA values")
+				}
+				if _, indexed := store.Addr.(*ssa.IndexAddr); indexed {
+					return diagnostic(fn, ins.Pos(), "indexed stores in bounded loops are unsupported")
+				}
+			}
+			if err := c.instruction(fn, ins); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

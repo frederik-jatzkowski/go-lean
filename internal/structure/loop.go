@@ -2,10 +2,107 @@
 package structure
 
 import (
+	"go/ast"
 	"slices"
 
 	"golang.org/x/tools/go/ssa"
 )
+
+// SecondSourceLoop returns the second loop in the function's own source body.
+func SecondSourceLoop(fn *ssa.Function) ast.Stmt {
+	syntax := fn.Syntax()
+	if syntax == nil {
+		return nil
+	}
+	var second ast.Stmt
+	sawLoop := false
+	ast.Inspect(syntax, func(node ast.Node) bool {
+		_, literal := node.(*ast.FuncLit)
+		if second != nil || literal && node != syntax {
+			return false
+		}
+		switch node.(type) {
+		case *ast.ForStmt, *ast.RangeStmt:
+			if sawLoop {
+				second = node.(ast.Stmt)
+			}
+			sawLoop = true
+		}
+		return true
+	})
+	return second
+}
+
+// SingleLoop finds one loop header and confirms that removing its back edges
+// leaves an acyclic graph, including the prelude and all exit paths.
+func SingleLoop(fn *ssa.Function) (header *ssa.BasicBlock, backs []int) {
+	for _, block := range fn.Blocks {
+		for _, succ := range block.Succs {
+			if !succ.Dominates(block) {
+				continue
+			}
+			if header != nil && header != succ {
+				return nil, nil
+			}
+			header = succ
+		}
+	}
+	if header == nil || header == fn.Blocks[0] {
+		return nil, nil
+	}
+	for i, pred := range header.Preds {
+		if header.Dominates(pred) {
+			backs = append(backs, i)
+		}
+	}
+	state := make(map[*ssa.BasicBlock]uint8)
+	var acyclic func(*ssa.BasicBlock) bool
+	acyclic = func(block *ssa.BasicBlock) bool {
+		switch state[block] {
+		case 1:
+			return false
+		case 2:
+			return true
+		}
+		state[block] = 1
+		for _, succ := range block.Succs {
+			if succ == header && header.Dominates(block) {
+				continue
+			}
+			if !acyclic(succ) {
+				return false
+			}
+		}
+		state[block] = 2
+		return true
+	}
+	if !acyclic(fn.Blocks[0]) {
+		return nil, nil
+	}
+	if len(header.Succs) == 2 {
+		seen := make(map[*ssa.BasicBlock]bool)
+		var reachesHeader func(*ssa.BasicBlock) bool
+		reachesHeader = func(block *ssa.BasicBlock) bool {
+			if block == header {
+				return true
+			}
+			if seen[block] {
+				return false
+			}
+			seen[block] = true
+			for _, succ := range block.Succs {
+				if reachesHeader(succ) {
+					return true
+				}
+			}
+			return false
+		}
+		if reachesHeader(header.Succs[1]) {
+			return nil, nil
+		}
+	}
+	return header, backs
+}
 
 // LoopRegion describes the control-flow edges of a single-entry loop.
 type LoopRegion struct {

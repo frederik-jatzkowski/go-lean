@@ -9,6 +9,7 @@ import (
 
 	"github.com/frederik-jatzkowski/go-lean/internal/gosource"
 	"github.com/frederik-jatzkowski/go-lean/internal/ir"
+	"github.com/frederik-jatzkowski/go-lean/internal/structure"
 	"golang.org/x/tools/go/ssa"
 )
 
@@ -137,6 +138,9 @@ func (c *checker) function(fn *ssa.Function) error {
 	}
 	if len(fn.Blocks) == 0 {
 		return diagnostic(fn, fn.Pos(), "Go body unavailable for %s", fn)
+	}
+	if loop := structure.SecondSourceLoop(fn); loop != nil {
+		return diagnostic(fn, loop.Pos(), "only one loop per function is supported; extract another loop into a checked helper")
 	}
 	sig := fn.Signature
 	constructor := c.directives[fn].Constructor
@@ -365,10 +369,32 @@ func (c *checker) checkBody(fn *ssa.Function) error {
 		return nil
 	}
 	if fold := matchStructuredFold(fn); fold != nil {
+		if err := c.checkLocalMemory(fn); err != nil {
+			return err
+		}
+		for _, block := range fn.Blocks {
+			for _, ins := range block.Instrs {
+				if cell, ok := ins.(*ssa.Alloc); ok && !fold.Structured.Iteration.Skip[ins] && c.records[cell].Mutable {
+					return diagnostic(fn, ins.Pos(), "loop local memory must be immutable")
+				}
+				if block == fold.Prelude && !fold.Structured.Iteration.Skip[ins] {
+					if err := c.instruction(fn, ins); err != nil {
+						return err
+					}
+				}
+			}
+		}
 		if err := c.checkLoopState(fn, fold.Structured); err != nil {
 			return err
 		}
 		c.ranges[fn] = fold
+		return nil
+	}
+	if loop := matchBoundedControlLoop(fn); loop != nil {
+		if err := c.checkBoundedControlLoop(fn, loop); err != nil {
+			return err
+		}
+		c.loops[fn] = loop
 		return nil
 	}
 	return c.checkOrdinaryBody(fn)

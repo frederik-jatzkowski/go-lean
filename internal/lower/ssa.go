@@ -64,12 +64,22 @@ func FromSSAWithAbstractCalls(input Input, sourceStem string, wordBits int64, ab
 			}
 		}
 		if loop := fn.Counted; loop != nil {
-			if loop.Structured != nil {
+			if loop.Control {
+				l.control = loop
+				l.controlResult = result.Result
+				result.Body = l.body(fn.Entry, nil)
+			} else if loop.Structured != nil {
 				l.lowerStructuredCountedLoop(&result, loop)
 			} else {
 				l.lowerCountedLoop(&result, loop)
 			}
 		} else if fold := fn.Range; fold != nil {
+			if fold.Prelude != nil {
+				iter := fold.Structured.Iteration
+				l.iteration = &iteration{header: iter.Header, skip: iter.Skip}
+				result.Body.Bindings = l.body(fold.Prelude, nil).Bindings
+				l.iteration = nil
+			}
 			if fold.Excluded != nil {
 				result.Body.Result = ir.Return{Value: ir.CollectionFold{Sequence: l.sliceList(fold.Source), Excluded: l.value(fold.Excluded)}}
 			} else if fold.Structured != nil {
@@ -296,6 +306,9 @@ type iteration struct {
 type lowerer struct {
 	abstract       map[ir.Symbol]bool
 	iteration      *iteration
+	control        *sourceCounted
+	controlResult  ir.Type
+	controlNext    *ir.Binder
 	root           string
 	input          Input
 	file           string
@@ -338,6 +351,15 @@ func (l *lowerer) bindAs(value *sourceValue, typ ir.Type) ir.Binder {
 }
 
 func (l *lowerer) body(block, predecessor *sourceBlock) ir.Body {
+	if l.control != nil && block == l.control.Structured.Iteration.Header {
+		if l.controlNext == nil {
+			return l.lowerBoundedControl(predecessor)
+		}
+		return ir.Body{Result: ir.AdvanceLoop{
+			Function: *l.controlNext,
+			State:    packResults(backEdgeValues(l.control.Structured.Next, predecessor), l.value),
+		}}
+	}
 	if l.iteration != nil && block == l.iteration.header {
 		value := l.iteration.stored
 		if l.iteration.backValues != nil {
@@ -349,8 +371,12 @@ func (l *lowerer) body(block, predecessor *sourceBlock) ir.Body {
 }
 
 func (l *lowerer) instructions(block, predecessor *sourceBlock, start int) ir.Body {
+	return l.lowerInstructions(block, predecessor, block.Instructions[start:], nil)
+}
+
+func (l *lowerer) lowerInstructions(block, predecessor *sourceBlock, instructions []*sourceValue, forcedSuccessor *sourceBlock) ir.Body {
 	var result ir.Body
-	for _, ins := range block.Instructions[start:] {
+	for _, ins := range instructions {
 		if l.iteration != nil && slices.Contains(l.iteration.skip, ins) {
 			if value := storedValue(l.iteration.stores, ins); value != nil {
 				l.iteration.stored = l.value(value)
@@ -572,6 +598,12 @@ func (l *lowerer) instructions(block, predecessor *sourceBlock, start int) ir.Bo
 				Binder: l.bindAs(ins.X, l.captureType(ins.X)), Value: l.value(ins.Value),
 			})
 		case ifValue:
+			if forcedSuccessor != nil {
+				next := l.body(forcedSuccessor, block)
+				result.Bindings = append(result.Bindings, next.Bindings...)
+				result.Result = next.Result
+				break
+			}
 			condition := l.value(ins.X)
 			incoming := l.state
 			var stored ir.Expr
@@ -957,9 +989,12 @@ func (l *lowerer) lowerStructuredFold(fold *sourceRange) ir.StructuredFold {
 	result.Final = l.freshBinder("final", typ)
 	l.iteration = &iteration{header: iter.Header, skip: iter.Skip, backValues: spec.Next}
 	parameterBindings := l.state
+	preludeCanPanic := l.canPanic
+	l.canPanic = false
 	result.Iteration = l.body(iter.Entry, iter.Header)
 	result.Iteration.Bindings = append(bindings, result.Iteration.Bindings...)
 	result.Effectful = l.canPanic
+	l.canPanic = preludeCanPanic || result.Effectful
 	l.iteration = nil
 	l.state = restoreBindings(parameterBindings, l.state)
 	result.Continuation = l.body(spec.Exit, iter.Header)
@@ -1051,4 +1086,48 @@ func backEdgeValues(edges []*sourceBackEdge, predecessor *sourceBlock) []*source
 		}
 	}
 	return nil
+}
+
+func (l *lowerer) lowerBoundedControl(predecessor *sourceBlock) ir.Body {
+	loop := l.control
+	spec := loop.Structured
+	header := spec.Iteration.Header
+	entryState := func(phi *sourceValue) ir.Expr {
+		return l.phiValue(phi, predecessor, l.value)
+	}
+	var bound ir.Expr
+	if slices.Contains(header.Instructions, loop.Bound) {
+		bound = ir.SliceLength{List: l.sliceList(loop.Bound.Call.Args[0])}
+	} else {
+		bound = l.value(loop.Bound)
+	}
+	fuel := ir.LoopFuel{Bound: bound, Signed: !loop.State.Type.Model.IsUnsigned(), ZeroStart: loop.RangeGuard}
+	if !loop.RangeGuard {
+		fuel.Start = entryState(loop.State)
+	}
+	// The bound is exact for the header guard. A break or return finishes
+	// along its own SSA path before the helper spends the remaining fuel.
+	result := ir.BoundedControl{
+		Initial: packResults(spec.States, entryState), Fuel: fuel, Result: l.controlResult,
+		State:    l.freshBinder("state", l.loopStateType(spec.States)),
+		Function: l.freshBinder("loop", ir.Nat),
+	}
+	incoming := l.state
+	preludePanic := l.canPanic
+	l.canPanic = false
+	instructions := header.Instructions[len(spec.States):]
+	lowerPath := func(successor *sourceBlock) ir.Body {
+		bindings := l.unpackLoopState(spec.States, result.State)
+		body := l.lowerInstructions(header, nil, instructions, successor)
+		body.Bindings = append(bindings, body.Bindings...)
+		l.state = restoreBindings(incoming, l.state)
+		return body
+	}
+	result.Done = lowerPath(spec.Exit)
+	l.controlNext = &result.Function
+	result.Step = lowerPath(spec.Iteration.Entry)
+	l.controlNext = nil
+	result.CanPanic = l.canPanic
+	l.canPanic = preludePanic || result.CanPanic
+	return ir.Body{Result: result}
 }

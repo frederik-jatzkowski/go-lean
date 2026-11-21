@@ -355,6 +355,27 @@ func (r renderer) renderBody(out *strings.Builder, body ir.Body, indent string, 
 		r.renderBody(out, result.Iteration, indent+"  ", result.Effectful)
 		fmt.Fprintf(out, "%s) %s %s\n", indent, r.renderExpr(result.Initial), r.renderExpr(result.Sequence))
 		r.renderBody(out, result.Continuation, indent, canPanic)
+	case ir.BoundedControl:
+		name := binderName(result.Function)
+		state, stateType := binderName(result.State), r.leanType(result.State.Type)
+		resultType := r.leanType(result.Result)
+		do := ""
+		if result.CanPanic {
+			resultType = "Option (" + resultType + ")"
+			do = " do"
+		}
+		fmt.Fprintf(out, "%slet rec %s : Nat → %s → %s\n", indent, name, stateType, resultType)
+		fmt.Fprintf(out, "%s  | 0, %s =>%s\n", indent, state, do)
+		r.renderBody(out, result.Done, indent+"    ", result.CanPanic)
+		fmt.Fprintf(out, "%s  | fuel + 1, %s =>%s\n", indent, state, do)
+		r.renderBody(out, result.Step, indent+"    ", result.CanPanic)
+		fmt.Fprint(out, indent)
+		if canPanic && !result.CanPanic {
+			fmt.Fprint(out, "return ")
+		}
+		fmt.Fprintf(out, "%s %s %s\n", name, r.renderExpr(result.Fuel), r.renderExpr(result.Initial))
+	case ir.AdvanceLoop:
+		fmt.Fprintf(out, "%s%s fuel %s\n", indent, binderName(result.Function), r.renderExpr(result.State))
 	case ir.ListBuild:
 		if result.Destination != nil {
 			operator, traversal := ":=", "List.map"

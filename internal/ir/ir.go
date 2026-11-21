@@ -221,6 +221,20 @@ type StructuredFold struct {
 	Effectful               bool
 }
 
+// BoundedControl is a local recursive loop whose exits return from its enclosing path.
+type BoundedControl struct {
+	Function, State Binder
+	Fuel, Initial   Expr
+	Done, Step      Body
+	Result          Type
+	CanPanic        bool
+}
+
+type AdvanceLoop struct {
+	Function Binder
+	State    Expr
+}
+
 type ListBuild struct {
 	Destination  *Binder
 	Continuation *Body
@@ -247,6 +261,8 @@ func (StructuredFold) result() {}
 func (ListFold) result()       {}
 func (ListBuild) result()      {}
 func (ListRecursion) result()  {}
+func (BoundedControl) result() {}
+func (AdvanceLoop) result()    {}
 
 type Expr interface{ expr() }
 

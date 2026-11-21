@@ -422,6 +422,8 @@ const (
 	fieldCountedBefore
 	fieldCountedAfter
 	fieldCountedStructured
+	fieldCountedControl
+	fieldCountedRangeGuard
 )
 
 func countedFields(f sourceFields, value *sourceCounted) {
@@ -435,6 +437,8 @@ func countedFields(f sourceFields, value *sourceCounted) {
 	referenceListField(f, fieldCountedBefore, &value.Before, valueFields)
 	referenceListField(f, fieldCountedAfter, &value.After, valueFields)
 	referenceField(f, fieldCountedStructured, &value.Structured, loopFields)
+	booleanField(f, fieldCountedControl, &value.Control)
+	booleanField(f, fieldCountedRangeGuard, &value.RangeGuard)
 }
 
 const (
@@ -447,6 +451,7 @@ const (
 	fieldRangeStructured
 	fieldRangeExcluded
 	fieldRangeAppendTo
+	fieldRangePrelude
 )
 
 func rangeFields(f sourceFields, value *sourceRange) {
@@ -459,6 +464,7 @@ func rangeFields(f sourceFields, value *sourceRange) {
 	referenceField(f, fieldRangeStructured, &value.Structured, loopFields)
 	referenceField(f, fieldRangeExcluded, &value.Excluded, valueFields)
 	referenceField(f, fieldRangeAppendTo, &value.AppendTo, valueFields)
+	referenceField(f, fieldRangePrelude, &value.Prelude, blockFields)
 }
 
 const (

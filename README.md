@@ -8,6 +8,17 @@ go-lean translates selected Go functions and methods into Lean so you can prove 
 >
 > Lean checks the laws against the generated model. Applying a theorem to a Go execution depends on the translation preserving Go semantics, the law's preconditions holding, and modeled dependencies meeting their contracts.
 
+## Featured example: verified toy compiler
+
+Compile a typed prefix expression from source bytes to stack bytecode. Lean checks tokenization, parsing, type checking, emission, and the VM's instruction step individually. The end-to-end proof shows that compilation returns the specified diagnostic or produces code that halts with the expression's value.
+
+```sh
+go run ./examples/provable/bytecode_vm/compiler/cmd/toy-compiler "and eq add 255 1 0 not false"
+# Bool: true
+```
+
+[Read the compiler walkthrough](docs/toy-compiler.md).
+
 ## Use go-lean in a Go module
 
 Use Go 1.26.0 or later and install Elan to provide `lean` and `lake` on PATH.

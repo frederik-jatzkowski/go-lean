@@ -77,7 +77,11 @@ func fromSSA(input Input, file string, wordBits int64, abstract map[ir.Symbol]ma
 			}
 			continue
 		}
-		result := ir.Function{Symbol: symbol, Result: productType(fn.Results, l.ordinaryType)}
+		result := ir.Function{Symbol: symbol, Result: productType(fn.Results, l.ordinaryType), Decreases: fn.Decreases}
+		if fn.Decreases != "" {
+			facts.record(fn, true, nil)
+			l.canPanic = true
+		}
 		l.abstract = abstract[result.Symbol]
 		for i := 0; i < fn.TypeParameters; i++ {
 			result.TypeParams = append(result.TypeParams, ir.TypeParameter(i))
@@ -599,7 +603,7 @@ func (l *lowerer) lowerInstructions(block, predecessor *sourceBlock, instruction
 				continue
 			}
 			target := ins.Call.Target
-			call := ir.Call{Callee: l.symbol(target)}
+			call := ir.Call{Callee: l.symbol(target), RecursiveSite: ins.Call.RecursiveSite}
 			abstractTarget := call.Callee
 			if call.Callee.Package != l.root {
 				abstractTarget.Package = l.root

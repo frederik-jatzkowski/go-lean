@@ -60,6 +60,11 @@ func reconcileManaged(root, packageRoot string, config lakeConfig, data []byte, 
 	}
 	if focused {
 		var selected []Output
+		for _, output := range outputs {
+			if stem, ok := strings.CutSuffix(output.Path, "_model.lean"); ok {
+				selected = append(selected, Output{Path: stem + "_decreases.lean"}, Output{Path: stem + "_decreases_proofs.lean"})
+			}
+		}
 		for source := range active {
 			stem := strings.TrimSuffix(source, ".go")
 			for _, suffix := range []string{"_gen.lean", "_laws.lean", "_verify.lean"} {
@@ -198,6 +203,14 @@ func (config lakeConfig) managedModuleNames(packageRoot string, blocks map[int]m
 		names[owner][lakeRoot(module)] = true
 		if stem, ok := strings.CutSuffix(module, "_verify"); ok {
 			names[owner][lakeRoot(stem+"_proofs")] = true
+		}
+		if strings.HasSuffix(module, "_decreases") {
+			proof := strings.TrimSuffix(output.Path, ".lean") + "_proofs.lean"
+			if _, err := os.Stat(proof); err == nil {
+				names[owner][lakeRoot(module+"_proofs")] = true
+			} else if !os.IsNotExist(err) {
+				return nil, err
+			}
 		}
 	}
 	return names, nil

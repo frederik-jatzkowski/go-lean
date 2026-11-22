@@ -48,6 +48,7 @@ type Function struct {
 	CanPanic   bool
 	Loop       *CountedLoop
 	Fuel       *Binder
+	Decreases  string
 }
 
 // CountedLoop repeats the SSA update once per unit of natural-number fuel.
@@ -395,9 +396,10 @@ type IntegerExtremum struct {
 }
 
 type Call struct {
-	Contracts []Type
-	Callee    Symbol
-	Args      []Expr
+	Contracts     []Type
+	Callee        Symbol
+	Args          []Expr
+	RecursiveSite string
 }
 
 type InterfaceCall struct {

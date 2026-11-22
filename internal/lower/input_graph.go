@@ -189,6 +189,7 @@ const (
 	fieldFunctionRange
 	fieldFunctionBuild
 	fieldFunctionChain
+	fieldFunctionDecreases
 )
 
 func functionFields(f sourceFields, value *sourceFunction) {
@@ -209,6 +210,7 @@ func functionFields(f sourceFields, value *sourceFunction) {
 	referenceField(f, fieldFunctionRange, &value.Range, rangeFields)
 	referenceField(f, fieldFunctionBuild, &value.Build, buildFields)
 	referenceField(f, fieldFunctionChain, &value.Chain, chainFields)
+	textField(f, fieldFunctionDecreases, &value.Decreases)
 }
 
 const (
@@ -372,6 +374,7 @@ const (
 	fieldCallClone
 	fieldCallExtremum
 	fieldCallCapacity
+	fieldCallRecursiveSite
 )
 
 func callFields(f sourceFields, value *sourceCall) {
@@ -383,6 +386,7 @@ func callFields(f sourceFields, value *sourceCall) {
 	booleanField(f, fieldCallClone, &value.Clone)
 	textField(f, fieldCallExtremum, &value.Extremum)
 	booleanField(f, fieldCallCapacity, &value.Capacity)
+	textField(f, fieldCallRecursiveSite, &value.RecursiveSite)
 }
 
 const (

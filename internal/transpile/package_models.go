@@ -5,6 +5,7 @@ import (
 	"go/token"
 	"go/types"
 	"maps"
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -256,6 +257,11 @@ func (m *packageModel) lower(available map[ir.Symbol]ir.Function, traced map[ir.
 		return fmt.Errorf("%s: Go call to %s.%s uses a different slice representation than its canonical package model (nil or capacity is modeled differently)", sites[incompatible], incompatible.Package, incompatible.Name)
 	}
 	m.program.WordBits = m.input.WordBits
+	for _, fn := range m.program.Functions {
+		if fn.Decreases != "" && len(fn.Contracts) != 0 {
+			return fmt.Errorf("%s: //golean:decreases on %s does not support interface contracts", m.path, fn.Symbol.Name)
+		}
+	}
 	if err := traceVerificationRoots(m.input, &m.program, abstract, m.external); err != nil {
 		return err
 	}
@@ -348,12 +354,22 @@ func (m *packageModel) addVerification(file lean.Verification) {
 	maps.Copy(v.Constructors, file.Constructors)
 }
 
-func (m *packageModel) output(models map[string]*packageModel) Output {
+func (m *packageModel) outputs(models map[string]*packageModel, module string) ([]Output, error) {
 	v := m.verification
 	for path := range m.imports {
 		v.ModelImports = append(v.ModelImports, models[path].module)
 	}
 	slices.Sort(v.ModelImports)
 	v.ModelImports = slices.Compact(v.ModelImports)
-	return Output{Path: m.path + "_model.lean", Source: lean.RenderVerification(m.program, v)}
+	var outputs []Output
+	if slices.ContainsFunc(m.program.Functions, func(fn ir.Function) bool { return fn.Decreases != "" }) {
+		if _, err := os.Stat(m.path + "_decreases_proofs.lean"); err == nil {
+			v.DecreaseModule = lean.DecreaseModule(module)
+			v.DecreaseProofModule = lean.DecreaseProofModule(module)
+			outputs = append(outputs, Output{Path: m.path + "_decreases.lean", Source: lean.RenderDecreases(m.program, v)})
+		} else if !os.IsNotExist(err) {
+			return nil, err
+		}
+	}
+	return append(outputs, Output{Path: m.path + "_model.lean", Source: lean.RenderVerification(m.program, v)}), nil
 }

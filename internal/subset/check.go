@@ -15,17 +15,18 @@ import (
 
 // Checked holds the validated functions in dependency-first order.
 type Checked struct {
-	contracts map[*types.TypeName][]string
-	root      *ssa.Package
-	functions []*ssa.Function
-	records   map[*ssa.Alloc]RecordCell
-	arrays    map[*ssa.Alloc]*ssa.Store
-	loops     map[*ssa.Function]*CountedLoop
-	ranges    map[*ssa.Function]*RangeFold
-	builds    map[*ssa.Function]*SliceBuild
-	chains    map[*ssa.Function]*ChainRecursion
-	stateful  map[*ssa.Function]*StatefulMethod
-	groups    []int
+	contracts  map[*types.TypeName][]string
+	root       *ssa.Package
+	functions  []*ssa.Function
+	records    map[*ssa.Alloc]RecordCell
+	arrays     map[*ssa.Alloc]*ssa.Store
+	loops      map[*ssa.Function]*CountedLoop
+	ranges     map[*ssa.Function]*RangeFold
+	builds     map[*ssa.Function]*SliceBuild
+	chains     map[*ssa.Function]*ChainRecursion
+	stateful   map[*ssa.Function]*StatefulMethod
+	groups     []int
+	directives map[*ssa.Function]gosource.Directives
 
 	owned               map[ssa.Value]ssa.Value
 	collectionAppends   map[*ssa.Call]ssa.Value
@@ -36,9 +37,10 @@ func (c Checked) CollectionRoot(value ssa.Value) ssa.Value       { return c.owne
 func (c Checked) CollectionAppend(call *ssa.Call) ssa.Value      { return c.collectionAppends[call] }
 func (c Checked) IsCollectionPackaging(ins ssa.Instruction) bool { return c.collectionPackaging[ins] }
 
-func (c Checked) Root() *ssa.Package         { return c.root }
-func (c Checked) Functions() []*ssa.Function { return c.functions }
-func (c Checked) Groups() []int              { return c.groups }
+func (c Checked) Root() *ssa.Package                { return c.root }
+func (c Checked) Functions() []*ssa.Function        { return c.functions }
+func (c Checked) Groups() []int                     { return c.groups }
+func (c Checked) Decreases(fn *ssa.Function) string { return c.directives[fn].Decreases }
 
 func (c Checked) Stateful(fn *ssa.Function) *StatefulMethod { return c.stateful[fn] }
 
@@ -89,6 +91,9 @@ func Check(program gosource.Program) (Checked, error) {
 		receiver := pointerReceiver(fn)
 		hasBuffers := receiver != nil && len(c.bufferFields[StatefulRecord(receiver.Type())]) != 0
 		if !program.Directives[fn].Constructor && (hasBuffers || writesReceiver(fn, make(map[*ssa.Function]bool))) {
+			if program.Directives[fn].Decreases != "" {
+				return Checked{}, diagnostic(fn, fn.Pos(), "//golean:decreases does not support mutating pointer receivers")
+			}
 			if err := c.checkStateful(fn); err != nil {
 				return Checked{}, err
 			}
@@ -169,7 +174,7 @@ func Check(program gosource.Program) (Checked, error) {
 	return Checked{
 		contracts: c.contracts, root: program.Package, functions: c.ordered, records: c.records, arrays: c.arrays, loops: c.loops,
 		ranges: c.ranges, builds: c.builds, chains: c.chains, stateful: c.stateful, owned: c.owned,
-		collectionAppends: c.collectionAppends, collectionPackaging: c.collectionPackaging, groups: groups,
+		collectionAppends: c.collectionAppends, collectionPackaging: c.collectionPackaging, groups: groups, directives: c.directives,
 	}, nil
 }
 
@@ -217,6 +222,18 @@ func (c *checker) function(fn *ssa.Function) error {
 		return diagnostic(fn, loop.Pos(), "only one loop per function is supported; extract another loop into a checked helper")
 	}
 	sig := fn.Signature
+	decreases := c.directives[fn].Decreases
+	if decreases != "" {
+		if sig.TypeParams().Len() != 0 || len(fn.TypeArgs()) != 0 || c.directives[fn].Constructor ||
+			len(c.directives[fn].Abstract) != 0 || len(c.directives[fn].InterfaceCalls) != 0 || !hasDirectRecursion(fn) {
+			return diagnostic(fn, fn.Pos(), "//golean:decreases requires a non-generic direct recursive function without proof boundaries")
+		}
+		for _, param := range fn.Params {
+			if InterfaceHandle(param.Type()) != "" || interfaceRecord(param.Type()) {
+				return diagnostic(fn, param.Pos(), "//golean:decreases does not support interface inputs")
+			}
+		}
+	}
 	constructor := c.directives[fn].Constructor
 	if constructor && (sig.Recv() != nil || sig.Results().Len() != 1 ||
 		sig.TypeParams().Len() != 0 || !interfaceRecord(sig.Results().At(0).Type())) {
@@ -327,7 +344,14 @@ func (c *checker) function(fn *ssa.Function) error {
 			}
 		}
 	}
-	if collection != nil {
+	if decreases != "" {
+		if err := c.checkResultOwnership(fn, nil); err != nil {
+			return err
+		}
+		if err := c.checkOrdinaryBody(fn); err != nil {
+			return err
+		}
+	} else if collection != nil {
 		if collection.AppendTo != nil {
 			if err := c.checkAppendFold(fn, collection); err != nil {
 				return err
@@ -373,6 +397,17 @@ func hasSliceResult(results *types.Tuple) bool {
 	for result := range results.Variables() {
 		if Type(result.Type()).SliceElem() != "" {
 			return true
+		}
+	}
+	return false
+}
+
+func hasDirectRecursion(fn *ssa.Function) bool {
+	for _, block := range fn.Blocks {
+		for _, ins := range block.Instrs {
+			if call, ok := ins.(*ssa.Call); ok && call.Call.StaticCallee() == fn {
+				return true
+			}
 		}
 	}
 	return false
@@ -662,8 +697,10 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 			if len(c.directives[callee].Abstract) != 0 {
 				return diagnostic(fn, ins.Pos(), "calling an abstracted verification root in the same module is unsupported")
 			}
-			if err := c.function(callee); err != nil {
-				return diagnostic(fn, ins.Pos(), "call to %s: %w", callee, err)
+			if callee != fn || c.directives[fn].Decreases == "" {
+				if err := c.function(callee); err != nil {
+					return diagnostic(fn, ins.Pos(), "call to %s: %w", callee, err)
+				}
 			}
 		}
 		build := c.builds[callee]

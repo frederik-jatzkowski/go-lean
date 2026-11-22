@@ -166,7 +166,7 @@ func load(dir, pattern string, active map[string]bool) ([]Program, error) {
 				continue
 			}
 			result.Roots = append(result.Roots, fn)
-			directives := Directives{Laws: root.laws, Constructor: root.constructor, InterfaceCalls: root.interfaceCalls}
+			directives := Directives{Laws: root.laws, Constructor: root.constructor, InterfaceCalls: root.interfaceCalls, Decreases: root.decreases}
 			for _, target := range root.abstract {
 				callee := prog.FuncValue(target.fn)
 				if callee == nil {

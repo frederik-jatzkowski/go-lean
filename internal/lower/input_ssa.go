@@ -5,6 +5,7 @@ import (
 	"go/token"
 	"go/types"
 	"math"
+	"path/filepath"
 	"slices"
 
 	"github.com/frederik-jatzkowski/go-lean/internal/ir"
@@ -95,6 +96,7 @@ func (b *ssaInputBuilder) fillFunction(fn *ssa.Function) {
 	if len(fn.Blocks) > 0 {
 		f.Entry = b.block(fn.Blocks[0])
 	}
+	f.Decreases = b.checked.Decreases(fn)
 	if m := b.checked.Stateful(fn); m != nil {
 		f.Stateful = &sourceStateful{Receiver: b.value(m.Receiver), Record: b.typ(subset.StatefulRecord(m.Receiver.Type()))}
 		for index, field := range f.Stateful.Record.Fields {
@@ -415,6 +417,11 @@ func (b *ssaInputBuilder) instruction(ins ssa.Instruction) *sourceValue {
 		v.Kind, v.Call = callValue, &sourceCall{Args: b.valuesOf(i.Call.Args), Value: b.value(i.Call.Value),
 			Target: b.function(i.Call.StaticCallee()), Length: subset.IsLength(i), Clone: subset.IsSliceClone(i),
 			Extremum: subset.IntegerExtremum(i), Capacity: subset.IsSliceCapacity(i)}
+		if i.Call.StaticCallee() == i.Parent() && b.checked.Decreases(i.Parent()) != "" {
+			position := i.Parent().Prog.Fset.Position(i.Pos())
+			position.Filename = filepath.Base(position.Filename)
+			v.Call.RecursiveSite = position.String()
+		}
 		if i.Call.IsInvoke() {
 			v.Call.Method = i.Call.Method.Name()
 		}

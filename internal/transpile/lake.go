@@ -176,7 +176,8 @@ func (config lakeConfig) staleOutputs(projectRoot, packageRoot string, blocks ma
 			return nil
 		}
 		stem, ok := generatedStem(path)
-		isModel := strings.HasSuffix(path, "_model.lean")
+		decreasesStem, isDecreases := strings.CutSuffix(path, "_decreases.lean")
+		isModel := strings.HasSuffix(path, "_model.lean") || isDecreases
 		if !ok && !isModel {
 			return nil
 		}
@@ -185,7 +186,7 @@ func (config lakeConfig) staleOutputs(projectRoot, packageRoot string, blocks ma
 			return nil
 		}
 		source := stem + ".go"
-		if isModel && focused {
+		if isModel && focused && !(isDecreases && expected[decreasesStem+"_model.lean"]) {
 			// Other packages may still import a model discovered in a previous
 			// workspace build. Only a full scan can prove it is stale.
 			return nil

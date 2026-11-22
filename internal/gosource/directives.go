@@ -35,6 +35,7 @@ type Directives struct {
 	Constructor    bool
 	Laws           []Law
 	Abstract       []Abstract
+	Decreases      string
 }
 
 type selectedRoot struct {
@@ -46,6 +47,8 @@ type selectedRoot struct {
 	laws           []Law
 	assumptions    []Law
 	abstract       []abstractTarget
+	decreases      string
+	decreaseAt     token.Position
 }
 
 type abstractTarget struct {
@@ -83,6 +86,11 @@ func selectRoots(pkg *packages.Package, file *ast.File) ([]selectedRoot, error) 
 			remainder := strings.TrimPrefix(line, directive)
 			payload := strings.TrimSpace(remainder)
 			switch directive {
+			case "//golean:decreases":
+				if payload == "" || root.decreases != "" {
+					return nil, directiveError(position, "expected one //golean:decreases <Lean Nat expression>")
+				}
+				root.decreases, root.decreaseAt = payload, position
 			case "//golean:verify:constructor":
 				if payload != "" || root.constructor {
 					return nil, directiveError(position, "expected a single //golean:verify:constructor without arguments")
@@ -154,6 +162,9 @@ func selectRoots(pkg *packages.Package, file *ast.File) ([]selectedRoot, error) 
 				root.abstract = append(root.abstract, abstractTarget{fn: target, position: position})
 			}
 			continuation = nil
+		}
+		if root.decreases != "" && !marked {
+			return nil, directiveError(root.decreaseAt, "//golean:decreases requires //golean:export or //golean:verify")
 		}
 		if len(root.abstract) != 0 && len(root.laws) == 0 {
 			return nil, directiveError(root.abstract[0].position, "abstraction requires a caller with a named //golean:verify law")

@@ -88,6 +88,7 @@ type sourceFunction struct {
 	Range                           *sourceRange
 	Build                           *sourceBuild
 	Chain                           *sourceChain
+	Decreases                       string
 }
 
 type sourceBlock struct {
@@ -183,6 +184,7 @@ type sourceCall struct {
 	Target                  *sourceFunction
 	Method, Extremum        string
 	Length, Clone, Capacity bool
+	RecursiveSite           string
 }
 
 type sourceStateful struct {

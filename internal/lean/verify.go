@@ -11,17 +11,19 @@ import (
 )
 
 type Verification struct {
-	Module       string
-	Scope        ir.Symbol
-	ScopedLaws   []gosource.Law
-	SeparateLaws bool
-	HasModel     bool
-	ModelImports []string
-	LawImports   []string
-	Roots        []VerificationRoot
-	Constructors map[ir.Symbol]bool
-	PackagePath  string
-	ModelModule  string
+	Module              string
+	Scope               ir.Symbol
+	ScopedLaws          []gosource.Law
+	SeparateLaws        bool
+	HasModel            bool
+	ModelImports        []string
+	LawImports          []string
+	Roots               []VerificationRoot
+	Constructors        map[ir.Symbol]bool
+	PackagePath         string
+	ModelModule         string
+	DecreaseModule      string
+	DecreaseProofModule string
 }
 
 type VerificationRoot struct {
@@ -57,7 +59,9 @@ func moduleName(path, suffix string) string {
 	return strings.Join(parts, ".")
 }
 
-func PackageModule(path string) string { return moduleName(path, "_model") }
+func PackageModule(path string) string       { return moduleName(path, "_model") }
+func DecreaseModule(path string) string      { return moduleName(path, "_decreases") }
+func DecreaseProofModule(path string) string { return moduleName(path, "_decreases_proofs") }
 
 func (v Verification) root(symbol ir.Symbol) VerificationRoot {
 	for _, root := range v.Roots {

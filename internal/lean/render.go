@@ -32,23 +32,37 @@ func RenderVerification(program ir.Program, verification Verification) string {
 	for _, module := range verification.ModelImports {
 		fmt.Fprintf(&out, "import %s\n", module)
 	}
+	measured := slices.ContainsFunc(program.Functions, func(fn ir.Function) bool { return fn.Decreases != "" })
+	if measured {
+		out.WriteString("import Lean.Elab.Command\nimport Lean.Util.CollectAxioms\n")
+		if verification.DecreaseModule != "" {
+			fmt.Fprintf(&out, "import %s\nimport %s\n", verification.DecreaseModule, verification.DecreaseProofModule)
+		} else {
+			out.WriteString("import Lean.Elab.Term\n")
+		}
+	}
 	if len(verification.Roots) != 0 || len(verification.Constructors) != 0 {
 		out.WriteString("import Lean.Elab.Command\n")
 	}
 	// Go allows unused parameters, and they are part of the generated signature.
 	out.WriteString("\nset_option linter.unusedVariables false\n")
-	out.WriteString("\nnamespace GoLean\n")
-	if program.WordBits != 0 {
-		scope := symbolScope(verification.Scope)
-		if verification.Scope.Package == "" {
-			scope = symbolScope(program.Functions[0].Symbol)
+	if measured {
+		out.WriteString(auditRecursion)
+		if verification.DecreaseModule == "" {
+			out.WriteString(declareMeasure)
 		}
-		fmt.Fprintf(&out, "\nabbrev %s.GoTypes.Int := %s\n", scope, r.leanType(ir.IntWord))
-		fmt.Fprintf(&out, "abbrev %s.GoTypes.UInt := %s\n", scope, r.leanType(ir.UIntWord))
-		fmt.Fprintf(&out, "abbrev %s.GoTypes.WordBits : Nat := %d\n", scope, program.WordBits)
 	}
-	r.renderRecords(&out, verification.PackagePath)
-	r.renderContracts(&out, verification.PackagePath)
+	out.WriteString("\nnamespace GoLean\n")
+	if verification.DecreaseModule == "" {
+		scope := verification.Scope.Package
+		if scope == "" && len(program.Functions) != 0 {
+			scope = program.Functions[0].Symbol.Package
+		}
+		r.renderModelTypes(&out, verification.PackagePath, scope)
+		if measured {
+			r.renderDecreaseDeclarations(&out, program.Functions)
+		}
+	}
 	if len(verification.Roots) != 0 {
 		out.WriteString(declareLaw)
 		for _, root := range verification.Roots {
@@ -58,6 +72,10 @@ func RenderVerification(program ir.Program, verification Verification) string {
 		}
 	}
 	for _, fn := range program.Functions {
+		if fn.Decreases != "" {
+			r.renderRecursiveFunction(&out, fn, verification.DecreaseProofModule != "")
+			continue
+		}
 		root := verification.root(fn.Symbol)
 		r.abstract = make(map[ir.Symbol]string, len(root.Abstract))
 		for _, target := range root.Abstract {
@@ -119,6 +137,17 @@ func RenderVerification(program ir.Program, verification Verification) string {
 	}
 	out.WriteString("\nend GoLean\n")
 	return out.String()
+}
+
+func (r renderer) renderModelTypes(out *strings.Builder, pkg, wordScope string) {
+	if r.wordBits != 0 {
+		scope := quoted(wordScope)
+		fmt.Fprintf(out, "\nabbrev %s.GoTypes.Int := %s\n", scope, r.leanType(ir.IntWord))
+		fmt.Fprintf(out, "abbrev %s.GoTypes.UInt := %s\n", scope, r.leanType(ir.UIntWord))
+		fmt.Fprintf(out, "abbrev %s.GoTypes.WordBits : Nat := %d\n", scope, r.wordBits)
+	}
+	r.renderRecords(out, pkg)
+	r.renderContracts(out, pkg)
 }
 
 func (r renderer) renderParams(out *strings.Builder, params []ir.Binder) {
@@ -684,6 +713,9 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 		return value
 	case ir.Call:
 		call := "_root_.GoLean." + r.untracedName(expr.Callee)
+		if expr.RecursiveSite != "" {
+			call = quoted(expr.Callee.Name)
+		}
 		if abstract, ok := r.abstract[expr.Callee]; ok {
 			call = abstract
 		}

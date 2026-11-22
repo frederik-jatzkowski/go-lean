@@ -30,19 +30,19 @@ end «github.com/frederik-jatzkowski/go-lean/internal/lower».«ssa».InterfaceC
 
 namespace «github.com/frederik-jatzkowski/go-lean/internal/lower».«ssa»
 
-run_cmd declareGoLaw `Laws.«lookupAfterBinding» "Prop" "∀ {S : Type} (store : InterfaceContracts.StateStoreContract S) (state : S) (value binder : Int64),\n  lookupBindingID store (store.Bind state value binder) value = (binder, true)" "ssa.go:175"
+run_cmd declareGoLaw `Laws.«lookupAfterBinding» "Prop" "∀ {S : Type} (store : InterfaceContracts.StateStoreContract S) (state : S) (value binder : Int64),\n  lookupBindingID store (store.Bind state value binder) value = (binder, true)" "ssa.go:179"
 
-run_cmd declareGoLaw `Laws.«interveningBindingsPreserveLookup» "Prop" "∀ {S : Type} (store : InterfaceContracts.StateStoreContract S) (state : S) (value : Int64)\n  (writes : List (Int64 × Int64)) (distinct : ∀ entry ∈ writes, value ≠ entry.1),\n  lookupBindingID store (writes.foldl (fun s entry => store.Bind s entry.1 entry.2) state) value =\n  lookupBindingID store state value" "ssa.go:177"
+run_cmd declareGoLaw `Laws.«interveningBindingsPreserveLookup» "Prop" "∀ {S : Type} (store : InterfaceContracts.StateStoreContract S) (state : S) (value : Int64)\n  (writes : List (Int64 × Int64)) (distinct : ∀ entry ∈ writes, value ≠ entry.1),\n  lookupBindingID store (writes.foldl (fun s entry => store.Bind s entry.1 entry.2) state) value =\n  lookupBindingID store state value" "ssa.go:181"
 
 end «github.com/frederik-jatzkowski/go-lean/internal/lower».«ssa»
 
 namespace «github.com/frederik-jatzkowski/go-lean/internal/lower».«ssa»
 
-run_cmd declareGoLaw `Laws.«lookupAfterEmission» "Prop" "∀ {S : Type} (store : InterfaceContracts.StateStoreContract S) (state : S) (function : Int64)\n  (effect : Bool),\n  lookupEmission store (recordEmission store state function effect) function = (effect, true)" "ssa.go:200"
+run_cmd declareGoLaw `Laws.«lookupAfterEmission» "Prop" "∀ {S : Type} (store : InterfaceContracts.StateStoreContract S) (state : S) (function : Int64)\n  (effect : Bool),\n  lookupEmission store (recordEmission store state function effect) function = (effect, true)" "ssa.go:204"
 
-run_cmd declareGoLaw `Laws.«writingDependencyIndexPreservesEmission» "Prop" "∀ {S : Type} (store : InterfaceContracts.StateStoreContract S) (state : S)\n  (function callee dependencyIndex : Int64),\n  lookupEmission store (store.PutFact state function 1 dependencyIndex) callee =\n  lookupEmission store state callee" "ssa.go:203"
+run_cmd declareGoLaw `Laws.«writingDependencyIndexPreservesEmission» "Prop" "∀ {S : Type} (store : InterfaceContracts.StateStoreContract S) (state : S)\n  (function callee dependencyIndex : Int64),\n  lookupEmission store (store.PutFact state function 1 dependencyIndex) callee =\n  lookupEmission store state callee" "ssa.go:207"
 
-run_cmd declareGoLaw `Laws.«interveningEmissionsPreserveCallee» "Prop" "∀ {S : Type} (store : InterfaceContracts.StateStoreContract S) (state : S) (callee : Int64)\n  (effect : Bool) (later : List (Int64 × Bool)) (distinct : ∀ entry ∈ later, callee ≠ entry.1),\n  lookupEmission store\n  (later.foldl (fun s entry => recordEmission store s entry.1 entry.2)\n  (recordEmission store state callee effect)) callee = (effect, true)" "ssa.go:207"
+run_cmd declareGoLaw `Laws.«interveningEmissionsPreserveCallee» "Prop" "∀ {S : Type} (store : InterfaceContracts.StateStoreContract S) (state : S) (callee : Int64)\n  (effect : Bool) (later : List (Int64 × Bool)) (distinct : ∀ entry ∈ later, callee ≠ entry.1),\n  lookupEmission store\n  (later.foldl (fun s entry => recordEmission store s entry.1 entry.2)\n  (recordEmission store state callee effect)) callee = (effect, true)" "ssa.go:211"
 
 end «github.com/frederik-jatzkowski/go-lean/internal/lower».«ssa»
 

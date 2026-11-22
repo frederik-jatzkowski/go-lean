@@ -52,7 +52,11 @@ func generate(programs []gosource.Program, resolveModule func(string) (string, e
 				return nil, err
 			}
 			model.module = lean.PackageModule(module)
-			outputs = append(outputs, model.output(models))
+			modelOutputs, err := model.outputs(models, module)
+			if err != nil {
+				return nil, err
+			}
+			outputs = append(outputs, modelOutputs...)
 		}
 	}
 	for _, program := range programs {

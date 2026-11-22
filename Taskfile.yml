@@ -15,7 +15,7 @@ tasks:
     cmds: ['{{.GO}} build -o {{.CLI}} ./cmd/go-lean']
 
   generate:
-    desc: Regenerate Lean modules for all marked Go source files
+    desc: Regenerate Lean modules for the selected examples
     cmds: ['{{.GO}} run ./cmd/go-lean transpile ./...']
 
   test:
@@ -32,7 +32,7 @@ tasks:
 
   prove:
     desc: Check the Lean proofs with Lake
-    cmds: ['{{.LAKE}} build']
+    cmds: ['{{.GO}} run ./cmd/go-lean verify ./...']
 
   check:
     desc: Run the Go tests, vet, and Lean proofs

@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/frederik-jatzkowski/go-lean/internal/transpile"
 	"github.com/spf13/cobra"
 )
 
@@ -29,7 +28,7 @@ func newCommand() *cobra.Command {
 			if err := validatePattern(args[0]); err != nil {
 				return err
 			}
-			_, err := transpile.ReconcilePattern(".", args[0])
+			_, err := generate(cmd.Context(), args[0])
 			return err
 		},
 	}
@@ -87,11 +86,11 @@ func newVerifyCommand() *cobra.Command {
 			if err := validatePattern(pattern); err != nil {
 				return err
 			}
-			targets, err := transpile.ReconcilePattern(".", pattern)
+			targets, err := generate(cmd.Context(), pattern)
 			if err != nil {
 				return err
 			}
-			if pattern != "./..." && len(targets) == 0 {
+			if len(targets) == 0 {
 				fmt.Fprintln(cmd.OutOrStdout(), "No Lean targets for", pattern)
 				return nil
 			}

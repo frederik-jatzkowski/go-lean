@@ -1,7 +1,7 @@
-import clampimport.limits.limits_gen
+import clampimport.limits.limits
 import Lean.Elab.Tactic.Omega
 
-namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport/limits».limits.Proofs
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport/limits».Proofs
 
 theorem atMostRight : Laws.atMostRight := by
   intro x y
@@ -28,4 +28,4 @@ theorem leftIdentityMax : Laws.leftIdentityMax := by
   simp only [Max, decide_eq_true_eq]
   split <;> simp_all only [Int64.le_iff_toInt_le, Int64.lt_iff_toInt_lt, ← Int64.toInt_inj] <;> omega
 
-end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport/limits».limits.Proofs
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport/limits».Proofs

@@ -1,6 +1,6 @@
-import grid_game.grid_game_gen
+import grid_game.grid_game
 
-namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».grid_game.Proofs
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».Proofs
 
 theorem stepBoundedEdge : Laws.stepBoundedEdge := by
   unfold Laws.stepBoundedEdge
@@ -92,4 +92,4 @@ theorem youCantWin : Laws.youCantWin := by
   simp only [safe, Bool.and_eq_true, and_assoc] at h
   simpa [replay] using h.2.2.2.2
 
-end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».grid_game.Proofs
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».Proofs

@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	golean "github.com/frederik-jatzkowski/go-lean"
-	"github.com/frederik-jatzkowski/go-lean/internal/transpile"
 	"github.com/spf13/cobra"
 	"golang.org/x/mod/modfile"
 )
@@ -57,7 +56,7 @@ func newDoctorCommand() *cobra.Command {
 					failed = true
 				}
 			}
-			for _, err := range checkWorkspace(cmd.OutOrStdout()) {
+			for _, err := range checkWorkspace() {
 				fmt.Fprintln(cmd.ErrOrStderr(), err)
 				failed = true
 			}
@@ -139,7 +138,7 @@ func createScaffold(out io.Writer, path, content string) error {
 	return nil
 }
 
-func checkWorkspace(out io.Writer) []error {
+func checkWorkspace() []error {
 	var issues []error
 	if err := checkGoModule(); err != nil {
 		issues = append(issues, err)
@@ -164,21 +163,11 @@ func checkWorkspace(out io.Writer) []error {
 	case toml && lean:
 		issues = append(issues, errors.New("both lakefile.toml and lakefile.lean exist: keep one Lake configuration"))
 	case toml:
-		managed, err := transpile.CheckLakeTOML(".")
-		if err != nil {
+		if _, err := readLake(); err != nil {
 			issues = append(issues, err)
-		} else if !managed {
-			fmt.Fprintln(out, "Register generated modules in the Lake configuration when using manual roots.")
 		}
 	case lean:
-		data, err := os.ReadFile("lakefile.lean")
-		if err != nil {
-			issues = append(issues, err)
-		} else if strings.TrimSpace(string(data)) == "" {
-			issues = append(issues, errors.New("lakefile.lean is empty: configure a Lake library for the generated modules"))
-		} else {
-			fmt.Fprintln(out, "Register generated modules in lakefile.lean when using manual roots.")
-		}
+		issues = append(issues, errors.New("go-lean requires lakefile.toml with managed roots"))
 	default:
 		issues = append(issues, errors.New("Lake configuration is missing: run go-lean setup"))
 	}

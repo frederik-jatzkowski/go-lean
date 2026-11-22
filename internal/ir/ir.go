@@ -1,35 +1,39 @@
-// Package ir represents pure, typed expressions and returning control flow.
+// Package ir defines the closed, typed representation consumed by Lean emission.
 package ir
 
-import (
-	"strconv"
-	"strings"
+type Symbol struct {
+	Package string
+	Name    string
+}
+
+type Kind uint8
+
+const (
+	Bool Kind = iota + 1
+	String
+	Int8
+	Int16
+	Int32
+	Int64
+	UInt8
+	UInt16
+	UInt32
+	UInt64
+	Record
+	Array
+	ByteArray
+	RBMap
+	RBSet
+	Option
+	BitVec
+	List
 )
 
-type Program struct {
-	TracedRoots map[Symbol]bool
-	Functions   []Function
-	Records     map[Type]Record
-	Contracts   map[Type]Contract
-	WordBits    int64
-}
-
-type Contract struct {
-	Symbol  Symbol
-	Methods []Method
-	Laws    []string
-}
-
-type Method struct {
-	Name   string
-	Params []Type
-	Result Type
-}
-
-type Record struct {
-	Symbol  Symbol
-	Fields  []Field
-	Handles []Type
+type Type struct {
+	Kind   Kind
+	Record Symbol
+	// Element is the element or map value type. Key is the ordered key type.
+	Element, Key *Type
 }
 
 type Field struct {
@@ -37,458 +41,169 @@ type Field struct {
 	Type Type
 }
 
-type Function struct {
-	Traced     bool
-	Symbol     Symbol
-	TypeParams []Type
-	Contracts  []Type
-	Params     []Binder
-	Result     Type
-	Body       Body
-	CanPanic   bool
-	Loop       *CountedLoop
-	Fuel       *Binder
-	Decreases  string
+type Declaration interface{ declaration() }
+
+type Struct struct {
+	Symbol Symbol
+	Fields []Field
 }
 
-// CountedLoop repeats the SSA update once per unit of natural-number fuel.
-type CountedLoop struct {
-	Symbol   Symbol
-	Params   []Binder
-	State    Binder
-	Body     *Body
-	CanPanic bool
-	Steps    []Binding
-	Next     Expr
-}
-
-type Symbol struct {
-	Package    string
-	File       string
-	Name       string
-	Dependency string
-}
-
-type Binder struct {
-	Name  string
-	Index int
-	Type  Type
-}
-
-type Type string
-
-const (
-	Int8     Type = "Int8"
-	Int16    Type = "Int16"
-	Int32    Type = "Int32"
-	Int64    Type = "Int64"
-	UInt8    Type = "UInt8"
-	UInt16   Type = "UInt16"
-	UInt32   Type = "UInt32"
-	UInt64   Type = "UInt64"
-	IntWord  Type = "int"
-	UIntWord Type = "uint"
-	Bool     Type = "Bool"
-	Bytes    Type = "ByteArray"
-	Error    Type = "(Option String)"
-	Float32  Type = "Float32"
-	Float64  Type = "Float"
-)
-
-func (t Type) IsInteger() bool {
-	return t == Int8 || t == Int16 || t == Int32 || t == Int64 || t == IntWord || t.IsUnsigned()
-}
-
-func (t Type) IsUnsigned() bool {
-	return t == UInt8 || t == UInt16 || t == UInt32 || t == UInt64 || t == UIntWord
-}
-
-func (t Type) IsWord() bool { return t == IntWord || t == UIntWord }
-
-func TypeParameter(index int) Type { return Type("α" + strconv.Itoa(index)) }
-
-func UnaryFunctionType(input, output Type) Type { return Type("func:" + input + "\x00" + output) }
-
-func (t Type) UnaryFunctionShape() (input, output Type) {
-	if signature, ok := strings.CutPrefix(string(t), "func:"); ok {
-		input, output, _ := strings.Cut(signature, "\x00")
-		return Type(input), Type(output)
-	}
-	return "", ""
-}
-
-func ProductType(left, right Type) Type {
-	return Type("product:" + strconv.Itoa(len(left)) + ":" + string(left) + string(right))
-}
-
-func (t Type) ProductShape() (left, right Type) {
-	if tail, ok := strings.CutPrefix(string(t), "product:"); ok {
-		length, rest, _ := strings.Cut(tail, ":")
-		n, _ := strconv.Atoi(length)
-		return Type(rest[:n]), Type(rest[n:])
-	}
-	return "", ""
-}
-
-func RecordType(pkg, name string) Type { return Type("struct:" + pkg + "." + name) }
-
-func (t Type) IsRecord() bool { return strings.HasPrefix(string(t), "struct:") }
-
-func RecordPointer(pointee Type) Type { return Type("pointer:" + string(pointee)) }
-
-func (t Type) Pointee() Type {
-	if pointee, ok := strings.CutPrefix(string(t), "pointer:"); ok {
-		return Type(pointee)
-	}
-	return ""
-}
-
-func SliceType(elem Type) Type { return Type("slice:" + string(elem)) }
-
-func (t Type) SliceElem() Type {
-	if elem, ok := strings.CutPrefix(string(t), "slice:"); ok {
-		return Type(elem)
-	}
-	return ""
-}
-
-func MapType(key, value Type) Type { return Type("map:" + key + ":" + value) }
-
-func (t Type) MapShape() (key, value Type) {
-	if entries, ok := strings.CutPrefix(string(t), "map:"); ok {
-		key, value, _ := strings.Cut(entries, ":")
-		return Type(key), Type(value)
-	}
-	return "", ""
-}
-
-func OptionType(elem Type) Type { return Type("option:" + elem) }
-
-func (t Type) OptionElem() Type {
-	if elem, ok := strings.CutPrefix(string(t), "option:"); ok {
-		return Type(elem)
-	}
-	return ""
-}
-
-func ArrayType(elem Type, length int64) Type {
-	return Type("array:" + strconv.FormatInt(length, 10) + ":" + string(elem))
-}
-
-func (t Type) ArrayShape() (elem Type, length string) {
-	shape, ok := strings.CutPrefix(string(t), "array:")
-	if !ok {
-		return "", ""
-	}
-	length, element, _ := strings.Cut(shape, ":")
-	return Type(element), length
-}
-
-// Body introduces immutable bindings and ends in a return or a returning branch.
-type Body struct {
-	Bindings []Binding
-	Result   Result
-}
+func (Struct) declaration() {}
 
 type Binding struct {
-	Binder   Binder
-	Value    Expr
-	CanPanic bool
+	ID   int
+	Type Type
 }
 
-type Result interface{ result() }
-
-type Return struct{ Value Expr }
-
-type If struct {
-	Condition Expr
-	Then      Body
-	Else      Body
+type Function struct {
+	Symbol    Symbol
+	Params    []Binding
+	Result    Type
+	Body      Expr
+	Contracts []Symbol
 }
 
-type ListFold struct {
-	Sequence Expr
-	Initial  Expr
-	State    Binder
-	Element  Binder
-	Steps    []Binding
-	Next     Expr
-}
+func (Function) declaration() {}
 
-type StructuredFold struct {
-	Sequence, Initial       Expr
-	State, Element, Final   Binder
-	Iteration, Continuation Body
-	Effectful               bool
-}
-
-// BoundedControl is a local recursive loop whose exits return from its enclosing path.
-type BoundedControl struct {
-	Function, State Binder
-	Fuel, Initial   Expr
-	Done, Step      Body
-	Result          Type
-	CanPanic        bool
-}
-
-type AdvanceLoop struct {
-	Function Binder
-	State    Expr
-}
-
-type ListBuild struct {
-	Destination  *Binder
-	Continuation *Body
-	Effectful    bool
-	Body         *Body
-	Sequence     Expr
-	Element      Binder
-	Steps        []Binding
-	Next         Expr
-}
-
-// ListRecursion exposes the tail as the structurally smaller input.
-type ListRecursion struct {
-	Input Binder
-	Head  *Binder
-	Tail  Binder
-	Base  Expr
-	Step  Body
-}
-
-func (Return) result()         {}
-func (If) result()             {}
-func (StructuredFold) result() {}
-func (ListFold) result()       {}
-func (ListBuild) result()      {}
-func (ListRecursion) result()  {}
-func (BoundedControl) result() {}
-func (AdvanceLoop) result()    {}
-
-type Expr interface{ expr() }
-
-// Trace represents an empty trace or a single classified effect.
-type Trace string
-
-type TraceAppend struct{ Before, After Expr }
-
-func (Trace) expr()       {}
-func (TraceAppend) expr() {}
-
-type IntLiteral struct {
-	Value string
-	Type  Type
-}
-
-type BoolLiteral bool
-type BytesLiteral string
-type Float32Literal uint32
-type Float64Literal uint64
-type Ref Binder
-type Negate struct{ Value Expr }
-type Not struct{ Value Expr }
-type ByteLen struct{ Value Expr }
-type BytesToList struct{ Value Expr }
-type LoopFuel struct {
-	Start, Bound      Expr
-	Signed, ZeroStart bool
-}
-
-type RecordLiteral struct {
-	Type   Type
-	Values []Expr
-}
-
-type RecordField struct {
-	Value Expr
-	Name  string
-}
-
-type CheckedRecordField struct {
-	Value Expr
-	Type  Type
-	Name  string
-}
-
-type NilPointer struct{}
-type EmptySlice struct{}
-type EmptyMap struct{}
-
-type MapLookup struct {
-	Map Expr
-	Key Expr
-}
-
-type MapUpdate struct {
-	Map   Expr
-	Key   Expr
-	Value Expr
-}
-
-type OptionGetD struct {
-	Value   Expr
-	Default Expr
-}
-
-type OptionIsSome struct{ Value Expr }
-
-type CheckedIndex struct {
-	Sequence     Expr
-	SequenceType Type
-	Index        Expr
-	IndexType    Type
-}
-
-type ArrayReplicate struct {
-	Length string
-	Value  Expr
-}
-
-type ArrayGet struct {
-	Sequence, Index, Default Expr
-	IndexType                Type
-}
-
-type ArraySet struct {
-	Sequence, Index, Value Expr
-	IndexType              Type
-}
-
-type CollectionFold struct{ Sequence, Excluded Expr }
-
-type SliceAppend struct {
-	Slice, Element            Expr
-	WithoutCapacity, Nullable bool
-}
-
-type MakeSlice struct {
-	Length, Capacity, Zero   Expr
-	LengthType, CapacityType Type
-	Nullable, TracksCapacity bool
-	Array                    bool
-}
-
-type SliceSet struct {
-	Slice, Index, Value      Expr
-	IndexType                Type
-	Nullable, TracksCapacity bool
-}
-
-type SliceCapacity struct{ Slice Expr }
-
-type NatZero struct{}
-
-type StringLiteral string
-
-type CheckedStringSlice struct {
-	Bytes, Low, High  Expr
-	LowType, HighType Type
-}
-
-type Convert struct {
-	Value    Expr
-	From, To Type
-}
-
-type IntegerExtremum struct {
-	Args []Expr
-	Max  bool
-}
-
-type Call struct {
-	Contracts     []Type
-	Callee        Symbol
-	Args          []Expr
-	RecursiveSite string
-}
-
-type InterfaceCall struct {
-	Contract Type
-	Method   string
-	Args     []Expr
-}
-
-type FunctionRef Symbol
-
-type LiftCallback struct{ Function Expr }
-
-type Apply struct {
-	Function Expr
-	Argument Expr
-}
-
-type SelfCall struct {
+type Proposition struct {
 	Name string
-	Args []Expr
+	Lean string
 }
 
-type Binary struct {
-	Op          Operator
-	Left, Right Expr
-	OperandType Type
+type Contract struct {
+	Caller, Callee Symbol
+	Params         []Type
+	Result         Type
+	Assumptions    []Proposition
 }
 
-func (IntLiteral) expr()         {}
-func (BoolLiteral) expr()        {}
-func (BytesLiteral) expr()       {}
-func (Float32Literal) expr()     {}
-func (Float64Literal) expr()     {}
-func (Ref) expr()                {}
-func (Negate) expr()             {}
-func (Not) expr()                {}
-func (ByteLen) expr()            {}
-func (BytesToList) expr()        {}
-func (LoopFuel) expr()           {}
-func (RecordLiteral) expr()      {}
-func (RecordField) expr()        {}
-func (CheckedRecordField) expr() {}
-func (NilPointer) expr()         {}
-func (EmptySlice) expr()         {}
-func (EmptyMap) expr()           {}
-func (MapLookup) expr()          {}
-func (MapUpdate) expr()          {}
-func (OptionGetD) expr()         {}
-func (OptionIsSome) expr()       {}
-func (CheckedIndex) expr()       {}
-func (ArrayReplicate) expr()     {}
-func (ArrayGet) expr()           {}
-func (ArraySet) expr()           {}
-func (CollectionFold) expr()     {}
-func (NatZero) expr()            {}
-func (SliceAppend) expr()        {}
-func (MakeSlice) expr()          {}
-func (SliceSet) expr()           {}
-func (SliceCapacity) expr()      {}
-func (StringLiteral) expr()      {}
-func (CheckedStringSlice) expr() {}
-func (IntegerExtremum) expr()    {}
-func (Convert) expr()            {}
-func (Binary) expr()             {}
+func (Contract) declaration() {}
 
-func (InterfaceCall) expr() {}
-func (Call) expr()          {}
-func (LiftCallback) expr()  {}
-func (FunctionRef) expr()   {}
-func (Apply) expr()         {}
-func (SelfCall) expr()      {}
+type Law struct {
+	Proposition
+	Caller    Symbol
+	Contracts []Symbol
+}
 
-type Operator int
+type Package struct {
+	Path, Name, Dir string
+	Word            Kind
+	Imports         []string
+	Decls           []Declaration
+	Laws            []Law
+}
+
+type Expr interface{ expression() }
+
+type Constant struct {
+	Type Type
+	// Value is decimal for integers, true/false for booleans, and raw bytes for strings.
+	Value string
+}
+
+type Local struct{ ID int }
+type Let struct {
+	ID          int
+	Value, Body Expr
+}
+type If struct{ Cond, Then, Else Expr }
+
+// Join binds the continuation of an if whose branches can both fall through.
+type Join struct {
+	ID         int
+	Next, Body Expr
+}
+
+type Jump struct{ ID int }
+
+type UnaryOp uint8
+
+const Not UnaryOp = iota + 1
+
+type Unary struct {
+	Op    UnaryOp
+	Value Expr
+}
+
+type BinaryOp uint8
 
 const (
-	Add Operator = iota
-	Subtract
-	Multiply
-	Divide
-	Remainder
-	Equal
-	NotEqual
-	Less
-	LessEqual
-	Greater
-	GreaterEqual
+	Add BinaryOp = iota + 1
+	Sub
+	Eq
+	Ne
+	Lt
+	Le
+	Gt
+	Ge
+	And
+	Or
 )
 
-// PanicsOnZeroDivisor reports whether a zero right operand causes a Go panic.
-func (op Operator) PanicsOnZeroDivisor() bool {
-	return op == Divide || op == Remainder
+type Binary struct {
+	Op          BinaryOp
+	Kind        Kind
+	Left, Right Expr
 }
+type FieldRead struct {
+	Record Expr
+	Name   string
+}
+type StructLiteral struct {
+	Type   Symbol
+	Fields []Expr
+}
+type Call struct {
+	Target Symbol
+	Args   []Expr
+}
+type AbstractCall struct {
+	Target Symbol
+	Args   []Expr
+}
+
+type PrimitiveOp uint8
+
+const (
+	Empty PrimitiveOp = iota + 1
+	Some
+	None
+	IsSome
+	UnwrapOr
+	Nil
+	Cons
+	IsEmpty
+	Push
+	Pop
+	Get
+	Set
+	Size
+	Extract
+	Find
+	Contains
+	Insert
+	Erase
+	NewBitVec
+	Width
+	ToUint64
+)
+
+type Primitive struct {
+	Op   PrimitiveOp
+	Type Type
+	Args []Expr
+}
+
+func (Constant) expression()      {}
+func (Local) expression()         {}
+func (Let) expression()           {}
+func (If) expression()            {}
+func (Join) expression()          {}
+func (Jump) expression()          {}
+func (Unary) expression()         {}
+func (Binary) expression()        {}
+func (FieldRead) expression()     {}
+func (StructLiteral) expression() {}
+func (Call) expression()          {}
+func (AbstractCall) expression()  {}
+func (Primitive) expression()     {}

@@ -95,19 +95,22 @@ func forward(coordinate uint8, wrap bool) uint8 {
 //golean:verify+ let expected := Start
 //golean:verify+ actual.«field:X» = expected.«field:X» ∧ actual.«field:Y» = expected.«field:Y»
 func Step(position Position, direction Direction, wrap bool) Position {
-	var target Position
-	switch direction {
-	case Up:
-		target = Position{X: position.X, Y: backward(position.Y, wrap)}
-	case Down:
-		target = Position{X: position.X, Y: forward(position.Y, wrap)}
-	case Left:
-		target = Position{X: backward(position.X, wrap), Y: position.Y}
-	case Right:
-		target = Position{X: forward(position.X, wrap), Y: position.Y}
-	default:
-		return position
+	if direction == Up {
+		return moveIfOpen(position, Position{X: position.X, Y: backward(position.Y, wrap)}, wrap)
 	}
+	if direction == Down {
+		return moveIfOpen(position, Position{X: position.X, Y: forward(position.Y, wrap)}, wrap)
+	}
+	if direction == Left {
+		return moveIfOpen(position, Position{X: backward(position.X, wrap), Y: position.Y}, wrap)
+	}
+	if direction == Right {
+		return moveIfOpen(position, Position{X: forward(position.X, wrap), Y: position.Y}, wrap)
+	}
+	return position
+}
+
+func moveIfOpen(position, target Position, wrap bool) Position {
 	if IsWall(target, wrap) {
 		return position
 	}

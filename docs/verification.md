@@ -9,7 +9,7 @@ Put directives in the declaration's Go doc comment. Use consecutive `//golean:ve
 | Directive | Use |
 | --- | --- |
 | `//golean:verify name : proposition` | Declare a law on a function, concrete method, concrete type, or package. On a function or method, it also selects that operation for translation. Use a unique law name within the Go file. |
-| `//golean:export` | Select a function or concrete method for translation so other laws can refer to it. |
+| `//golean:export` | Select a function or concrete method for translation and make it callable from another modeled Go package. |
 | `//golean:verify:import Lean.Module` | In a package comment, make a Lean module available to the package's laws. The imported module can use generated model types. |
 | `//golean:assume:import Lean.Module` | In a package comment, import definitions for dependency contracts. These modules load before the model and must be independent of generated models that use them. |
 
@@ -54,7 +54,7 @@ The checked-in companion also proves idempotence. [Clamp source](../examples/pro
 
 ## Generate and prove
 
-1. Run `go tool go-lean transpile ./pkg` after editing Go code or directives. Read the signature in `<stem>_gen.lean` before writing the proof. Pay attention to receiver arguments, machine-width integers, result tuples, and any modeled panic outcomes or traces.
+1. Run `go tool go-lean transpile ./pkg` after editing Go code or directives. Read the signature in `<pkg>_model.lean` before writing the proof. Pay attention to receiver arguments, machine-width integers, result tuples, and any modeled panic outcomes or traces.
 2. Write `<stem>_proofs.lean`. Import `<stem>_laws` when it exists, or `<stem>_gen` otherwise. Verification imports and type or package laws produce a separate `_laws` module. Place each theorem under the law's namespace followed by `.Proofs`, using the law's name and its generated proposition as the theorem type.
 3. Run `go tool go-lean verify ./pkg` or build the corresponding `<module>.<stem>_verify` target with Lake. The generated verification module checks the named proofs and their axiom dependencies.
 
@@ -74,7 +74,19 @@ roots = [
 
 Set `srcDir` to cover the generated modules and omit `globs`. Include the library in `defaultTargets` to check it with plain `lake build` or whole-module `go tool go-lean verify`. Keep handwritten specs and standalone roots outside the markers, with a trailing comma after each manual entry. When migrating, remove manual entries for modules go-lean will register, including required proof companions. With manual Lake configuration, register the modules yourself.
 
-Use `go tool go-lean transpile ./...` after moving or deleting Go files, or when a proof imports generated modules in other packages. Whole-module generation reconciles obsolete generated files and roots in managed source trees. Move handwritten proof companions yourself, updating their imports and namespaces.
+Use `go tool go-lean transpile ./...` after moving or deleting Go files, or when a handwritten proof imports a package outside the focused Go dependency graph. Whole-module generation reconciles obsolete generated files and roots in managed source trees. Move handwritten proof companions yourself, updating their imports and namespaces.
+
+## Compose proofs across packages
+
+Each modeled Go package owns one `<pkg>_model.lean` in its directory, with declarations under `GoLean.«full/go/import/path»`. The module defines selected functions, their reachable same-package helpers, and the supported records owned by the package. A record used in another package's signature or body is declared in its Go package's model, even if that package supplies types only. Supported exported record declarations without interface fields are included whenever their owning package model is generated, so focused generation can retain types used by other callers. Existing `<stem>_gen.lean` files import the model and provide aliases in the previous file-scoped namespaces. Laws, proof companions, and checked theorems keep their file-scoped names.
+
+Add `//golean:export` to a function or method called by another modeled package. It can also have a `//golean:verify` law. Calls through named interfaces continue to use the contract laws declared with `//golean:assume` on the interface or its methods. A concrete call missing its boundary annotation reports the Go call location.
+
+Suppose package `parser` declares `AST` and exports `Parse`, and package `compiler` calls `parser.Parse`. The generated compiler model imports the parser model. Its call refers directly to `GoLean.«example.com/project/parser».Parse` and uses the same `AST` declared there. In `compiler_proofs.lean`, import the parser's verification module to use a theorem such as `GoLean.«example.com/project/parser».parser.Checked.parseSound` with `rw` or `apply`.
+
+Focused generation includes modeled packages in the Go import graph. Managed Lake libraries register the generated model modules automatically. For a manually configured library, add the corresponding `<pkg>_model` module paths to its roots or globs. If an existing Lean build cache contains pre-migration file-scoped declarations, rebuild it from clean artifacts.
+
+When a caller and callee infer different slice representations because one observes nilness or capacity, go-lean reports the mismatch at the call site. The supported Go subset also applies across package boundaries.
 
 ### Troubleshoot a failed check
 

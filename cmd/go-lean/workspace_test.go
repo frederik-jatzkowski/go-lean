@@ -129,9 +129,11 @@ func TestVerifyRunsLakeAfterGeneration(t *testing.T) {
 	write(t, source, `package main
 import ("fmt"; "os"; "strings")
 func main() {
-	if _, err := os.Stat("pkg/model_gen.lean"); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+	for _, path := range []string{"pkg/model_gen.lean", "pkg/model_model.lean"} {
+		if _, err := os.Stat(path); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
 	}
 	fmt.Println(strings.Join(os.Args[1:], " "))
 	fmt.Fprintln(os.Stderr, "from Lake")

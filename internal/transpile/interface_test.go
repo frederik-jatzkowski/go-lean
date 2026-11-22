@@ -67,15 +67,10 @@ func Divide(e boundary.Evaluator, x int) int { return x / read(e, x) }
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(outputs) != 1 {
-		t.Fatalf("got %d outputs, want 1", len(outputs))
-	}
-	got := outputs[0].Source
+	got := generatedFile(t, outputs, "sample_model.lean").Source
 	for _, want := range []string{
-		".Dependencies.«example.test/sample/boundary».InterfaceContracts.«EvaluatorContract»",
-		"read_identity : ∀ s x, Read s x = x",
-		"second_law : True",
-		"read_zero : ∀ s, Read s 0 = 0",
+		"import «boundary».«boundary_model»",
+		"«example.test/sample/boundary».InterfaceContracts.«EvaluatorContract»",
 		".«Read» «v0_e» «v1_x»",
 		".«read» «contract:",
 		": Option Int",
@@ -84,12 +79,20 @@ func Divide(e boundary.Evaluator, x int) int { return x / read(e, x) }
 			t.Errorf("missing %q in output:\n%s", want, got)
 		}
 	}
-	if strings.Count(got, "\nstructure ") != 1 || strings.Contains(got, "unused_law") {
-		t.Fatalf("expected only the reached contract:\n%s", got)
+	if strings.Contains(got, "\nstructure ") {
+		t.Fatalf("caller redefined a contract:\n%s", got)
 	}
-	if strings.Index(got, "read_identity :") >= strings.Index(got, "second_law :") ||
-		strings.Index(got, "second_law :") >= strings.Index(got, "read_zero :") {
-		t.Fatalf("expected contract laws in declaration order:\n%s", got)
+	contract := generatedFile(t, outputs, "boundary_model.lean").Source
+	if strings.Count(contract, "\nstructure ") != 1 || strings.Contains(contract, "unused_law") {
+		t.Fatalf("expected only the reached contract:\n%s", contract)
+	}
+	previous := -1
+	for _, law := range []string{"read_identity : ∀ s x, Read s x = x", "second_law : True", "read_zero : ∀ s, Read s 0 = 0"} {
+		if index := strings.Index(contract, law); index <= previous {
+			t.Fatalf("expected contract laws in declaration order:\n%s", contract)
+		} else {
+			previous = index
+		}
 	}
 }
 

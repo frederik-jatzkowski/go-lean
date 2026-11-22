@@ -27,6 +27,17 @@ func newModule(t *testing.T) string {
 	return dir
 }
 
+func generatedFile(t *testing.T, outputs []transpile.Output, base string) transpile.Output {
+	t.Helper()
+	for _, output := range outputs {
+		if filepath.Base(output.Path) == base {
+			return output
+		}
+	}
+	t.Fatalf("generation did not write %s", base)
+	return transpile.Output{}
+}
+
 func TestLowerSSA(t *testing.T) {
 	path := filepath.Join(newModule(t), "input.go")
 	writeFile(t, path, `package match
@@ -53,7 +64,7 @@ func folded() int64 {
 	}
 	got := outputs[0].Source
 	for _, want := range []string{
-		"def «example.test/sample».«input».«def»",
+		"def «example.test/sample».«def»",
 		"(-«v0_x»)",
 		"(Int64.ofInt (-9223372036854775808))",
 		"(Int64.ofInt (9223372036854775805))",
@@ -104,6 +115,7 @@ func TestConcreteMethods(t *testing.T) {
 	dir := newModule(t)
 	writeFile(t, filepath.Join(dir, "policy", "policy.go"), `package policy
 type Tier uint8
+//golean:export
 func (t Tier) Limit() uint8 { return uint8(t) }
 `)
 	writeFile(t, filepath.Join(dir, "input.go"), `package sample
@@ -121,10 +133,10 @@ func Limit() uint8 { return First(1).Limit() + (*Second)(nil).Limit() }
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := outputs[0].Source
+	got := generatedFile(t, outputs, "sample_model.lean").Source
 	for _, want := range []string{
 		"«First$Limit»", "«Second$Limit»", "«example.test/sample/policy».«Tier$Limit»",
-		"«input».«Limit»", "«Second$Limit» none)",
+		"«example.test/sample».«Limit»", "«Second$Limit» none)",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in output:\n%s", want, got)
@@ -165,8 +177,8 @@ func selectX(s AOuter) int64 { return s.X }
 		t.Fatal(err)
 	}
 	got := outputs[0].Source
-	inner := strings.Index(got, "structure «example.test/sample».«input».«ZInner»")
-	outer := strings.Index(got, "structure «example.test/sample».«input».«AOuter»")
+	inner := strings.Index(got, "structure «example.test/sample».«ZInner»")
+	outer := strings.Index(got, "structure «example.test/sample».«AOuter»")
 	if inner < 0 || outer < 0 || inner >= outer {
 		t.Fatalf("expected the embedded structure before its parent:\n%s", got)
 	}
@@ -470,31 +482,33 @@ func Root(x int64) int64 { return middle.Add(x) + middle.Add(x) }
 `)
 	writeFile(t, filepath.Join(dir, "middle", "middle.go"), `package middle
 import "example.test/sample/leaf"
+//golean:export
 func Add(x int64) int64 { return leaf.Add(x) }
 `)
 	leaf := filepath.Join(dir, "leaf", "leaf.go")
-	writeFile(t, leaf, "package leaf\nfunc Add(x int64) int64 { return x + 1 }\n")
+	writeFile(t, leaf, "package leaf\n//golean:export\nfunc Add(x int64) int64 { return x + 1 }\n")
 
 	outputs, err := transpile.Generate(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := outputs[0].Source
-	leafDef := "def «example.test/sample».«input».Dependencies.«example.test/sample/leaf».«Add»"
-	middleDef := "def «example.test/sample».«input».Dependencies.«example.test/sample/middle».«Add»"
-	rootDef := "def «example.test/sample».«input».«Root»"
-	if strings.Count(got, leafDef) != 1 || strings.Count(got, middleDef) != 1 ||
-		strings.Index(got, leafDef) >= strings.Index(got, middleDef) ||
-		strings.Index(got, middleDef) >= strings.Index(got, rootDef) {
-		t.Fatalf("expected one definition per function in dependency order:\n%s", got)
-	}
-
-	writeFile(t, leaf, "package leaf\nfunc Add(x int64) int64 { return x | 2 }\n")
-	_, err = transpile.Generate(dir)
-	for _, want := range []string{"call to example.test/sample/middle.Add", "call to example.test/sample/leaf.Add", "unsupported runtime operation |"} {
-		if err == nil || !strings.Contains(err.Error(), want) {
-			t.Errorf("got %v, want %q in the call chain", err, want)
+	for i, want := range []string{"leaf_model.lean", "middle_model.lean", "sample_model.lean"} {
+		if filepath.Base(outputs[i].Path) != want {
+			t.Fatalf("expected dependency-first generation of %s, got %s", want, outputs[i].Path)
 		}
+	}
+	for i, want := range []string{"def «example.test/sample/leaf».«Add»", "import «leaf».«leaf_model»", "import «middle».«middle_model»"} {
+		if !strings.Contains(outputs[i].Source, want) {
+			t.Fatalf("expected %s in:\n%s", want, outputs[i].Source)
+		}
+	}
+	if strings.Contains(outputs[2].Source, "import «leaf»") || strings.Contains(outputs[2].Source, "def «example.test/sample/middle»") {
+		t.Fatal("caller model duplicated a dependency")
+	}
+	writeFile(t, leaf, "package leaf\n//golean:export\nfunc Add(x int64) int64 { return x | 2 }\n")
+	_, err = transpile.Generate(dir)
+	if err == nil || !strings.Contains(err.Error(), "unsupported runtime operation |") {
+		t.Fatalf("expected the dependency model to reject its unsupported operation, got %v", err)
 	}
 }
 
@@ -546,7 +560,7 @@ func update(flag bool) int64 {
 		}
 	}
 	checkGeneratedLean(t, dir, outputs[0].Path, outputs[0].Source, `
-open GoLean.«example.test/sample».input
+open GoLean.«example.test/sample»
 example : update true = 7 := by decide
 example : update false = 4 := by decide
 `)
@@ -596,7 +610,7 @@ func mapWithBranch(key int64, set bool) map[int64]int64 {
 		}
 	}
 	checkGeneratedLean(t, dir, outputs[0].Path, outputs[0].Source, `
-open GoLean.«example.test/sample».input
+open GoLean.«example.test/sample»
 example : mapWithBranch 4 true = some [(4, 4)] := by decide
 example : mapWithBranch 4 false = some [(4, 1)] := by decide
 example : (literal 7 8).bind (List.lookup 2) = some 8 := by decide
@@ -713,7 +727,7 @@ func (b *batch) run() int {
 		t.Fatal(err)
 	}
 	checkGeneratedLean(t, dir, outputs[0].Path, outputs[0].Source, `
-open GoLean.«example.test/sample».input
+open GoLean.«example.test/sample»
 example : weighted [2, 3] 4 = 20 := by decide
 example : convert [-1, 2, 3] = some [false, true, true] := by decide
 example : clamp [-1, 2, 3] = some [0, 2, 3] := by decide

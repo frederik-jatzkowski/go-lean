@@ -91,7 +91,11 @@ func hasDirectCall(caller, callee *ssa.Function) bool {
 }
 
 func rootSymbol(program gosource.Program, fn *ssa.Function) ir.Symbol {
-	return ir.Symbol{Package: program.Package.Pkg.Path(), File: url.PathEscape(sourceStem(program.Path)), Name: functionName(fn)}
+	return ir.Symbol{Package: program.Package.Pkg.Path(), Name: functionName(fn)}
+}
+
+func fileScope(program gosource.Program) ir.Symbol {
+	return ir.Symbol{Package: program.Package.Pkg.Path(), File: url.PathEscape(sourceStem(program.Path))}
 }
 
 func functionName(fn *ssa.Function) string {
@@ -140,7 +144,7 @@ func makeVerification(resolveModule func(string) (string, error), program gosour
 	imports := program.LeanImports[packagePath]
 	verification := lean.Verification{
 		Constructors: make(map[ir.Symbol]bool),
-		Scope:        ir.Symbol{Package: packagePath, File: url.PathEscape(sourceStem(program.Path))},
+		Scope:        fileScope(program),
 		ScopedLaws:   program.ScopedLaws,
 		SeparateLaws: len(imports.Verify) != 0 || len(program.ScopedLaws) != 0,
 		HasModel:     len(program.Roots) != 0,
@@ -193,7 +197,7 @@ func makeVerification(resolveModule func(string) (string, error), program gosour
 				return verification, err
 			}
 			root.Abstract = append(root.Abstract, lean.AbstractCall{
-				Call: abstractSymbol(symbol, target.Callee), Signature: concrete, Operation: callee.Name, Module: module, Laws: owner.Directives[target.Callee].Laws,
+				Call: abstractSymbol(symbol, target.Callee), Signature: concrete, Operation: callee.Name, Module: module, Scope: fileScope(owner), Laws: owner.Directives[target.Callee].Laws,
 			})
 		}
 		verification.Roots = append(verification.Roots, root)

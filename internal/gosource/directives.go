@@ -42,6 +42,7 @@ type selectedRoot struct {
 	constructor    bool
 	fn             *types.Func
 	marked         bool
+	exported       bool
 	laws           []Law
 	assumptions    []Law
 	abstract       []abstractTarget
@@ -93,6 +94,7 @@ func selectRoots(pkg *packages.Package, file *ast.File) ([]selectedRoot, error) 
 					return nil, directiveError(position, "expected //golean:export without arguments")
 				}
 				marked = true
+				root.exported = true
 			case "//golean:verify+", "//golean:assume+":
 				kind := strings.TrimSuffix(directive, "+")
 				if continuation == nil || continuationKind != kind || position.Line != continuation.Position.Line+strings.Count(continuation.Proposition, "\n")+1 || payload == "" {

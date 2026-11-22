@@ -126,12 +126,23 @@ func reconcileManaged(root, packageRoot string, config lakeConfig, data []byte, 
 
 func (config lakeConfig) verificationTargets(packageRoot string, outputs []Output) ([]string, error) {
 	files := make(map[string]string)
+	models := make(map[string]string)
+	wrapped := make(map[string]bool)
 	for _, output := range outputs {
 		stem, check := strings.CutSuffix(output.Path, "_verify.lean")
 		if check {
 			files[stem] = output.Path
+			wrapped[filepath.Dir(output.Path)] = true
 		} else if stem, model := strings.CutSuffix(output.Path, "_gen.lean"); model && files[stem] == "" {
 			files[stem] = output.Path
+			wrapped[filepath.Dir(output.Path)] = true
+		} else if strings.HasSuffix(output.Path, "_model.lean") {
+			models[filepath.Dir(output.Path)] = output.Path
+		}
+	}
+	for dir, model := range models {
+		if !wrapped[dir] {
+			files[model] = model
 		}
 	}
 	targets := make(map[string]bool)

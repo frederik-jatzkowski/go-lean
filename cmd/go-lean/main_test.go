@@ -81,13 +81,21 @@ func C(x int64) int64 { return x }
 		t.Fatal(err)
 	}
 	expected := map[string]string{
-		"a_gen.lean":        "def «example.test/tree».«a».«A»",
-		"b_gen.lean":        "def «example.test/tree».«b».«A»",
-		"nested/c_gen.lean": "def «example.test/tree/nested».«c».«C»",
+		"a_gen.lean":             "import «tree_model»",
+		"b_gen.lean":             "import «tree_model»",
+		"nested/c_gen.lean":      "import «nested».«tree_model»",
+		"nested/tree_model.lean": "def «example.test/tree/nested».«C»",
 	}
 	for file, definition := range expected {
 		if got := read(t, file); !strings.Contains(got, definition) {
 			t.Errorf("%s is missing %q:\n%s", file, definition, got)
+		}
+	}
+	original := read(t, "tree_model.lean")
+	for _, name := range []string{"A", "B", "helper"} {
+		declaration := "def «example.test/tree».«" + name + "»"
+		if strings.Count(original, declaration) != 1 {
+			t.Errorf("tree_model.lean must define %q once:\n%s", name, original)
 		}
 	}
 	for _, path := range []string{"nested/c_verify.lean", "nested/unmarked_gen.lean", "nested/skipped_gen.lean"} {
@@ -99,20 +107,19 @@ func C(x int64) int64 { return x }
 		t.Fatalf("expected a package path error, got %v", err)
 	}
 
-	original := read(t, "a_gen.lean")
 	write(t, "a.go", strings.ReplaceAll(read(t, "a.go"), "x + 1", "x + 2"))
 	write(t, "nested/c_gen.lean", "-- handwritten\n")
 	if err := run("transpile", "./..."); err == nil || !strings.Contains(err.Error(), "generated header") {
 		t.Fatalf("expected a conflicting output error, got %v", err)
 	}
-	if read(t, "a_gen.lean") != original || read(t, "nested/c_gen.lean") != "-- handwritten\n" {
+	if read(t, "tree_model.lean") != original || read(t, "nested/c_gen.lean") != "-- handwritten\n" {
 		t.Fatal("a conflicting output changed a file")
 	}
 	write(t, "nested/c.go", strings.ReplaceAll(read(t, "nested/c.go"), "return x", "return x | 2"))
 	if err := run("transpile", "./..."); err == nil || !strings.Contains(err.Error(), "unsupported runtime operation |") {
 		t.Fatalf("expected a subset error, got %v", err)
 	}
-	if read(t, "a_gen.lean") != original {
+	if read(t, "tree_model.lean") != original {
 		t.Fatal("failed subset validation changed a generated file")
 	}
 }

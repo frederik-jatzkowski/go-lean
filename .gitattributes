@@ -1,3 +1,4 @@
 *_gen.lean text eol=lf
+*_model.lean text eol=lf
 *_laws.lean text eol=lf
 *_verify.lean text eol=lf

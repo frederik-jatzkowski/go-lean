@@ -49,7 +49,7 @@ func evaluate(settings Settings) int64 {
 func (settings Settings) Evaluate() int64 { return evaluate(settings) }
 `
 	const proof = `
-namespace GoLean.«example.test/sample».input
+namespace GoLean.«example.test/sample»
 
 private def gate : InterfaceContracts.GateContract Bool :=
   ⟨id, trivial⟩
@@ -59,7 +59,7 @@ private def reader : InterfaceContracts.ReaderContract Bool :=
 example : «Settings$Evaluate» gate reader ⟨true, false, true, 10⟩ = 11 ∧
     «Settings$Evaluate» gate reader ⟨true, false, false, 10⟩ = 12 := by decide
 
-end GoLean.«example.test/sample».input
+end GoLean.«example.test/sample»
 `
 	for _, constructor := range []bool{true, false} {
 		name := "without_constructor_verification"

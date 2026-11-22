@@ -23,7 +23,7 @@ Commit the resulting `go.mod` and `go.sum` changes so contributors and CI use th
 
 For repository build and test commands, see [Working in the go-lean checkout](../../../CONTRIBUTING.md).
 
-Follow [clamp.go](../../../examples/provable/clamp/clamp.go) for a complete example. Its `clampBounds` law states that ordered bounds contain the result. Generation defines `Laws.clampBounds` in `clamp_gen.lean`. The [proof companion](../../../examples/provable/clamp/clamp_proofs.lean) imports `clamp.clamp_gen` and proves `theorem clampBounds : Laws.clampBounds` in the model namespace's `.Proofs` namespace.
+Follow [clamp.go](../../../examples/provable/clamp/clamp.go) for a complete example. Its `clampBounds` law states that ordered bounds contain the result. Generation defines `Laws.clampBounds` in `clamp_gen.lean`. The [proof companion](../../../examples/provable/clamp/clamp_proofs.lean) imports `clamp.clamp_gen` and proves `theorem clampBounds : Laws.clampBounds` in the file namespace's `.Proofs` namespace.
 
 # Best Proof Practices
 
@@ -48,7 +48,7 @@ Choose the home of a law by the behavior it describes:
 - **Concrete type doc comment** for a law about the type across its method set, such as an invariant preserved by every game action.
 - **Package doc comment** for a law about the package's behavior across entry points, such as every bowling history from `Start` agreeing with the reference rules.
 
-For type and package laws, select the operations with `//golean:export` or an operation-specific `//golean:verify`. A package law in `doc.go` can import other files' generated models and refer to their qualified Lean names.
+For type and package laws, select the operations with `//golean:export` or an operation-specific `//golean:verify`. A package law in `doc.go` can refer to the package's modeled functions. Import a dependency's proof companion when you need its behavioral theorems.
 
 Import a handwritten reference specification with `//golean:verify:import` in the package doc comment. Verification laws load after the model, so the specification can use its generated types. Put definitions used by `//golean:assume` in modules loaded through `//golean:assume:import`. Those modules load before the model and must avoid depending on any generated model that uses them.
 
@@ -56,7 +56,7 @@ The [bowling walkthrough](../../../docs/bowling.md#read-the-laws-by-scope) demon
 
 | Directive | Placement and use |
 | --- | --- |
-| `//golean:export` | Function or concrete method. Generate its model without declaring a law. This also makes independent definitions available to laws in the same generated module. |
+| `//golean:export` | Function or concrete method. Select the operation for modeling and allow concrete calls from other packages. Add `//golean:verify` separately to declare a law. |
 | `//golean:verify name : proposition` | Function, concrete method, concrete type, or package. Function and method directives also select the operation. Use a unique law name within the Go file. Continue on immediately consecutive `//golean:verify+` lines. |
 | `//golean:verify:import Lean.Module` | Package doc comment. Make a Lean module available to verification laws throughout the package. |
 | `//golean:assume:import Lean.Module` | Package doc comment. Make a Lean module available to contract propositions, including in generated callers, and to verification laws. |
@@ -70,7 +70,7 @@ Concrete call abstraction requires non-generic, non-variadic caller and callee s
 
 Boundary classification keeps the Go signature and pairs the usual Lean result with a `List String` trace. Each `effect` call adds `import/path.Interface.Method` in execution order, including repeated calls. A `readonly` call adds no entry and assumes its implementation has no externally observable effects. Interface contracts must describe the return values throughout the sequence. This mode requires an acyclic, total model and rejects any path where a `readonly` call follows an effect, including across helper calls. Callbacks, opaque calls, concrete call abstraction, and constructor verification are outside this mode.
 
-Edit the Go source and directives and `<stem>_proofs.lean`. Generation writes `<stem>_gen.lean` for translated operations and `<stem>_verify.lean` for named laws. A verification import or a type or package law puts the declarations in `<stem>_laws.lean`. The proof companion imports that module when present and imports `<stem>_gen.lean` otherwise. Use the law declaration's namespace followed by `.Proofs` for handwritten theorems. Transpilation maintains generated roots and required proof companion roots in managed Lake blocks. Keep handwritten reference modules and standalone proofs in the manual portion of the roots array. When moving a proof companion, update its module imports and namespace.
+Edit the Go source and directives and `<stem>_proofs.lean`. Generation writes one `<package>_model.lean` for the package's translated operations and named types. Canonical Lean declarations use the namespace `GoLean.«full/go/import/path»`. Cross-package calls import that model automatically and use its definitions directly. Add `//golean:export` to a concrete cross-package callee, even if it already has a verification law. The per-file `<stem>_gen.lean` exposes aliases, and `<stem>_verify.lean` checks the named laws. A verification import or a type or package law puts the declarations in `<stem>_laws.lean`. The proof companion imports that module when present and imports `<stem>_gen.lean` otherwise. Use the law declaration's namespace followed by `.Proofs` for handwritten theorems. Transpilation maintains generated roots and required proof companion roots in managed Lake blocks. Keep handwritten reference modules and standalone proofs in the manual portion of the roots array. When moving a proof companion, update its module imports and namespace.
 
 Regenerate after Go edits. On a subset error, start with the reported source location and inspect the marked root's reachable calls using the [supported Go reference](../../../docs/supported-go.md) and [rejection fixtures](../../../examples/reject). After generation succeeds, inspect the model signature before writing the law. Check receiver arguments, contract parameters, result products, modeled panic outcomes, and traces. Build the verification target to catch missing or mismatched theorems and unapproved axiom dependencies. Resolve those errors in the law or handwritten proof, including any use of `sorry` or custom axioms.
 

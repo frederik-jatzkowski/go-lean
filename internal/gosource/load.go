@@ -25,6 +25,15 @@ type Program struct {
 	WordBits          int64
 	InterfaceDocs     map[*types.TypeName]InterfaceDoc
 	InitializedFields map[*types.Var]bool
+	Packages          map[string]PackageLocation
+	Exports           map[*types.Func]bool
+}
+
+type PackageLocation struct {
+	Directory string
+	Name      string
+	Imports   []string
+	Types     *types.Package
 }
 
 type selectedFile struct {
@@ -48,7 +57,7 @@ func LoadWithFiles(dir, pattern string) ([]Program, map[string]bool, error) {
 
 func load(dir, pattern string, active map[string]bool) ([]Program, error) {
 	fset := token.NewFileSet()
-	cfg := &packages.Config{Mode: packages.LoadAllSyntax, Dir: dir, Fset: fset}
+	cfg := &packages.Config{Mode: packages.LoadAllSyntax | packages.NeedModule, Dir: dir, Fset: fset}
 	loaded, err := packages.Load(cfg, pattern)
 	if err != nil {
 		return nil, err
@@ -70,7 +79,25 @@ func load(dir, pattern string, active map[string]bool) ([]Program, error) {
 	}
 	var selected []selectedFile
 	var selectedPackages []*packages.Package
+	locations := make(map[string]PackageLocation)
+	exports := make(map[*types.Func]bool)
+	var workspace []*packages.Package
+	explicit := make(map[*packages.Package]bool)
 	for _, pkg := range loaded {
+		explicit[pkg] = true
+	}
+	packages.Visit(loaded, func(pkg *packages.Package) bool {
+		if explicit[pkg] || pkg.Module != nil && pkg.Module.Main {
+			workspace = append(workspace, pkg)
+		}
+		return true
+	}, nil)
+	for _, pkg := range workspace {
+		var dependencies []string
+		for _, dep := range pkg.Imports {
+			dependencies = append(dependencies, dep.PkgPath)
+		}
+		slices.Sort(dependencies)
 		before := len(selected)
 		for _, file := range pkg.Syntax {
 			path := fset.PositionFor(file.Pos(), false).Filename
@@ -81,9 +108,15 @@ func load(dir, pattern string, active map[string]bool) ([]Program, error) {
 			if active != nil {
 				active[filepath.Clean(path)] = true
 			}
+			locations[pkg.PkgPath] = PackageLocation{Directory: filepath.Dir(path), Name: pkg.Name, Imports: dependencies, Types: pkg.Types}
 			roots, err := selectRoots(pkg, file)
 			if err != nil {
 				return nil, err
+			}
+			for _, root := range roots {
+				if root.exported {
+					exports[root.fn] = true
+				}
 			}
 			laws, err := scopedLaws(pkg, file, roots)
 			if err != nil {
@@ -115,6 +148,8 @@ func load(dir, pattern string, active map[string]bool) ([]Program, error) {
 			LeanImports:       imports,
 			InterfaceDocs:     docs,
 			InitializedFields: fields,
+			Packages:          locations,
+			Exports:           exports,
 			Assumptions:       assumptions,
 			Directives:        make(map[*ssa.Function]Directives),
 			WordBits:          8 * file.pkg.TypesSizes.Sizeof(types.Typ[types.Int]),

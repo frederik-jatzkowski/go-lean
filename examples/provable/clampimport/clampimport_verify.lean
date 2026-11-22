@@ -36,18 +36,18 @@ theorem GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampi
 run_cmd auditGoProof `«clampimport».«clampimport_proofs» `GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport».«clampimport».Proofs.«clampIdempotent» `GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport».«clampimport».Laws.«clampIdempotent»
 theorem GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport».«clampimport».Checked.«clampIdempotent» : GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport».«clampimport».Laws.«clampIdempotent» := GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport».«clampimport».Proofs.«clampIdempotent»
 
-def GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport».«clampimport».Linked.«Clamp$Min» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport».«clampimport».AbstractCalls.«Clamp».«Min» where
-  operation := GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport/limits».«limits».«Min»
+def GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport».«clampimport».Linked.«Clamp$Min» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport».AbstractCalls.«Clamp».«Min» where
+  operation := GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport/limits».«Min»
   «atMostRight» := GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport/limits».«limits».Checked.«atMostRight»
   «leftIdentity» := GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport/limits».«limits».Checked.«leftIdentity»
   «rightIdentity» := GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport/limits».«limits».Checked.«rightIdentity»
 
-def GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport».«clampimport».Linked.«Clamp$Max» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport».«clampimport».AbstractCalls.«Clamp».«Max» where
-  operation := GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport/limits».«limits».«Max»
+def GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport».«clampimport».Linked.«Clamp$Max» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport».AbstractCalls.«Clamp».«Max» where
+  operation := GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport/limits».«Max»
   «atLeastRight» := GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport/limits».«limits».Checked.«atLeastRight»
   «leftIdentityMax» := GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport/limits».«limits».Checked.«leftIdentityMax»
 
-def GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport».«clampimport».Linked.«Clamp» := GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport».«clampimport».«Clamp» GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport».«clampimport».Linked.«Clamp$Min» GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport».«clampimport».Linked.«Clamp$Max»
+def GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport».«clampimport».Linked.«Clamp» := GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport».«Clamp» GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport».«clampimport».Linked.«Clamp$Min» GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport».«clampimport».Linked.«Clamp$Max»
 
 namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/clampimport».«clampimport».Linked
 

@@ -20,6 +20,8 @@ type Verification struct {
 	LawImports   []string
 	Roots        []VerificationRoot
 	Constructors map[ir.Symbol]bool
+	PackagePath  string
+	ModelModule  string
 }
 
 type VerificationRoot struct {
@@ -33,6 +35,7 @@ type AbstractCall struct {
 	Signature ir.Function
 	Operation string
 	Module    string
+	Scope     ir.Symbol
 	Laws      []gosource.Law
 }
 
@@ -53,6 +56,8 @@ func moduleName(path, suffix string) string {
 	}
 	return strings.Join(parts, ".")
 }
+
+func PackageModule(path string) string { return moduleName(path, "_model") }
 
 func (v Verification) root(symbol ir.Symbol) VerificationRoot {
 	for _, root := range v.Roots {
@@ -112,8 +117,8 @@ func (r renderer) renderAbstractContract(out *strings.Builder, root Verification
 	}
 }
 
-func renderLaws(out *strings.Builder, root VerificationRoot) {
-	fmt.Fprintf(out, "\nnamespace %s\n", symbolScope(root.Symbol))
+func renderLaws(out *strings.Builder, root VerificationRoot, scope ir.Symbol) {
+	fmt.Fprintf(out, "\nnamespace %s\n", symbolScope(scope))
 	var quantifiers, arguments []string
 	for _, target := range root.Abstract {
 		binder := abstractBinder(target)
@@ -129,7 +134,7 @@ func renderLaws(out *strings.Builder, root VerificationRoot) {
 		}
 		emitLaw(out, "Laws."+quoted(law.Name), "Prop", term, law)
 	}
-	fmt.Fprintf(out, "\nend %s\n", symbolScope(root.Symbol))
+	fmt.Fprintf(out, "\nend %s\n", symbolScope(scope))
 }
 
 const auditProof = `
@@ -153,9 +158,12 @@ func RenderLaws(v Verification) string {
 	model := moduleName(v.Module, "_gen")
 	if v.HasModel {
 		fmt.Fprintf(&out, "import %s\n", model)
+	} else if v.ModelModule != "" {
+		model = v.ModelModule
+		fmt.Fprintf(&out, "import %s\n", model)
 	}
 	for _, module := range v.LawImports {
-		if v.HasModel && (module == model || slices.Contains(v.ModelImports, module)) {
+		if module == model && (v.HasModel || v.ModelModule != "") || v.HasModel && slices.Contains(v.ModelImports, module) {
 			continue
 		}
 		fmt.Fprintf(&out, "import %s\n", module)
@@ -163,10 +171,10 @@ func RenderLaws(v Verification) string {
 	out.WriteString(declareLaw)
 	out.WriteString("\nnamespace GoLean\n")
 	for _, root := range v.Roots {
-		renderLaws(&out, root)
+		renderLaws(&out, root, v.Scope)
 	}
 	if len(v.ScopedLaws) != 0 {
-		renderLaws(&out, VerificationRoot{Symbol: v.Scope, Laws: v.ScopedLaws})
+		renderLaws(&out, VerificationRoot{Laws: v.ScopedLaws}, v.Scope)
 	}
 	out.WriteString("\nend GoLean\n")
 	return out.String()
@@ -204,7 +212,7 @@ func RenderCheck(v Verification) string {
 		auditRoots = append(slices.Clone(auditRoots), VerificationRoot{Symbol: v.Scope, Laws: v.ScopedLaws})
 	}
 	for _, root := range auditRoots {
-		scope := "GoLean." + symbolScope(root.Symbol)
+		scope := "GoLean." + symbolScope(v.Scope)
 		for _, law := range root.Laws {
 			name := quoted(law.Name)
 			proof := scope + ".Proofs." + name
@@ -214,7 +222,7 @@ func RenderCheck(v Verification) string {
 	}
 	for _, root := range v.Roots {
 		if root.canLink() {
-			renderLink(&out, root, "GoLean."+symbolScope(root.Symbol))
+			renderLink(&out, root, "GoLean."+symbolScope(v.Scope))
 		}
 	}
 	return out.String()
@@ -229,7 +237,7 @@ func renderLink(out *strings.Builder, root VerificationRoot, scope string) {
 		fmt.Fprintf(out, "\ndef %s : %s where\n  operation := GoLean.%s\n",
 			name, abstractType(root, target), symbolName(callee))
 		for _, law := range target.Laws {
-			fmt.Fprintf(out, "  %s := GoLean.%s.Checked.%s\n", quoted(law.Name), symbolScope(callee), quoted(law.Name))
+			fmt.Fprintf(out, "  %s := GoLean.%s.Checked.%s\n", quoted(law.Name), symbolScope(target.Scope), quoted(law.Name))
 		}
 	}
 	concrete := scope + ".Linked." + quoted(root.Symbol.Name)

@@ -25,6 +25,7 @@ type Checked struct {
 	builds    map[*ssa.Function]*SliceBuild
 	chains    map[*ssa.Function]*ChainRecursion
 	stateful  map[*ssa.Function]*StatefulMethod
+	groups    []int
 
 	owned               map[ssa.Value]ssa.Value
 	collectionAppends   map[*ssa.Call]ssa.Value
@@ -37,6 +38,7 @@ func (c Checked) IsCollectionPackaging(ins ssa.Instruction) bool { return c.coll
 
 func (c Checked) Root() *ssa.Package         { return c.root }
 func (c Checked) Functions() []*ssa.Function { return c.functions }
+func (c Checked) Groups() []int              { return c.groups }
 
 func (c Checked) Stateful(fn *ssa.Function) *StatefulMethod { return c.stateful[fn] }
 
@@ -66,6 +68,7 @@ func Check(program gosource.Program) (Checked, error) {
 		contracts: make(map[*types.TypeName][]string), interfaceDocs: program.InterfaceDocs,
 		initializedFields: program.InitializedFields,
 		directives:        program.Directives,
+		exports:           program.Exports,
 		visiting:          make(map[*ssa.Function]bool),
 		done:              make(map[*ssa.Function]bool),
 		cells:             make(map[*ssa.Alloc]*ssa.Store),
@@ -92,29 +95,36 @@ func Check(program gosource.Program) (Checked, error) {
 			return Checked{}, err
 		}
 	}
-	capacity := make(map[ir.Type]bool)
-	for _, fn := range c.ordered {
+	groups := representationGroups(program, c.ordered)
+	capacity := make(map[int]map[ir.Type]bool)
+	for i, fn := range c.ordered {
+		types := capacity[groups[i]]
+		if types == nil {
+			types = make(map[ir.Type]bool)
+			capacity[groups[i]] = types
+		}
 		if fold := c.ranges[fn]; fold != nil && fold.AppendTo != nil {
-			capacity[Type(fold.AppendTo.Type())] = true
+			types[Type(fold.AppendTo.Type())] = true
 		}
 		for _, block := range fn.Blocks {
 			for _, ins := range block.Instrs {
 				if call, ok := ins.(*ssa.Call); ok && IsSliceCapacity(call) {
-					capacity[Type(call.Call.Args[0].Type())] = true
+					types[Type(call.Call.Args[0].Type())] = true
 				}
 			}
 		}
 	}
-	for _, fn := range c.ordered {
+	for i, fn := range c.ordered {
+		types := capacity[groups[i]]
 		for _, block := range fn.Blocks {
 			for _, ins := range block.Instrs {
 				// The conversion guarantees a minimum capacity, but its exact value is unspecified.
-				if conv, ok := ins.(*ssa.Convert); ok && stringToBytes(conv) && capacity[Type(conv.Type())] {
+				if conv, ok := ins.(*ssa.Convert); ok && stringToBytes(conv) && types[Type(conv.Type())] {
 					return Checked{}, diagnostic(fn, conv.Pos(), "string-to-byte conversion with observable slice capacity is unsupported")
 				}
 				if call, ok := ins.(*ssa.Call); ok && c.collectionAppends[call] != nil {
 					typ := Type(call.Type())
-					if capacity[typ] || typ.SliceElem() == ir.Bytes {
+					if types[typ] || typ.SliceElem() == ir.Bytes {
 						return Checked{}, diagnostic(fn, call.Pos(), "append with observable capacity requires a statically sized append fold")
 					}
 				}
@@ -122,7 +132,16 @@ func Check(program gosource.Program) (Checked, error) {
 		}
 	}
 	if len(c.stateful) != 0 {
-		for _, fn := range c.ordered {
+		statefulGroups := make(map[int]bool)
+		for i, fn := range c.ordered {
+			if c.stateful[fn] != nil {
+				statefulGroups[groups[i]] = true
+			}
+		}
+		for i, fn := range c.ordered {
+			if !statefulGroups[groups[i]] {
+				continue
+			}
 			if fold := c.ranges[fn]; fold != nil && fold.AppendTo != nil {
 				return Checked{}, diagnostic(fn, fn.Pos(), "fresh append folds cannot share a generated module with stateful methods")
 			}
@@ -144,13 +163,14 @@ func Check(program gosource.Program) (Checked, error) {
 	return Checked{
 		contracts: c.contracts, root: program.Package, functions: c.ordered, records: c.records, arrays: c.arrays, loops: c.loops,
 		ranges: c.ranges, builds: c.builds, chains: c.chains, stateful: c.stateful, owned: c.owned,
-		collectionAppends: c.collectionAppends, collectionPackaging: c.collectionPackaging,
+		collectionAppends: c.collectionAppends, collectionPackaging: c.collectionPackaging, groups: groups,
 	}, nil
 }
 
 type checker struct {
 	initializedFields map[*types.Var]bool
 	directives        map[*ssa.Function]gosource.Directives
+	exports           map[*types.Func]bool
 	contracts         map[*types.TypeName][]string
 	interfaceDocs     map[*types.TypeName]gosource.InterfaceDoc
 	visiting          map[*ssa.Function]bool
@@ -623,6 +643,9 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 			abstract = abstract || target.Callee == callee
 		}
 		if !abstract {
+			if err := c.checkCallBoundary(fn, ins.Pos(), callee); err != nil {
+				return err
+			}
 			if c.directives[callee].Constructor {
 				return diagnostic(fn, ins.Pos(), "verified constructor calls are unsupported in checked functions")
 			}
@@ -766,6 +789,31 @@ func (c *checker) instruction(fn *ssa.Function, ins ssa.Instruction) error {
 	default:
 		return diagnostic(fn, ins.Pos(), "unsupported SSA instruction %T", ins)
 	}
+}
+
+func (c *checker) checkCallBoundary(caller *ssa.Function, pos token.Pos, callee *ssa.Function) error {
+	owner := caller
+	for owner.Parent() != nil {
+		owner = owner.Parent()
+	}
+	if origin := owner.Origin(); origin != nil {
+		owner = origin
+	}
+	targetFunction := callee
+	if origin := callee.Origin(); origin != nil {
+		targetFunction = origin
+	}
+	target, _ := targetFunction.Object().(*types.Func)
+	if c.exports == nil || target == nil || owner.Pkg == nil || target.Pkg() == owner.Pkg.Pkg {
+		return nil
+	}
+	if !c.exports[target.Origin()] {
+		return diagnostic(caller, pos, "cross-package call to %s requires //golean:export on the Go declaration or a modeled interface contract", callee)
+	}
+	if len(callee.TypeArgs()) != 0 {
+		return diagnostic(caller, pos, "cross-package generic instantiation of %s is unsupported", callee)
+	}
+	return nil
 }
 
 // IntegerExtremum identifies runtime min and max on modeled integers.

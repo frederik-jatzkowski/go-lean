@@ -73,15 +73,17 @@ moreLeanArgs = ["-DwarningAsError=true"]
 [[lean_lib]]
 name = "Boundary"
 srcDir = "examples/provable"
-roots = ["`+moduleName+`_gen", "`+moduleName+`_proofs", "`+moduleName+`_verify"]
+roots = ["`+moduleName+`_model", "`+moduleName+`_gen", "`+moduleName+`_proofs", "`+moduleName+`_verify"]
 `)
 			outputs, err := transpile.Generate(dir)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(outputs) != 2 || !strings.Contains(outputs[0].Source, ".operation") ||
-				strings.Contains(outputs[1].Source, ".Linked.") || strings.Contains(outputs[0].Source, "\naxiom ") ||
-				strings.Contains(outputs[1].Source, "\naxiom ") {
+			modelOutput := generatedFile(t, outputs, test.name+"_model.lean").Source
+			verifyOutput := generatedFile(t, outputs, test.name+"_verify.lean").Source
+			if !strings.Contains(modelOutput, ".operation") ||
+				strings.Contains(verifyOutput, ".Linked.") || strings.Contains(modelOutput, "\naxiom ") ||
+				strings.Contains(verifyOutput, "\naxiom ") {
 				t.Fatalf("expected a conditional model and check for %s", stem)
 			}
 			model := filepath.Join(dir, stem+".go")
@@ -139,9 +141,9 @@ func Sum(x Local, y dep.Remote) int64 { return x.Value() + y.Value() }
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(outputs) != 2 ||
-		!strings.Contains(outputs[0].Source, "«contract:Local$Value».operation") ||
-		!strings.Contains(outputs[0].Source, "«contract:Remote$Value».operation") {
+	model := generatedFile(t, outputs, "sample_model.lean").Source
+	if !strings.Contains(model, "«contract:Local$Value».operation") ||
+		!strings.Contains(model, "«contract:Remote$Value».operation") {
 		t.Fatal("expected separate contracts for methods with the same name")
 	}
 	writeFile(t, boundary, strings.Replace(imported, "func (r Remote)", "//golean:verify\nfunc (r Remote)", 1))
@@ -200,7 +202,7 @@ defaultTargets = ["Verification"]
 moreLeanArgs = ["-DwarningAsError=true"]
 [[lean_lib]]
 name = "Verification"
-roots = ["input_gen", "input_proofs", "input_verify"]
+roots = ["sample_model", "input_gen", "input_proofs", "input_verify"]
 `)
 	writeFile(t, input, string(formatted))
 	generateFiles(t, dir)
@@ -260,11 +262,12 @@ name = "Verification"
 srcDir = "provable"
 roots = [
   "clampimport.clampimport_gen", "clampimport.clampimport_proofs", "clampimport.clampimport_verify",
+  "clampimport.clampimport_model", "clampimport.limits.limits_model",
   "clampimport.limits.limits_gen", "clampimport.limits.limits_proofs", "clampimport.limits.limits_verify",
 ]
 `)
 	generateFiles(t, dir)
-	model, err := os.ReadFile(filepath.Join(dir, clampPath, "clampimport_gen.lean"))
+	model, err := os.ReadFile(filepath.Join(dir, clampPath, "clampimport_model.lean"))
 	if err != nil {
 		t.Fatal(err)
 	}

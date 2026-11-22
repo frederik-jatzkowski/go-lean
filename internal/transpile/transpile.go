@@ -6,10 +6,7 @@ import (
 	"strings"
 
 	"github.com/frederik-jatzkowski/go-lean/internal/gosource"
-	"github.com/frederik-jatzkowski/go-lean/internal/ir"
 	"github.com/frederik-jatzkowski/go-lean/internal/lean"
-	"github.com/frederik-jatzkowski/go-lean/internal/lower"
-	"github.com/frederik-jatzkowski/go-lean/internal/subset"
 )
 
 type Output struct {
@@ -29,56 +26,50 @@ func Generate(dir string) ([]Output, error) {
 }
 
 func generate(programs []gosource.Program, resolveModule func(string) (string, error)) ([]Output, error) {
-	lowered := make(map[string]ir.Program, len(programs))
 	roots, err := verificationRoots(programs)
 	if err != nil {
 		return nil, err
 	}
+	models, ordered, lowered, err := packageModels(programs)
+	if err != nil {
+		return nil, err
+	}
+	verification := make(map[string]lean.Verification, len(programs))
 	for _, program := range programs {
-		if len(program.Roots) == 0 {
-			continue
-		}
-		abstract := make(map[ir.Symbol]map[ir.Symbol]bool)
-		for _, fn := range program.Roots {
-			targets := program.Directives[fn].Abstract
-			if len(targets) == 0 {
-				continue
-			}
-			caller := rootSymbol(program, fn)
-			calls := make(map[ir.Symbol]bool)
-			for _, target := range targets {
-				calls[abstractSymbol(caller, target.Callee)] = true
-			}
-			abstract[caller] = calls
-		}
-		checked, err := subset.Check(program)
+		file, err := makeVerification(resolveModule, program, roots, lowered)
 		if err != nil {
 			return nil, err
 		}
-		model := lower.FromSSAWithAbstractCalls(lower.NewInput(checked), sourceStem(program.Path), program.WordBits, abstract)
-		if err := traceVerificationRoots(program, &model, abstract); err != nil {
-			return nil, err
-		}
-		lowered[program.Path] = model
+		verification[program.Path] = file
+		pkg := models[file.Scope.Package]
+		pkg.addVerification(file)
 	}
 	var outputs []Output
-	for _, program := range programs {
-		model := lowered[program.Path]
-		verification, err := makeVerification(resolveModule, program, roots, lowered)
-		if err != nil {
-			return nil, err
+	for _, model := range ordered {
+		if model.hasDefinitions() {
+			module, err := resolveModule(model.path + ".go")
+			if err != nil {
+				return nil, err
+			}
+			model.module = lean.PackageModule(module)
+			outputs = append(outputs, model.output(models))
 		}
+	}
+	for _, program := range programs {
+		v := verification[program.Path]
+		model := models[v.Scope.Package]
+		v.ModelModule = model.module
 		base := strings.TrimSuffix(program.Path, ".go")
-		if verification.HasModel {
+		if v.HasModel {
 			outputs = append(outputs, Output{
-				Path: base + "_gen.lean", Source: lean.RenderVerification(model, verification),
+				Path: base + "_gen.lean", Source: lean.RenderAliases(model.program, v, model.module, model.visibleFunctions()),
 			})
 		}
-		if len(verification.Roots) != 0 || len(verification.ScopedLaws) != 0 {
-			if verification.SeparateLaws {
-				outputs = append(outputs, Output{Path: base + "_laws.lean", Source: lean.RenderLaws(verification)})
+		if len(v.Roots) != 0 || len(v.ScopedLaws) != 0 {
+			if v.SeparateLaws {
+				outputs = append(outputs, Output{Path: base + "_laws.lean", Source: lean.RenderLaws(v)})
 			}
-			outputs = append(outputs, Output{Path: base + "_verify.lean", Source: lean.RenderCheck(verification)})
+			outputs = append(outputs, Output{Path: base + "_verify.lean", Source: lean.RenderCheck(v)})
 		}
 	}
 	return outputs, nil

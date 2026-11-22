@@ -40,7 +40,7 @@ func Save(repo Repository, approved bool) bool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := outputs[0].Source
+	source := generatedFile(t, outputs, "sample_model.lean").Source
 	for _, want := range []string{"→ Int64 → Unit", "example.test/sample.Repository.Persist"} {
 		if !strings.Contains(source, want) {
 			t.Errorf("generated model lacks %q", want)
@@ -82,13 +82,25 @@ func Legacy(repo boundary.Repository, value int64) int64 { return Save(repo, val
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := outputs[0].Source
+	source := generatedFile(t, outputs, "sample_model.lean").Source
 	for _, want := range []string{"«Save$trace$0$helper»", "«Save$untraced»", "example.test/sample/boundary.Repository.Write"} {
 		if !strings.Contains(source, want) {
 			t.Errorf("generated model lacks %q", want)
 		}
 	}
-	checkInitializedLean(t, dir, outputs[0].Path, source+`
+	lake, err := exec.LookPath("lake")
+	if err != nil {
+		t.Skip("Lake is unavailable on PATH")
+	}
+	if err := transpile.Write(outputs); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, "lakefile.toml"), `name = "Trace"
+[[lean_lib]]
+name = "Trace"
+roots = ["boundary.boundary_model", "sample_model", "input_gen", "checks"]
+`)
+	writeFile(t, filepath.Join(dir, "checks.lean"), `import input_gen
 namespace GoLean.«example.test/sample».input
 
 private def repo : Dependencies.«example.test/sample/boundary».InterfaceContracts.RepositoryContract Unit :=
@@ -100,6 +112,7 @@ example : Legacy repo () 3 = 3 := rfl
 
 end GoLean.«example.test/sample».input
 `)
+	checkLake(t, lake, dir, "", "checks")
 }
 
 func TestSequentialBoundaryEffects(t *testing.T) {
@@ -188,9 +201,9 @@ func Run(repo Repository) int64 { `+tc.body+" }\n")
 }
 
 func TestAllowedEffectBreaksEmptyTraceProof(t *testing.T) {
-	lean, err := exec.LookPath("lean")
+	lake, err := exec.LookPath("lake")
 	if err != nil {
-		t.Skip("Lean is unavailable on PATH")
+		t.Skip("Lake is unavailable on PATH")
 	}
 	for _, rejection := range []string{"return 0", "repo.Write(0); return 0"} {
 		t.Run(rejection, func(t *testing.T) {
@@ -208,21 +221,26 @@ func Run(repo Repository, approved bool) int64 {
 			if err != nil {
 				t.Fatal(err)
 			}
-			path := outputs[0].Path
-			writeFile(t, path, outputs[0].Source+`
+			if err := transpile.Write(outputs); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, filepath.Join(dir, "lakefile.toml"), `name = "Trace"
+[[lean_lib]]
+name = "Trace"
+roots = ["sample_model", "input_gen", "checks"]
+`)
+			writeFile(t, filepath.Join(dir, "checks.lean"), `import input_gen
 namespace GoLean.«example.test/sample».input
 theorem reject : Laws.reject := by
   intro H repo handle
   rfl
 end GoLean.«example.test/sample».input
 `)
-			out, err := exec.Command(lean, "--root="+dir, path).CombinedOutput()
-			if rejection == "return 0" && err != nil {
-				t.Fatalf("expected the proof to check: %v\n%s", err, out)
+			diagnostic := ""
+			if rejection != "return 0" {
+				diagnostic = "definitionally equal"
 			}
-			if rejection != "return 0" && (err == nil || !strings.Contains(string(out), "definitionally equal")) {
-				t.Fatalf("expected the unexpected write to break the proof: %v\n%s", err, out)
-			}
+			checkLake(t, lake, dir, diagnostic, "checks")
 		})
 	}
 }

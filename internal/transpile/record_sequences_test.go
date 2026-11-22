@@ -76,7 +76,7 @@ func copyIntoField(values []int64) data { return initData(copyValues(values)) }
 defaultTargets = ["Checks"]
 [[lean_lib]]
 name = "Checks"
-roots = ["input_gen", "checks"]
+roots = ["sample_model", "input_gen", "checks"]
 `)
 	writeFile(t, filepath.Join(dir, "checks.lean"), `import input_gen
 open GoLean.«example.test/sample».input

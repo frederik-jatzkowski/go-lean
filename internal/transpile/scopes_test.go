@@ -60,7 +60,7 @@ end GoLean.«example.test/sample».input.Proofs
 	writeFile(t, filepath.Join(dir, "lakefile.toml"), `name = "Scoped"
 [[lean_lib]]
 name = "Scoped"
-roots = ["early", "late", "input_gen", "input_laws", "input_proofs", "input_verify", "doc_laws", "doc_proofs", "doc_verify"]
+roots = ["early", "late", "sample_model", "port.port_model", "input_gen", "input_laws", "input_proofs", "input_verify", "doc_laws", "doc_proofs", "doc_verify"]
 `)
 	outputs, err := transpile.Generate(dir)
 	if err != nil {
@@ -73,7 +73,7 @@ roots = ["early", "late", "input_gen", "input_laws", "input_proofs", "input_veri
 	if _, exists := models["doc_gen.lean"]; exists {
 		t.Fatal("a law-only file generated an operation model")
 	}
-	if model := models["input_gen.lean"]; strings.Count(model, "import «early»\n") != 1 || strings.Contains(model, "import «late»\n") {
+	if model := models["sample_model.lean"]; strings.Count(model, "import «early»\n") != 1 || strings.Contains(model, "import «late»\n") {
 		t.Fatalf("unexpected model imports:\n%s", model)
 	}
 	if laws := models["input_laws.lean"]; strings.Count(laws, "import «late»\n") != 1 || strings.Count(laws, "import «input_gen»\n") != 1 {

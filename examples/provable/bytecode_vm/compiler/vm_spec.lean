@@ -1,4 +1,4 @@
-import bytecode_vm.compiler.vm_gen
+import bytecode_vm.compiler.compiler_model
 
 namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/bytecode_vm/compiler».vm.VMModel
 

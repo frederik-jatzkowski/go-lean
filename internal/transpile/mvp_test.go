@@ -56,7 +56,7 @@ func copies(s string) ([]byte, []byte, bool) {
 		t.Fatal(err)
 	}
 	checkGeneratedLean(t, dir, outputs[0].Path, outputs[0].Source, `
-open GoLean.«example.test/sample».input
+open GoLean.«example.test/sample»
 example : decodeToken (ByteArray.mk #[49, 50]) 10 = some (12, true) := by decide
 example : decodeToken (ByteArray.mk #[49, 255]) 10 = some (0, false) := by decide
 example : copies (ByteArray.mk #[]) = some (some [], some [], false) := by decide
@@ -120,7 +120,7 @@ func summarize(keys []string, target string) (int, int, int, bool) {
 		t.Fatal(err)
 	}
 	checkGeneratedLean(t, dir, outputs[0].Path, outputs[0].Source, `
-open GoLean.«example.test/sample».input
+open GoLean.«example.test/sample»
 private def invalidByte : ByteArray := ByteArray.mk #[255]
 private def emptyByte : ByteArray := ByteArray.mk #[]
 example : forward (ByteArray.mk #[120, 255, 0]) 1 3 =

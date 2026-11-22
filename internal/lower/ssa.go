@@ -16,8 +16,18 @@ func FromSSA(input Input, sourceStem string, wordBits int64) ir.Program {
 
 // FromSSAWithAbstractCalls lowers designated direct calls as total operations.
 func FromSSAWithAbstractCalls(input Input, sourceStem string, wordBits int64, abstract map[ir.Symbol]map[ir.Symbol]bool) ir.Program {
+	program, _ := fromSSA(input, url.PathEscape(sourceStem), wordBits, abstract, nil, nil)
+	return program
+}
+
+// FromPackageSSA lowers functions owned by the input package. Concrete calls to
+// dependencies use the signatures and effects of models already lowered.
+func FromPackageSSA(input Input, groups []int, wordBits int64, abstract map[ir.Symbol]map[ir.Symbol]bool, external map[ir.Symbol]ir.Function) (ir.Program, ir.Symbol) {
+	return fromSSA(input, "", wordBits, abstract, external, groups)
+}
+
+func fromSSA(input Input, file string, wordBits int64, abstract map[ir.Symbol]map[ir.Symbol]bool, external map[ir.Symbol]ir.Function, groups []int) (ir.Program, ir.Symbol) {
 	program := ir.Program{Records: make(map[ir.Type]ir.Record), Contracts: make(map[ir.Type]ir.Contract)}
-	file := url.PathEscape(sourceStem)
 	reader := inputReader{input: input, objects: make(map[int64]any)}
 	// The checker orders callees before callers, so their effects are already known.
 	facts := &functionFacts{store: stateSnapshot{}}
@@ -26,9 +36,20 @@ func FromSSAWithAbstractCalls(input Input, sourceStem string, wordBits int64, ab
 	for i := int64(0); i < input.FunctionCount(); i++ {
 		functions = append(functions, reader.decodeFunction(input.FunctionAt(i)))
 	}
-	nullableSlices := usesNullableSlices(functions)
-	capacitySlices := capacitySliceTypes(functions)
-	for _, fn := range functions {
+	if groups == nil {
+		groups = make([]int, len(functions))
+	}
+	partitions := make(map[int][]*sourceFunction)
+	for i, fn := range functions {
+		partitions[groups[i]] = append(partitions[groups[i]], fn)
+	}
+	nullableSlices := make(map[int]bool)
+	capacitySlices := make(map[int]map[ir.Type]bool)
+	for group, partition := range partitions {
+		nullableSlices[group] = usesNullableSlices(partition)
+		capacitySlices[group] = capacitySliceTypes(partition)
+	}
+	for i, fn := range functions {
 		if fn.Origin != "" {
 			instances[fn] = fn.Origin + "$instance" + strconv.Itoa(len(instances))
 		}
@@ -36,7 +57,17 @@ func FromSSAWithAbstractCalls(input Input, sourceStem string, wordBits int64, ab
 			root: input.PackagePath(), input: input, file: file, state: stateSnapshot{}, binders: new([]ir.Binder), facts: facts,
 			records: program.Records, instances: instances,
 			contracts: program.Contracts, usedContracts: make(map[ir.Type]bool),
-			nullableSlices: nullableSlices && fn.Stateful == nil, capacitySlices: capacitySlices,
+			nullableSlices: nullableSlices[groups[i]] && fn.Stateful == nil, capacitySlices: capacitySlices[groups[i]],
+		}
+		symbol := l.symbol(fn)
+		if file == "" && symbol.Package != l.root {
+			if imported, ok := external[symbol]; ok {
+				if !l.matchesSignature(fn, imported) {
+					return ir.Program{}, symbol
+				}
+				facts.record(fn, imported.CanPanic, imported.Contracts)
+			}
+			continue
 		}
 		l.ownedCollections = fn.Range == nil && fn.Build == nil && (fn.Counted == nil || fn.Counted.Control)
 		if method := fn.Stateful; method != nil {
@@ -46,7 +77,7 @@ func FromSSAWithAbstractCalls(input Input, sourceStem string, wordBits int64, ab
 			}
 			continue
 		}
-		result := ir.Function{Symbol: l.symbol(fn), Result: productType(fn.Results, l.ordinaryType)}
+		result := ir.Function{Symbol: symbol, Result: productType(fn.Results, l.ordinaryType)}
 		l.abstract = abstract[result.Symbol]
 		for i := 0; i < fn.TypeParameters; i++ {
 			result.TypeParams = append(result.TypeParams, ir.TypeParameter(i))
@@ -118,7 +149,25 @@ func FromSSAWithAbstractCalls(input Input, sourceStem string, wordBits int64, ab
 		program.Functions = append(program.Functions, result)
 		facts.record(fn, result.CanPanic, result.Contracts)
 	}
-	return program
+	return program, ir.Symbol{}
+}
+
+func (l *lowerer) matchesSignature(fn *sourceFunction, imported ir.Function) bool {
+	if len(fn.Params) != len(imported.Params) || productType(fn.Results, l.ordinaryType) != imported.Result {
+		return false
+	}
+	for i, param := range fn.Params {
+		if fn.Build != nil && param == fn.Build.Callback {
+			if fn.Build.CallbackType != imported.Params[i].Type {
+				return false
+			}
+			continue
+		}
+		if l.ordinaryType(param.Type) != imported.Params[i].Type {
+			return false
+		}
+	}
+	return true
 }
 
 // lookupBindingID resolves a source value in the current branch's store.
@@ -337,7 +386,11 @@ func (l *lowerer) symbol(fn *sourceFunction) ir.Symbol {
 		symbol.Name = name
 	}
 	if fn.Package != l.root {
-		symbol.Dependency = fn.Package
+		if l.file == "" && fn.Package != "" {
+			symbol.Package = fn.Package
+		} else {
+			symbol.Dependency = fn.Package
+		}
 	}
 	return symbol
 }
@@ -547,7 +600,15 @@ func (l *lowerer) lowerInstructions(block, predecessor *sourceBlock, instruction
 			}
 			target := ins.Call.Target
 			call := ir.Call{Callee: l.symbol(target)}
-			abstract := l.abstract[call.Callee]
+			abstractTarget := call.Callee
+			if call.Callee.Package != l.root {
+				abstractTarget.Package = l.root
+				abstractTarget.Dependency = call.Callee.Package
+			}
+			abstract := l.abstract[abstractTarget]
+			if abstract {
+				call.Callee = abstractTarget
+			}
 			if !abstract {
 				call.Contracts = l.facts.contracts(target)
 			}
@@ -880,7 +941,11 @@ func (l *lowerer) freshSlice(elements ir.Expr, typ ir.Type) ir.Expr {
 func (l *lowerer) typeSymbol(t *sourceType, suffix string) ir.Symbol {
 	symbol := ir.Symbol{Package: l.root, File: l.file, Name: t.Name + suffix}
 	if t.Package != l.root {
-		symbol.Dependency = t.Package
+		if l.file == "" && t.Package != "" {
+			symbol.Package = t.Package
+		} else {
+			symbol.Dependency = t.Package
+		}
 	}
 	return symbol
 }

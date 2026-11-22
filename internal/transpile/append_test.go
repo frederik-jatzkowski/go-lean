@@ -44,7 +44,7 @@ func observe(input []uint8) (uint16, int, int, bool) {
 		t.Fatal(err)
 	}
 	checkGeneratedLean(t, dir, outputs[0].Path, outputs[0].Source, `
-open GoLean.«example.test/sample».input
+open GoLean.«example.test/sample»
 
 example : collect [0, 3, 10] [] = (some ([3, 100], 3), false) := by decide
 example : observe [0, 0] = some (0, 0, 2, false) := by decide

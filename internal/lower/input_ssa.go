@@ -12,6 +12,16 @@ import (
 	"golang.org/x/tools/go/ssa"
 )
 
+// AddPackageRecords declares checked, standalone record shapes even when the
+// current caller does not use every exported type in their owning package.
+func AddPackageRecords(program *ir.Program, owner string, records []types.Type) {
+	builder := ssaInputBuilder{types: make(map[types.Type]*sourceType)}
+	l := lowerer{root: owner, records: program.Records}
+	for _, record := range records {
+		l.valueType(builder.typ(record))
+	}
+}
+
 // NewInput snapshots checked SSA into the scalar view consumed by FromSSA.
 func NewInput(checked subset.Checked) Input {
 	builder := ssaInputBuilder{checked: checked, functions: make(map[*ssa.Function]*sourceFunction),

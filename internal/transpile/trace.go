@@ -64,10 +64,13 @@ type traceCompiler struct {
 	binders  int
 }
 
-func traceVerificationRoots(program gosource.Program, model *ir.Program, abstract map[ir.Symbol]map[ir.Symbol]bool) error {
+func traceVerificationRoots(program gosource.Program, model *ir.Program, abstract map[ir.Symbol]map[ir.Symbol]bool, imported map[ir.Symbol]ir.Function) error {
 	models := make(map[ir.Symbol]ir.Function)
 	for _, fn := range model.Functions {
 		models[fn.Symbol] = fn
+	}
+	for symbol, fn := range imported {
+		models[symbol] = fn
 	}
 	for _, fn := range program.Roots {
 		entries := program.Directives[fn].InterfaceCalls
@@ -141,6 +144,12 @@ func (c *traceCompiler) function(symbol ir.Symbol) (tracedFunction, error) {
 	}
 	if fn.CanPanic || fn.Loop != nil || fn.Fuel != nil {
 		return tracedFunction{}, fmt.Errorf("%s must have an acyclic, total model", symbol.Name)
+	}
+	if symbol.Package != c.root.Package {
+		if len(fn.Contracts) != 0 {
+			return tracedFunction{}, fmt.Errorf("strict proofs cannot classify interface operations inside imported model %s.%s", symbol.Package, symbol.Name)
+		}
+		return tracedFunction{symbol: symbol}, nil
 	}
 	body, summary, err := c.body(fn.Body, 0, ir.Trace(""))
 	if err != nil {

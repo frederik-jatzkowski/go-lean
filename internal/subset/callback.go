@@ -14,6 +14,9 @@ func (c *checker) checkCallback(caller *ssa.Function, call *ssa.Call, value ssa.
 	if !ok || fn.Parent() != nil && fn.Parent() != caller {
 		return diagnostic(caller, call.Pos(), "slice callback must be a statically known function")
 	}
+	if err := c.checkCallBoundary(caller, call.Pos(), fn); err != nil {
+		return err
+	}
 	if len(c.directives[fn].Abstract) != 0 {
 		return diagnostic(caller, call.Pos(), "using an abstracted verification root as a callback in the same module is unsupported")
 	}

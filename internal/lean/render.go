@@ -39,13 +39,16 @@ func RenderVerification(program ir.Program, verification Verification) string {
 	out.WriteString("\nset_option linter.unusedVariables false\n")
 	out.WriteString("\nnamespace GoLean\n")
 	if program.WordBits != 0 {
-		scope := symbolScope(program.Functions[0].Symbol)
+		scope := symbolScope(verification.Scope)
+		if verification.Scope.Package == "" {
+			scope = symbolScope(program.Functions[0].Symbol)
+		}
 		fmt.Fprintf(&out, "\nabbrev %s.GoTypes.Int := %s\n", scope, r.leanType(ir.IntWord))
 		fmt.Fprintf(&out, "abbrev %s.GoTypes.UInt := %s\n", scope, r.leanType(ir.UIntWord))
 		fmt.Fprintf(&out, "abbrev %s.GoTypes.WordBits : Nat := %d\n", scope, program.WordBits)
 	}
-	r.renderRecords(&out)
-	r.renderContracts(&out)
+	r.renderRecords(&out, verification.PackagePath)
+	r.renderContracts(&out, verification.PackagePath)
 	if len(verification.Roots) != 0 {
 		out.WriteString(declareLaw)
 		for _, root := range verification.Roots {
@@ -111,7 +114,7 @@ func RenderVerification(program ir.Program, verification Verification) string {
 	}
 	if !verification.SeparateLaws {
 		for _, root := range verification.Roots {
-			renderLaws(&out, root)
+			renderLaws(&out, root, verification.Scope)
 		}
 	}
 	out.WriteString("\nend GoLean\n")
@@ -190,12 +193,12 @@ func (r renderer) renderCountedLoop(out *strings.Builder, loop ir.CountedLoop) {
 	fmt.Fprintf(out, "\nend %s\n", ns)
 }
 
-func (r renderer) renderRecords(out *strings.Builder) {
+func (r renderer) renderRecords(out *strings.Builder, owner string) {
 	emitted := make(map[ir.Type]bool)
 	var emit func(ir.Type)
 	emit = func(typ ir.Type) {
 		record, exists := r.records[typ]
-		if !exists || emitted[typ] {
+		if !exists || emitted[typ] || (owner != "" && record.Symbol.Package != owner) {
 			return
 		}
 		emitted[typ] = true
@@ -238,9 +241,12 @@ func contractBinder(handle ir.Type) string {
 	return quoted("contract:" + string(handle))
 }
 
-func (r renderer) renderContracts(out *strings.Builder) {
+func (r renderer) renderContracts(out *strings.Builder, owner string) {
 	for _, handle := range slices.Sorted(maps.Keys(r.contracts)) {
 		contract := r.contracts[handle]
+		if owner != "" && contract.Symbol.Package != owner {
+			continue
+		}
 		fmt.Fprintf(out, "\nstructure %s (%s : Type) where\n", contractDeclaration(contract), r.leanType(handle))
 		for _, method := range contract.Methods {
 			fmt.Fprintf(out, "  %s : %s", quoted(method.Name), r.leanType(handle))
@@ -748,6 +754,9 @@ func quoted(name string) string { return "«" + name + "»" }
 func recordFieldName(name string) string { return quoted("field:" + name) }
 
 func symbolScope(symbol ir.Symbol) string {
+	if symbol.File == "" {
+		return quoted(symbol.Package)
+	}
 	return quoted(symbol.Package) + "." + quoted(symbol.File)
 }
 

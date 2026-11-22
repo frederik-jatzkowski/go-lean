@@ -58,14 +58,16 @@ roots = [
 	}
 	write(t, "src/handmade_gen.lean", lean.GeneratedHeader+" (example)\n")
 	write(t, "src/orphan_verify.lean", owned)
+	write(t, "src/orphan_model.lean", owned)
 	transpileTree(t)
-	assertMissing(t, "src/orphan_verify.lean")
+	assertMissing(t, "src/orphan_verify.lean", "src/orphan_model.lean")
 
 	insert := func(block string, entries ...string) string {
 		return strings.Replace(block, lakeBlock, "  # BEGIN go-lean managed roots\n  '"+
 			strings.Join(entries, "',\n  '")+"',\n  # END go-lean managed roots\n", 1)
 	}
-	want := crlf(first + insert(lakeBlock, "a_gen", "a_laws", "a_proofs", "a_verify") + insert(nested, "sub_gen"))
+	want := crlf(first + insert(lakeBlock, "a_gen", "a_laws", "a_proofs", "a_verify", "mainpkg_model") +
+		insert(nested, "nested_model", "sub_gen"))
 	if got := read(t, "lakefile.toml"); got != want {
 		t.Fatalf("unexpected generated Lake config:\n%s", got)
 	}
@@ -107,7 +109,7 @@ roots = [
 		t.Fatal(err)
 	}
 	transpileTree(t)
-	assertMissing(t, "src/a_gen.lean", "src/nested/sub_gen.lean")
+	assertMissing(t, "src/a_gen.lean", "src/mainpkg_model.lean", "src/nested/sub_gen.lean", "src/nested/nested_model.lean")
 	if got := read(t, "lakefile.toml"); got != crlf(first+lakeBlock+nested) {
 		t.Fatalf("unexpected config after directive removal and deletion:\n%s", got)
 	}
@@ -160,8 +162,8 @@ func TestManagedRootsLakeBuildAfterRename(t *testing.T) {
 	}
 	writeProof("renamed.part", "«renamed.part».b", "b")
 	transpileTree(t)
-	assertMissing(t, "original/a_gen.lean", "original/a_verify.lean")
-	if config := read(t, "lakefile.toml"); strings.Contains(config, "original.a") {
+	assertMissing(t, "original/a_gen.lean", "original/a_verify.lean", "original/sample_model.lean")
+	if config := read(t, "lakefile.toml"); strings.Contains(config, "original.") {
 		t.Fatalf("old roots survived the rename:\n%s", config)
 	}
 	build()

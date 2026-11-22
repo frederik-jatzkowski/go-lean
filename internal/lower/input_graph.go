@@ -391,6 +391,7 @@ const (
 	fieldStatefulCallbackInput
 	fieldStatefulRecord
 	fieldStatefulLoop
+	fieldStatefulBuffers
 )
 
 func statefulFields(f sourceFields, value *sourceStateful) {
@@ -399,6 +400,7 @@ func statefulFields(f sourceFields, value *sourceStateful) {
 	referenceField(f, fieldStatefulCallbackInput, &value.CallbackInput, typeFields)
 	referenceField(f, fieldStatefulRecord, &value.Record, typeFields)
 	referenceField(f, fieldStatefulLoop, &value.Loop, indexedFields)
+	textListField(f, fieldStatefulBuffers, &value.Buffers)
 }
 
 const (

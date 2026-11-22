@@ -15,6 +15,7 @@ type StatefulMethod struct {
 	Receiver *ssa.Parameter
 	Callback *ssa.Parameter
 	Loop     *IndexedLoop
+	Buffers  map[int]bool
 	writes   map[int]bool
 }
 
@@ -78,7 +79,7 @@ func writesReceiver(fn *ssa.Function, seen map[*ssa.Function]bool) bool {
 		for _, ins := range block.Instrs {
 			switch ins := ins.(type) {
 			case *ssa.Store:
-				if recordAddressBase(ins.Addr) == receiver {
+				if recordAddressBase(ins.Addr) == receiver || receiverSliceIndex(ins.Addr, receiver) != nil {
 					return true
 				}
 			case *ssa.Call:
@@ -109,30 +110,41 @@ func (c *checker) checkStateful(fn *ssa.Function) error {
 		return diagnostic(fn, fn.Pos(), "stateful methods require a declared record pointer receiver")
 	}
 	for result := range sig.Results().Variables() {
-		if !stateValueType(result.Type()) {
+		if !stateValueType(result.Type()) || c.containsBufferRecord(result.Type()) {
 			return diagnostic(fn, fn.Pos(), "unsupported stateful method result")
 		}
 	}
-	spec := &StatefulMethod{Receiver: receiver, writes: make(map[int]bool)}
+	spec := &StatefulMethod{
+		Receiver: receiver, writes: make(map[int]bool),
+		Buffers: c.bufferFields[StatefulRecord(receiver.Type())],
+	}
 	for _, param := range fn.Params[1:] {
-		if stateValueType(param.Type()) {
+		if stateValueType(param.Type()) && !c.containsBufferRecord(param.Type()) {
 			continue
 		}
-		if spec.Callback == nil && BooleanCallbackInput(param.Type()) != nil {
+		if len(spec.Buffers) == 0 && spec.Callback == nil && BooleanCallbackInput(param.Type()) != nil {
 			spec.Callback = param
 			continue
 		}
 		return diagnostic(fn, param.Pos(), "unsupported stateful method parameter")
 	}
 	c.visiting[fn] = true
+	if err := c.checkBufferUses(fn, spec); err != nil {
+		return err
+	}
 	for _, block := range fn.Blocks {
 		for _, ins := range block.Instrs {
+			if c.collectionPackaging[ins] {
+				continue
+			}
 			if !c.stateInstruction(fn, spec, ins) {
 				return diagnostic(fn, ins.Pos(), "unsupported receiver-state instruction or operand: %s", ins)
 			}
 			switch ins := ins.(type) {
 			case *ssa.Store:
-				if field := sameReceiverField(ins.Addr, receiver); field != nil {
+				if field := spec.bufferWriteField(ins); field != nil {
+					spec.writes[field.Field] = true
+				} else if field := sameReceiverField(ins.Addr, receiver); field != nil {
 					spec.writes[field.Field] = true
 				}
 			case *ssa.Call:
@@ -204,6 +216,9 @@ func (c *checker) stateInstruction(fn *ssa.Function, spec *StatefulMethod, ins s
 			}
 		}
 	case *ssa.FieldAddr:
+		if spec.bufferIndex(ins) != nil {
+			return true // Validated by checkBufferUses.
+		}
 		if sameReceiverField(ins, receiver) != nil {
 			for _, use := range *ins.Referrers() {
 				if store, ok := use.(*ssa.Store); (!ok || store.Addr != ins) && !readsCell(use, ins) {
@@ -217,6 +232,9 @@ func (c *checker) stateInstruction(fn *ssa.Function, spec *StatefulMethod, ins s
 		if !stateValue(ins.X) || Type(ins.X.Type()).SliceElem() == "" || !supportedIndex(ins.Index) {
 			return false
 		}
+		if spec.bufferIndex(ins) != nil {
+			return true
+		}
 		for _, use := range *ins.Referrers() {
 			if !readsCell(use, ins) {
 				return false
@@ -226,12 +244,19 @@ func (c *checker) stateInstruction(fn *ssa.Function, spec *StatefulMethod, ins s
 	case *ssa.UnOp:
 		if ins.Op == token.MUL {
 			_, indexed := ins.X.(*ssa.IndexAddr)
-			return stateValue(ins) && (indexed || sameReceiverField(ins.X, receiver) != nil || c.isRecordAddress(ins.X))
+			return stateValue(ins) && (indexed || spec.bufferIndex(ins.X) != nil || sameReceiverField(ins.X, receiver) != nil || c.isRecordAddress(ins.X))
 		}
 		return stateValue(ins.X) && c.instruction(fn, ins) == nil
 	case *ssa.Store:
-		return stateValue(ins.Val) && (sameReceiverField(ins.Addr, receiver) != nil || c.isRecordAddress(ins.Addr))
+		return stateValue(ins.Val) && (spec.bufferIndex(ins.Addr) != nil || sameReceiverField(ins.Addr, receiver) != nil || c.isRecordAddress(ins.Addr))
+	case *ssa.MakeSlice:
+		return c.owned[ins] != nil && supportedIndex(ins.Len) && supportedIndex(ins.Cap)
+	case *ssa.Slice:
+		return c.owned[ins] != nil
 	case *ssa.Call:
+		if c.collectionAppends[ins] != nil {
+			return true
+		}
 		args := ins.Call.Args
 		if len(args) == 1 && (IsLength(ins) || IsSliceClone(ins)) {
 			return stateValue(args[0]) && Type(args[0].Type()).SliceElem() != ""
@@ -240,6 +265,9 @@ func (c *checker) stateInstruction(fn *ssa.Function, spec *StatefulMethod, ins s
 			return len(args) == 1 && stateValue(args[0])
 		}
 		target := ins.Call.StaticCallee()
+		if len(spec.Buffers) > 0 && bufferCommand(fn, target, args) {
+			return c.function(target) == nil
+		}
 		if target == nil || len(args) == 0 || args[0] != receiver || pointerReceiver(target) == nil ||
 			!types.Identical(receiver.Type(), target.Params[0].Type()) {
 			return false

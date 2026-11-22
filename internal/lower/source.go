@@ -189,6 +189,7 @@ type sourceStateful struct {
 	Receiver, Callback    *sourceValue
 	CallbackInput, Record *sourceType
 	Loop                  *sourceIndexed
+	Buffers               []string
 }
 type sourceIndexed struct {
 	Header           *sourceBlock

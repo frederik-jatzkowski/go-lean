@@ -97,6 +97,11 @@ func (b *ssaInputBuilder) fillFunction(fn *ssa.Function) {
 	}
 	if m := b.checked.Stateful(fn); m != nil {
 		f.Stateful = &sourceStateful{Receiver: b.value(m.Receiver), Record: b.typ(subset.StatefulRecord(m.Receiver.Type()))}
+		for index, field := range f.Stateful.Record.Fields {
+			if m.Buffers[index] {
+				f.Stateful.Buffers = append(f.Stateful.Buffers, field.Name)
+			}
+		}
 		if m.Callback != nil {
 			f.Stateful.Callback = b.value(m.Callback)
 			f.Stateful.CallbackInput = b.typ(subset.BooleanCallbackInput(m.Callback.Type()))

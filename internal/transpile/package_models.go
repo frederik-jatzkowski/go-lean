@@ -293,7 +293,7 @@ func (m *packageModel) importTypeDependencies(models map[string]*packageModel, o
 			return
 		}
 		elem, _ := typ.ArrayShape()
-		for _, inner := range []ir.Type{elem, typ.OptionElem(), typ.Pointee(), typ.SliceElem()} {
+		for _, inner := range []ir.Type{elem, typ.OptionElem(), typ.Pointee(), typ.SliceElem(), typ.BufferElem()} {
 			scan(inner)
 		}
 		if dependency := owners[typ]; dependency != "" && dependency != owner {

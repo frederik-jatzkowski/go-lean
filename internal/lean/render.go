@@ -210,6 +210,9 @@ func (r renderer) renderRecords(out *strings.Builder, owner string) {
 			if elem := typ.SliceElem(); elem != "" {
 				typ = elem
 			}
+			if elem := typ.BufferElem(); elem != "" {
+				typ = elem
+			}
 			if elem, _ := typ.ArrayShape(); elem != "" {
 				typ = elem
 			}
@@ -274,6 +277,9 @@ func (r renderer) leanType(typ ir.Type) string {
 	}
 	if elem := typ.SliceElem(); elem != "" {
 		return "(List " + r.leanType(elem) + ")"
+	}
+	if elem := typ.BufferElem(); elem != "" {
+		return "(Array " + r.leanType(elem) + ")"
 	}
 	if elem, length := typ.ArrayShape(); elem != "" {
 		return "(Vector " + r.leanType(elem) + " " + length + ")"
@@ -503,6 +509,9 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 		length := r.integerAsInt(expr.Length, expr.LengthType)
 		capacity := r.integerAsInt(expr.Capacity, expr.CapacityType)
 		value := "(List.replicate length.toNat " + r.renderExpr(expr.Zero) + ")"
+		if expr.Array {
+			value = "(Array.replicate length.toNat " + r.renderExpr(expr.Zero) + ")"
+		}
 		if expr.TracksCapacity {
 			value = "(some (" + value + ", capacity.toNat))"
 		} else if expr.Nullable {
@@ -521,6 +530,15 @@ func (r renderer) renderExpr(expr ir.Expr) string {
 		return fmt.Sprintf("((%s).set %s %s)", sequence, index, value)
 	case ir.SliceCapacity:
 		return fmt.Sprintf("(%s.ofNat ((%s).getD ([], 0)).2)", r.leanType(ir.IntWord), r.renderExpr(expr.Slice))
+	case ir.EmptyBuffer:
+		return "#[]"
+	case ir.BufferLength:
+		return fmt.Sprintf("(%s.ofNat ((%s).getD #[]).size)", r.leanType(ir.IntWord), r.renderExpr(expr.Buffer))
+	case ir.BufferAppend:
+		return fmt.Sprintf("(some (((%s).getD #[]).push %s))", r.renderExpr(expr.Buffer), r.renderExpr(expr.Element))
+	case ir.BufferSet:
+		return fmt.Sprintf("(some (((%s).getD #[]).setIfInBounds %s %s))",
+			r.renderExpr(expr.Buffer), r.indexNat(expr.Index, expr.IndexType), r.renderExpr(expr.Value))
 	case ir.StringLiteral:
 		return strconv.Quote(string(expr))
 	case ir.CheckedStringSlice:

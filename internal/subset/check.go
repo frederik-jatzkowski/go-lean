@@ -79,14 +79,20 @@ func Check(program gosource.Program) (Checked, error) {
 		builds:            make(map[*ssa.Function]*SliceBuild),
 		chains:            make(map[*ssa.Function]*ChainRecursion),
 		stateful:          make(map[*ssa.Function]*StatefulMethod),
+		bufferFields:      findReceiverBuffers(program.Roots),
 
 		owned:               make(map[ssa.Value]ssa.Value),
 		collectionAppends:   make(map[*ssa.Call]ssa.Value),
 		collectionPackaging: make(map[ssa.Instruction]bool),
 	}
 	for _, fn := range program.Roots {
-		if !program.Directives[fn].Constructor && writesReceiver(fn, make(map[*ssa.Function]bool)) {
+		receiver := pointerReceiver(fn)
+		hasBuffers := receiver != nil && len(c.bufferFields[StatefulRecord(receiver.Type())]) != 0
+		if !program.Directives[fn].Constructor && (hasBuffers || writesReceiver(fn, make(map[*ssa.Function]bool))) {
 			if err := c.checkStateful(fn); err != nil {
+				return Checked{}, err
+			}
+			if err := c.checkBufferEntry(fn); err != nil {
 				return Checked{}, err
 			}
 			continue
@@ -184,6 +190,7 @@ type checker struct {
 	builds            map[*ssa.Function]*SliceBuild
 	chains            map[*ssa.Function]*ChainRecursion
 	stateful          map[*ssa.Function]*StatefulMethod
+	bufferFields      map[*types.Named]map[int]bool
 
 	owned               map[ssa.Value]ssa.Value
 	collectionAppends   map[*ssa.Call]ssa.Value
@@ -202,6 +209,9 @@ func (c *checker) function(fn *ssa.Function) error {
 	}
 	if len(fn.Blocks) == 0 {
 		return diagnostic(fn, fn.Pos(), "Go body unavailable for %s", fn)
+	}
+	if err := c.checkOrdinaryBufferRecords(fn); err != nil {
+		return err
 	}
 	if loop := structure.SecondSourceLoop(fn); loop != nil {
 		return diagnostic(fn, loop.Pos(), "only one loop per function is supported; extract another loop into a checked helper")

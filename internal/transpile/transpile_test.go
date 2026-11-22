@@ -148,7 +148,7 @@ func TestRejectUnsupportedStatefulMethods(t *testing.T) {
 	for _, test := range []struct{ name, body, want string }{
 		{"untracked pointer", "func (r *Record) f(other *Record) int { r.value++; other.value++; return r.value }", "unsupported stateful method parameter"},
 		{"receiver escape", "func (r *Record) f() int { r.value++; escaped = r; return r.value }", "unsupported receiver-state instruction"},
-		{"slice write", "func (r *Record) f() int { r.value++; r.items[0] = 1; return r.value }", "unsupported receiver-state instruction"},
+		{"slice write", "func (r *Record) f() int { r.value++; r.items[0] = 1; return r.value }", "owned buffer must be freshly initialized before mutation"},
 		{"unbounded", "func (r *Record) f() int { for r.value < 100 { r.value-- }; return r.value }", "one cursor increment on every back edge"},
 		{"no increment", "func (r *Record) f() int { for r.value < len(r.items) { if r.items[r.value] == 0 { r.value++ } }; return r.value }", "one cursor increment on every back edge"},
 		{"helper changes cursor on back edge", "func (r *Record) f() int { for r.value < len(r.items) { r.track(); r.value++ }; return r.value }; func (r *Record) track() { r.advance() }; func (r *Record) advance() { r.value++ }", "one cursor increment on every back edge"},

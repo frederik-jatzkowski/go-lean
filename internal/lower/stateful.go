@@ -39,7 +39,13 @@ func (l *lowerer) lowerStateful(fn *sourceFunction, method *sourceStateful) []ir
 	recordType := ir.RecordType(named.Package, named.Name)
 	record := ir.Record{Symbol: l.typeSymbol(named, "")}
 	for _, field := range named.Fields {
-		record.Fields = append(record.Fields, ir.Field{Name: field.Name, Type: stateType(l.valueType(field.Type))})
+		typ := l.valueType(field.Type)
+		if slices.Contains(method.Buffers, field.Name) {
+			typ = bufferStateType(typ)
+		} else {
+			typ = stateType(typ)
+		}
+		record.Fields = append(record.Fields, ir.Field{Name: field.Name, Type: typ})
 	}
 	l.records[recordType] = record
 
@@ -109,6 +115,47 @@ func (s *statefulLowerer) project(addr *sourceValue) ir.Expr {
 	return ir.CheckedRecordField{Value: s.state, Type: s.record, Name: addr.Field}
 }
 
+func bufferStateType(slice ir.Type) ir.Type {
+	return ir.OptionType(ir.BufferType(slice.SliceElem()))
+}
+
+func (s *statefulLowerer) isBuffer(field *sourceValue) bool {
+	return field.Kind == fieldAddress && field.X == s.method.Receiver && slices.Contains(s.method.Buffers, field.Field)
+}
+
+func (s *statefulLowerer) bufferField(sequence *sourceValue) *sourceValue {
+	if sequence.Kind == unaryValue && sequence.Dereference && s.isBuffer(sequence.X) {
+		return sequence.X
+	}
+	return nil
+}
+
+func (s *statefulLowerer) bufferIndex(addr *sourceValue) *sourceValue {
+	for addr.Kind == fieldAddress {
+		addr = addr.X
+	}
+	if addr.Kind == indexAddress && s.bufferField(addr.X) != nil {
+		return addr
+	}
+	return nil
+}
+
+func (s *statefulLowerer) bufferElement(addr *sourceValue) ir.Expr {
+	if addr.Kind == indexAddress {
+		return s.value(addr)
+	}
+	return ir.RecordField{Value: s.bufferElement(addr.X), Name: addr.Field}
+}
+
+func (s *statefulLowerer) updateField(body *ir.Body, field *sourceValue, value ir.Expr) {
+	receiver := s.fresh("receiver", s.record)
+	state := s.fresh("state", ir.OptionType(s.record))
+	update := ir.RecordUpdate{Record: ir.Ref(receiver), Field: field.Field, Value: value}
+	body.Bindings = append(body.Bindings, ir.Binding{Binder: receiver, Value: s.state, CanPanic: true},
+		ir.Binding{Binder: state, Value: ir.Some{Value: update}})
+	s.state = ir.Ref(state)
+}
+
 func (s *statefulLowerer) length(sequence ir.Expr) ir.Expr {
 	s.usesWord = true
 	return ir.SliceLength{List: ir.OptionGetD{Value: sequence, Default: ir.EmptySlice{}}}
@@ -122,7 +169,11 @@ func (s *statefulLowerer) child(block, predecessor *sourceBlock) ir.Body {
 			sequence := ir.RecordField{Value: receiver, Name: s.method.Loop.Sequence.Field}
 			cursor := ir.RecordField{Value: receiver, Name: s.method.Loop.Cursor.Field}
 			args := append([]ir.Expr{ir.Some{Value: receiver}}, s.loopParams...)
-			args = append(args, ir.IndexFuel{Length: s.length(sequence), Cursor: cursor})
+			length := s.length(sequence)
+			if s.isBuffer(s.method.Loop.Sequence) {
+				length = ir.BufferLength{Buffer: sequence}
+			}
+			args = append(args, ir.IndexFuel{Length: length, Cursor: cursor})
 			if s.traceType != "" {
 				args = append(args, s.trace)
 			}
@@ -160,35 +211,58 @@ func (s *statefulLowerer) body(block, predecessor *sourceBlock) ir.Body {
 		case unaryValue:
 			var value ir.Expr
 			canPanic := false
+			typ := stateType(s.valueType(ins.Type))
 			switch {
 			case ins.Not:
 				value = ir.Not{Value: s.value(ins.X)}
 			case ins.Dereference:
 				if field := ins.X; field.Kind == fieldAddress && field.X == s.method.Receiver {
 					value, canPanic = s.project(field), true
+					if s.isBuffer(field) {
+						typ = bufferStateType(ins.Type.Model)
+					}
+				} else if s.bufferIndex(ins.X) != nil {
+					value = s.bufferElement(ins.X)
 				} else {
 					value = s.load(ins.X)
 				}
 			default:
 				value = ir.Negate{Value: s.value(ins.X)}
 			}
-			body.Bindings = append(body.Bindings, ir.Binding{Binder: s.bind(ins), Value: value, CanPanic: canPanic})
+			body.Bindings = append(body.Bindings, ir.Binding{Binder: s.bindAs(ins, typ), Value: value, CanPanic: canPanic})
 		case indexAddress:
 			typ := s.valueType(ins.X.Type)
-			value := ir.CheckedIndex{Sequence: ir.OptionGetD{Value: s.value(ins.X), Default: ir.EmptySlice{}},
+			var empty ir.Expr = ir.EmptySlice{}
+			if s.bufferField(ins.X) != nil {
+				empty = ir.EmptyBuffer{}
+			}
+			value := ir.CheckedIndex{Sequence: ir.OptionGetD{Value: s.value(ins.X), Default: empty},
 				SequenceType: typ, Index: s.value(ins.IndexValue), IndexType: s.valueType(ins.IndexValue.Type)}
 			body.Bindings = append(body.Bindings, ir.Binding{Binder: s.bindAs(ins, typ.SliceElem()), Value: value, CanPanic: true})
 		case fieldValue:
 			body.Bindings = append(body.Bindings, ir.Binding{Binder: s.bind(ins), Value: ir.RecordField{Value: s.value(ins.X), Name: ins.Field}})
 		case storeValue:
 			if field := ins.X; field.Kind == fieldAddress && field.X == s.method.Receiver {
-				receiver := s.fresh("receiver", s.record)
-				state := s.fresh("state", ir.OptionType(s.record))
-				update := ir.RecordUpdate{Record: ir.Ref(receiver), Field: field.Field, Value: s.value(ins.Value)}
-				body.Bindings = append(body.Bindings, ir.Binding{Binder: receiver, Value: s.state, CanPanic: true},
-					ir.Binding{Binder: state, Value: ir.Some{Value: update}})
-				s.state = ir.Ref(state)
+				s.updateField(&body, field, s.value(ins.Value))
+			} else if index := s.bufferIndex(ins.X); index != nil {
+				value := s.value(ins.Value)
+				for field := ins.X; field != index; field = field.X {
+					value = ir.RecordUpdate{Record: s.bufferElement(field.X), Field: field.Field, Value: value}
+				}
+				update := ir.BufferSet{Buffer: s.value(index.X), Index: s.value(index.IndexValue),
+					IndexType: s.valueType(index.IndexValue.Type), Value: value}
+				s.updateField(&body, s.bufferField(index.X), update)
 			}
+		case makeSlice:
+			value := ir.MakeSlice{Length: s.value(ins.X), Capacity: s.value(ins.Y), Zero: s.zeroValue(ins.Type.Elem),
+				LengthType: s.valueType(ins.X.Type), CapacityType: s.valueType(ins.Y.Type), Array: true, Nullable: true}
+			body.Bindings = append(body.Bindings, ir.Binding{Binder: s.bindAs(ins, bufferStateType(ins.Type.Model)), Value: value, CanPanic: true})
+		case emptySliceValue:
+			body.Bindings = append(body.Bindings, ir.Binding{Binder: s.bindAs(ins, bufferStateType(ins.Type.Model)),
+				Value: ir.Some{Value: ir.EmptyBuffer{}}})
+		case appendValue:
+			value := ir.BufferAppend{Buffer: s.value(ins.X), Element: s.value(ins.Y)}
+			body.Bindings = append(body.Bindings, ir.Binding{Binder: s.bindAs(ins, bufferStateType(ins.Type.Model)), Value: value})
 		case callValue:
 			s.call(&body, ins)
 		case convertValue:
@@ -222,7 +296,11 @@ func (s *statefulLowerer) call(body *ir.Body, ins *sourceValue) {
 	args := ins.Call.Args
 	switch {
 	case ins.Call.Length:
-		body.Bindings = append(body.Bindings, ir.Binding{Binder: s.bind(ins), Value: s.length(s.value(args[0]))})
+		length := s.length(s.value(args[0]))
+		if s.bufferField(args[0]) != nil {
+			length = ir.BufferLength{Buffer: s.value(args[0])}
+		}
+		body.Bindings = append(body.Bindings, ir.Binding{Binder: s.bind(ins), Value: length})
 	case ins.Call.Clone:
 		body.Bindings = append(body.Bindings, ir.Binding{Binder: s.bind(ins), Value: s.value(args[0])})
 	case ins.Call.Value == s.method.Callback:
@@ -234,6 +312,14 @@ func (s *statefulLowerer) call(body *ir.Body, ins *sourceValue) {
 		s.trace = ir.Ref(trace)
 	default:
 		target := ins.Call.Target
+		if target.Stateful == nil {
+			call := ir.Call{Callee: s.symbol(target)}
+			for _, arg := range args {
+				call.Args = append(call.Args, s.value(arg))
+			}
+			body.Bindings = append(body.Bindings, ir.Binding{Binder: s.bind(ins), Value: call, CanPanic: s.facts.effect(target)})
+			return
+		}
 		call := ir.Call{Callee: s.symbol(target), Args: []ir.Expr{s.state}}
 		for _, arg := range args[1:] {
 			call.Args = append(call.Args, s.value(arg))

@@ -364,6 +364,7 @@ type MakeSlice struct {
 	Length, Capacity, Zero   Expr
 	LengthType, CapacityType Type
 	Nullable, TracksCapacity bool
+	Array                    bool
 }
 
 type SliceSet struct {

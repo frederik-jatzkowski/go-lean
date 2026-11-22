@@ -6,6 +6,7 @@ moreLeanArgs = ["-DwarningAsError=true"]
 name = "ExampleProofs"
 srcDir = "examples/provable"
 roots = [
+  'nine_mens_morris.morris_rules',
   # BEGIN go-lean managed roots
   'assumed_worker.assumed_worker',
   'assumed_worker.assumed_worker_proofs',
@@ -19,5 +20,8 @@ roots = [
   'grid_game.grid_game',
   'grid_game.grid_game_proofs',
   'grid_game.grid_game_verify',
+  'nine_mens_morris.morris',
+  'nine_mens_morris.morris_proofs',
+  'nine_mens_morris.morris_verify',
   # END go-lean managed roots
 ]

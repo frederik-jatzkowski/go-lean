@@ -23,6 +23,8 @@ Separate pure, total decision logic from I/O and other runtime behavior. Every m
 
 The modeled graph supports boolean, integer, and string scalars, value structs, and curated types. Pointers, raw slices and maps, interfaces, function values, reassignment, loops, recursion, switches, and user-defined generics are outside the subset. Ordinary Go can use these features outside the modeled graph. Prefer a small state transition a caller can run repeatedly over embedding its driver loop in the model.
 
+Direct calls to user-defined methods on supported concrete value receivers are modeled as functions with the receiver first. This includes `value.Method(args)` and `Type.Method(value, args)`. Refer to the generated method as `«Type$Method»` in Lean laws. Pointer receivers, implicit dereferences, promoted methods, and stored method values are outside the subset. Methods follow the same directive and single-result rules as functions. Name ordinary functions in dependency contracts.
+
 Use the Go package `github.com/frederik-jatzkowski/go-lean/pkg/lean` for values with Lean counterparts:
 
 | Go | Lean |

@@ -222,10 +222,16 @@ func (f *function) call(e *ast.CallExpr) (ir.Expr, error) {
 		args, err := f.arguments(nodes)
 		return ir.Primitive{Op: op, Type: t, Args: args}, err
 	}
-	if selection != nil || fn.Signature().Recv() != nil {
-		return nil, load.Error(p, e.Pos(), "only curated value methods are supported")
+	nodes := e.Args
+	if selection != nil {
+		if !valueReceiver(fn) || selection.Indirect() || len(selection.Index()) != 1 {
+			return nil, load.Error(p, e.Pos(), "expected a direct call on a concrete value receiver")
+		}
+		if receiver != nil {
+			nodes = append([]ast.Expr{receiver}, nodes...)
+		}
 	}
-	args, err := f.arguments(e.Args)
+	args, err := f.arguments(nodes)
 	if err != nil {
 		return nil, err
 	}

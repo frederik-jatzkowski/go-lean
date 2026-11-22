@@ -43,7 +43,21 @@ func Program(source *load.Program) ([]*ir.Package, error) {
 }
 
 func symbol(obj types.Object) ir.Symbol {
-	return ir.Symbol{Package: obj.Pkg().Path(), Name: obj.Name()}
+	name := obj.Name()
+	if fn, ok := obj.(*types.Func); ok && fn.Signature().Recv() != nil {
+		receiver := types.Unalias(fn.Signature().Recv().Type()).(*types.Named)
+		name = receiver.Obj().Name() + "$" + name
+	}
+	return ir.Symbol{Package: obj.Pkg().Path(), Name: name}
+}
+
+func valueReceiver(fn *types.Func) bool {
+	receiver := fn.Signature().Recv()
+	if receiver == nil {
+		return false
+	}
+	named, ok := types.Unalias(receiver.Type()).(*types.Named)
+	return ok && !types.IsInterface(named)
 }
 
 func (c *compiler) output(path string) *ir.Package {
@@ -95,8 +109,11 @@ func (c *compiler) function(fn *types.Func) error {
 	}
 	c.state[fn] = 1
 	sig := fn.Signature()
-	if sig.Recv() != nil || sig.Variadic() || sig.TypeParams().Len() != 0 || sig.Results().Len() != 1 || src.Decl.Body == nil {
+	if sig.Variadic() || sig.TypeParams().Len() != 0 || sig.Results().Len() != 1 || src.Decl.Body == nil {
 		return load.Error(p, pos, "expected a concrete, non-variadic function with one result")
+	}
+	if sig.Recv() != nil && !valueReceiver(fn) {
+		return load.Error(p, pos, "expected a concrete value receiver")
 	}
 	if sig.Results().At(0).Name() != "" {
 		return load.Error(p, pos, "named results are unsupported")
@@ -107,8 +124,14 @@ func (c *compiler) function(fn *types.Func) error {
 		contracts: make(map[*types.Func]bool),
 	}
 	model := ir.Function{Symbol: symbol(fn)}
+	params := make([]*types.Var, 0, sig.Params().Len()+1)
+	if sig.Recv() != nil {
+		params = append(params, sig.Recv())
+	}
 	for i := 0; i < sig.Params().Len(); i++ {
-		param := sig.Params().At(i)
+		params = append(params, sig.Params().At(i))
+	}
+	for _, param := range params {
 		t, err := c.goType(p, pos, param.Type())
 		if err != nil {
 			return err

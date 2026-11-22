@@ -142,6 +142,9 @@ func TestSubsetDiagnostics(t *testing.T) {
 		{"func F(x *[]int64) int64 { return 0 }", "unsupported type"},
 		{"func F(x int64) int64 { return x * 2 }", "unsupported binary operator"},
 		{"func F() bool { return len([1]int{}) == 1 }", "unsupported constant builtin call"},
+		{"func F(v Value) bool { return v.Check() }; type Value struct{}; func (*Value) Check() bool { return true }", "concrete value receiver"},
+		{"func F() bool { return Outer{}.Check() }; type Outer struct{ Value }; type Value bool; func (v Value) Check() bool { return v == true }", "concrete value receiver"},
+		{"func F(v interface{ Check() bool }) bool { return v.Check() }", "unsupported type"},
 	} {
 		put(t, "f.go", "package example\n//golean:export\n"+tc.body+"\n")
 		err := command("transpile", ".")
@@ -157,6 +160,40 @@ func TestSubsetDiagnostics(t *testing.T) {
 	err := command("transpile", ".")
 	if err == nil || !strings.Contains(err.Error(), "would overwrite a handwritten file") || get(t, "example.lean") != handwritten {
 		t.Fatalf("expected the handwritten file to be preserved, got %v", err)
+	}
+}
+
+func TestDirectValueMethods(t *testing.T) {
+	workspace(t, false)
+	put(t, "example.go", `package example
+type First struct { Value int64 }
+type Second int64
+
+//golean:export
+func (v First) Add(n int64) int64 { return v.Value + n }
+func (v Second) Add(n int64) int64 {
+	if v == 0 { return n }
+	return n - 1
+}
+
+//golean:export
+func Run(first First, second Second, n int64) int64 {
+	return first.Add(Second.Add(second, n))
+}
+`)
+	if err := command("transpile", "."); err != nil {
+		t.Fatal(err)
+	}
+	model := get(t, "example.lean")
+	for _, want := range []string{
+		"def «First$Add» («local:0» : ",
+		".«First$Add» «local:0» (",
+		"def «Second$Add» («local:0» : _root_.Int64)",
+		".«Second$Add» «local:1» «local:2»",
+	} {
+		if !strings.Contains(model, want) {
+			t.Errorf("expected %q in the generated model:\n%s", want, model)
+		}
 	}
 }
 

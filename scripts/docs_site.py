@@ -20,6 +20,7 @@ def on_config(config):
 def on_files(files, config):
     root = Path(config.config_file_path).resolve().parent
     sources = [root / name for name in ROOT_PAGES]
+    sources.extend(sorted(root.glob("examples/proven/*/README.md")))
     for file in list(files):
         if file.src_dir == config.docs_dir:
             files.remove(file)

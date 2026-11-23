@@ -33,10 +33,10 @@ With Python 3.12 available, install the docs dependency and run MkDocs from the 
 
 ```sh
 python -m pip install -r requirements-docs.txt
-python -m mkdocs serve --watch README.md --watch CONTRIBUTING.md --watch LICENSE
+python -m mkdocs serve --watch README.md --watch CONTRIBUTING.md --watch LICENSE --watch examples/proven
 ```
 
-MkDocs prints the local preview URL. It builds the homepage from the root README and picks up Markdown pages under `docs/` automatically. Run `python -m mkdocs build --strict` to check the production build.
+MkDocs prints the local preview URL. It builds the homepage from the root README and reads the guides under `docs/` and the walkthroughs from each example's README. Run `python -m mkdocs build --strict` to check the production build.
 
 ### Enable GitHub Pages deployment
 
@@ -67,44 +67,21 @@ go test -count=1 -v ./cmd/go-lean ./internal/transpile
 
 In PowerShell, replace the two `export` commands with `$env:GOTOOLCHAIN = 'local'` and `$env:ELAN_TOOLCHAIN = 'leanprover/lean4:v4.36.0'`.
 
-## Check the clamp proof
+## Verify the current examples
+
+From the repository root with Elan on PATH, verify one package or select all current examples:
 
 ```sh
-go run ./cmd/go-lean transpile ./examples/provable/clamp
-lake build clamp.clamp_verify
+go run ./cmd/go-lean verify ./examples/proven/clamp_import
+go run ./cmd/go-lean verify ./examples/proven/...
 ```
 
-`clampBounds` states that the result lies between ordered bounds. Follow the declaration and matching theorem in the [verification guide](docs/verification.md#select-a-proof-target).
-
-## Check the expression parser
-
-```sh
-go test ./examples/provable/expression_parser
-go run ./cmd/go-lean transpile ./examples/provable/expression_parser
-lake build expression_parser.expression_parser_verify
-```
-
-## Run and check the order service
-
-```sh
-go run ./examples/provable/order_service/cmd/orders
-go test ./examples/provable/order_service
-go run ./cmd/go-lean transpile ./examples/provable/order_service
-lake build order_service.orders_verify
-```
-
-## Check the bowling example
-
-```sh
-go test ./examples/provable/bowling
-go run ./cmd/go-lean transpile ./examples/provable/bowling
-lake build bowling.bowling_verify
-```
+The [example walkthroughs](README.md#fully-verified-examples) show the Go entry points, laws, proof arguments, and individual check commands.
 
 ## Run the playable examples
 
 ```sh
-go run ./examples/provable/grid_game/cmd/grid-game
-go run ./examples/provable/grid_game/cmd/grid-game -wrap
-go run ./examples/provable/nine_mens_morris/cmd/morris
+go run ./examples/proven/grid_game/cmd/grid-game
+go run ./examples/proven/grid_game/cmd/grid-game -wrap
+go run ./examples/proven/nine_mens_morris/cmd/morris
 ```

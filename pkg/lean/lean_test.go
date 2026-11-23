@@ -76,7 +76,7 @@ func TestByteArray(t *testing.T) {
 
 func TestOrderedCollections(t *testing.T) {
 	type key int
-	var empty RBMap[key, string]
+	var empty OrderedMap[key, string]
 	check(t, empty.Find(0), None[string]())
 	m := empty.Insert(2, "two").Insert(-1, "").Insert(1, "one").Insert(3, "three")
 	check(t, empty.Contains(2), false)
@@ -93,7 +93,7 @@ func TestOrderedCollections(t *testing.T) {
 	check(t, erased.Find(3), Some("three"))
 	check(t, len(erased.entries), 3)
 
-	var emptySet RBSet[string]
+	var emptySet OrderedSet[string]
 	s := emptySet.Insert("b").Insert("a").Insert("b")
 	check(t, emptySet.Contains("b"), false)
 	check(t, len(s.keys.entries), 2)

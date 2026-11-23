@@ -84,9 +84,9 @@ func leanType(t ir.Type) string {
 		return "(_root_.Array " + leanType(*t.Element) + ")"
 	case ir.ByteArray:
 		return "_root_.ByteArray"
-	case ir.RBMap:
+	case ir.OrderedMap:
 		return "(_root_.Std.TreeMap " + leanType(*t.Key) + " " + leanType(*t.Element) + " _root_.Ord.compare)"
-	case ir.RBSet:
+	case ir.OrderedSet:
 		return "(_root_.Std.TreeSet " + leanType(*t.Key) + " _root_.Ord.compare)"
 	case ir.Option, ir.Box:
 		return "(_root_.Option " + leanType(*t.Element) + ")"

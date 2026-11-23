@@ -159,14 +159,14 @@ var constructors = map[string]ir.PrimitiveOp{
 }
 
 var methods = map[ir.Kind]map[string]ir.PrimitiveOp{
-	ir.Array:     {"Push": ir.Push, "Pop": ir.Pop, "Get": ir.Get, "Set": ir.Set, "Size": ir.Size},
-	ir.ByteArray: {"Push": ir.Push, "Get": ir.Get, "Set": ir.Set, "Size": ir.Size, "Extract": ir.Extract},
-	ir.RBMap:     {"Find": ir.Find, "Contains": ir.Contains, "Insert": ir.Insert, "Erase": ir.Erase},
-	ir.RBSet:     {"Contains": ir.Contains, "Insert": ir.Insert, "Erase": ir.Erase},
-	ir.Box:       {"IsSome": ir.IsSome, "Get": ir.BoxGet},
-	ir.Option:    {"IsSome": ir.IsSome, "UnwrapOr": ir.UnwrapOr},
-	ir.List:      {"IsEmpty": ir.IsEmpty},
-	ir.BitVec:    {"Get": ir.Get, "Set": ir.Set, "Width": ir.Width, "ToUint64": ir.ToUint64},
+	ir.Array:      {"Push": ir.Push, "Pop": ir.Pop, "Get": ir.Get, "Set": ir.Set, "Size": ir.Size},
+	ir.ByteArray:  {"Push": ir.Push, "Get": ir.Get, "Set": ir.Set, "Size": ir.Size, "Extract": ir.Extract},
+	ir.OrderedMap: {"Find": ir.Find, "Contains": ir.Contains, "Insert": ir.Insert, "Erase": ir.Erase},
+	ir.OrderedSet: {"Contains": ir.Contains, "Insert": ir.Insert, "Erase": ir.Erase},
+	ir.Box:        {"IsSome": ir.IsSome, "Get": ir.BoxGet},
+	ir.Option:     {"IsSome": ir.IsSome, "UnwrapOr": ir.UnwrapOr},
+	ir.List:       {"IsEmpty": ir.IsEmpty},
+	ir.BitVec:     {"Get": ir.Get, "Set": ir.Set, "Width": ir.Width, "ToUint64": ir.ToUint64},
 }
 
 func callBase(e ast.Expr) ast.Expr {

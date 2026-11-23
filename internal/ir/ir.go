@@ -22,8 +22,8 @@ const (
 	Record
 	Array
 	ByteArray
-	RBMap
-	RBSet
+	OrderedMap
+	OrderedSet
 	Option
 	BitVec
 	List

@@ -15,7 +15,7 @@ go tool go-lean transpile ./pkg
 go tool go-lean verify ./pkg
 ```
 
-In the go-lean repository, use `go run ./cmd/go-lean` in place of `go tool go-lean`. The pinned toolchain is Lean 4.36.0. Use `.`, `./pkg`, `./pkg/...`, or `./...` for package selection. A selected package outside the managed Lake source directories needs a `lean_lib` with a local `srcDir` and a managed roots block. Keep manually maintained roots outside the block. The archived examples live in a separate Go module under `examples/legacy`.
+In the go-lean repository, use `go run ./cmd/go-lean` in place of `go tool go-lean`. The pinned toolchain is Lean 4.36.0. Use `.`, `./pkg`, `./pkg/...`, or `./...` for package selection. A selected package outside the managed Lake source directories needs a `lean_lib` with a local `srcDir` and a managed roots block. Keep manually maintained roots outside the block.
 
 # Write the modeled Go
 
@@ -30,7 +30,7 @@ Use the Go package `github.com/frederik-jatzkowski/go-lean/pkg/lean` for values 
 | Go | Lean |
 | --- | --- |
 | `Array[T]`, `ByteArray` | `Array`, `ByteArray` |
-| `RBMap[K,V]`, `RBSet[K]` | `Std.TreeMap`, `Std.TreeSet` |
+| `OrderedMap[K,V]`, `OrderedSet[K]` | `Std.TreeMap`, `Std.TreeSet` |
 | `Option[T]`, `List[T]` | `Option`, `List` |
 | `Box[T]` | `Option`, with the modeled Go zero value as the fallback for `Get()` |
 | `BitVec` | A width at most 64 paired with a `BitVec` of that width |
@@ -72,9 +72,9 @@ Use directives in function or package doc comments with the exact `//golean:` pr
 | `//golean:assume name : proposition` | Declare an explicit law about a scalar function. Refer to the operation by its unqualified Go name. Continue it with `//golean:assume+`. |
 | `//golean:abstract alias.Function` | In a verified root, replace an explicitly named direct call with a contract parameter. Use the Go import alias or an unqualified local function name. |
 
-An abstract root takes the generated contracts before its ordinary arguments. In its laws, use `dependency0`, `dependency1`, and so on in directive order. Its checked claims are conditional on the runtime callees satisfying those laws. Keep the assumption narrow and state independently what runtime behavior warrants it. See [assumed_worker](../../../examples/provable/assumed_worker/assumed_worker.go).
+An abstract root takes the generated contracts before its ordinary arguments. In its laws, use `dependency0`, `dependency1`, and so on in directive order. Its checked claims are conditional on the runtime callees satisfying those laws. Keep the assumption narrow and state independently what runtime behavior warrants it. See [assumed_worker](../../../examples/proven/assumed_worker/assumed_worker.go).
 
-Concrete cross-package calls use the dependency's generated model. Export each called function and import the dependency's verification module from a handwritten proof to reuse its `Checked` theorems. See [clampimport](../../../examples/provable/clampimport/clampimport_proofs.lean).
+Concrete cross-package calls use the dependency's generated model. Export each called function and import the dependency's verification module from a handwritten proof to reuse its `Checked` theorems. See [clamp_import](../../../examples/proven/clamp_import/clamp_import_proofs.lean).
 
 A package law can use operations selected by function directives or reached through modeled calls. Imported specifications must load independently of the model that uses them and its proof and verification modules. Put handwritten specification roots outside the managed Lake block.
 
@@ -82,7 +82,7 @@ A package law can use operations selected by function directives or reached thro
 
 Generation puts the model and formal laws in `<package>.lean`, with a review copy of the laws at the top. Packages with laws also get separate proof and verification modules. If migrating from a workspace with a separate laws module, update the handwritten companion to import `<package>.lean` before removing the old generated model and laws files. Edit only the handwritten `<package>_proofs.lean` companion. Generation creates it on the first run and preserves it thereafter. Use the namespace `GoLean.«full/go/import/path».Proofs` and one theorem `theorem lawName : Laws.lawName` per obligation. State laws independently of the implementation wherever possible. Verification checks theorem types and axiom dependencies. Replace every scaffold `sorry` with a proof.
 
-For a state machine, prove that the generated step preserves an invariant, then induct on histories from the initial state. Put observations such as accepting a move or reaching a goal in the law. The [grid game proof](../../../examples/provable/grid_game/grid_game_proofs.lean) covers all finite move histories in bounded and wrapping modes. Run verification again after changing a Go implementation or a proof.
+For a state machine, prove that the generated step preserves an invariant, then induct on histories from the initial state. Put observations such as accepting a move or reaching a goal in the law. The [grid game proof](../../../examples/proven/grid_game/grid_game_proofs.lean) covers all finite move histories in bounded and wrapping modes. Run verification again after changing a Go implementation or a proof.
 
 # Best Practices
 
@@ -94,4 +94,4 @@ Avoid writing a reference implementation as the specification, especially a Lean
 
 Keep implementation-shaped invariants and representations in the proof companion or in a separate refinement module. Use an intermediate model only when it simplifies a specific proof, and prove the connection from that model to the domain rules. If a helper replays generated behavior, pass the generated step as an argument so the specification can load independently.
 
-In [bowling](../../../examples/provable/bowling/README.md), the scoring rules express strike and spare bonuses in terms of later deliveries. The package law checks acceptance decisions and final scores over every finite history from the initial state.
+In [bowling](../../../examples/proven/bowling/README.md), the scoring rules express strike and spare bonuses in terms of later deliveries. The package law checks acceptance decisions and final scores over every finite history from the initial state.

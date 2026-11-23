@@ -4,7 +4,7 @@ moreLeanArgs = ["-DwarningAsError=true"]
 
 [[lean_lib]]
 name = "ExampleProofs"
-srcDir = "examples/provable"
+srcDir = "examples/proven"
 roots = [
   'bowling.bowling_rules',
   'nine_mens_morris.morris_rules',
@@ -15,12 +15,12 @@ roots = [
   'bowling.bowling',
   'bowling.bowling_proofs',
   'bowling.bowling_verify',
-  'clampimport.clampimport',
-  'clampimport.clampimport_proofs',
-  'clampimport.clampimport_verify',
-  'clampimport.limits.limits',
-  'clampimport.limits.limits_proofs',
-  'clampimport.limits.limits_verify',
+  'clamp_import.clamp_import',
+  'clamp_import.clamp_import_proofs',
+  'clamp_import.clamp_import_verify',
+  'clamp_import.limits.limits',
+  'clamp_import.limits.limits_proofs',
+  'clamp_import.limits.limits_verify',
   'grid_game.grid_game',
   'grid_game.grid_game_proofs',
   'grid_game.grid_game_verify',
@@ -32,7 +32,7 @@ roots = [
 
 [[lean_lib]]
 name = "StackMachineCompiler"
-srcDir = "examples/provable/stack-machine-compiler"
+srcDir = "examples/proven/stack_machine_compiler"
 roots = [
   'spec',
   # BEGIN go-lean managed roots

@@ -49,7 +49,7 @@ func basic(p *packages.Package, pos token.Pos, b *types.Basic) (ir.Type, error) 
 }
 
 var curatedTypes = map[string]ir.Kind{
-	"Array": ir.Array, "ByteArray": ir.ByteArray, "RBMap": ir.RBMap, "RBSet": ir.RBSet,
+	"Array": ir.Array, "ByteArray": ir.ByteArray, "OrderedMap": ir.OrderedMap, "OrderedSet": ir.OrderedSet,
 	"Box": ir.Box, "Option": ir.Option, "BitVec": ir.BitVec, "List": ir.List, "FoldControl": ir.FoldControl,
 }
 
@@ -78,7 +78,7 @@ func (c *compiler) goType(p *packages.Package, pos token.Pos, typ types.Type) (i
 				if err != nil {
 					return ir.Type{}, err
 				}
-				if i == 0 && (kind == ir.RBMap || kind == ir.RBSet) {
+				if i == 0 && (kind == ir.OrderedMap || kind == ir.OrderedSet) {
 					result.Key = &arg
 				} else {
 					result.Element = &arg

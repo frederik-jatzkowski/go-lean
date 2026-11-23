@@ -22,9 +22,9 @@ func (r renderer) primitive(v ir.Primitive) string {
 			return as("#[]")
 		case ir.ByteArray:
 			return "_root_.ByteArray.empty"
-		case ir.RBMap:
+		case ir.OrderedMap:
 			return as("_root_.Std.TreeMap.empty")
-		case ir.RBSet:
+		case ir.OrderedSet:
 			return as("_root_.Std.TreeSet.empty")
 		case ir.Option, ir.Box:
 			return as("_root_.Option.none")
@@ -77,7 +77,7 @@ func (r renderer) primitive(v ir.Primitive) string {
 		return call("Std.TreeMap.get?")
 	case ir.Contains, ir.Insert, ir.Erase:
 		prefix := "Std.TreeMap."
-		if v.Type.Kind == ir.RBSet {
+		if v.Type.Kind == ir.OrderedSet {
 			prefix = "Std.TreeSet."
 		}
 		method := map[ir.PrimitiveOp]string{ir.Contains: "contains", ir.Insert: "insert", ir.Erase: "erase"}[v.Op]

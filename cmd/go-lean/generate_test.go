@@ -394,9 +394,9 @@ func Bytes() bool {
 
 //golean:verify ordered : Ordered = true
 func Ordered() bool {
-	m := curated.RBMap[string, int8]{}.Insert("\xff", 7).Insert("\x00", 1)
+	m := curated.OrderedMap[string, int8]{}.Insert("\xff", 7).Insert("\x00", 1)
 	r := m.Insert("\xff", 8).Erase("\x00")
-	s := curated.RBSet[key]{}.Insert(-2).Insert(1).Insert(-2).Erase(1)
+	s := curated.OrderedSet[key]{}.Insert(-2).Insert(1).Insert(-2).Erase(1)
 	return before("\x00", "\xff") && !before("\xff", "\x00") && m.Find("\xff").UnwrapOr(0) == 7 &&
 		r.Find("\xff").UnwrapOr(0) == 8 && !r.Contains("\x00") &&
 		s.Contains(-2) && !s.Contains(1)

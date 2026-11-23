@@ -5,6 +5,35 @@ import (
 	"testing"
 )
 
+func TestWallLayout(t *testing.T) {
+	want := [Size]string{
+		"S....W..",
+		"S....W..",
+		"......WW",
+		"........",
+		"........",
+		"........",
+		"........",
+		"......SS",
+	}
+	for _, wrap := range []bool{false, true} {
+		for y, row := range want {
+			for x, cell := range row {
+				position := Position{X: uint8(x), Y: uint8(y)}
+				expected := cell == 'W' || (wrap && cell == 'S')
+				if got := IsWall(position, wrap); got != expected {
+					t.Errorf("IsWall(%v, %t) = %t, want %t", position, wrap, got, expected)
+				}
+			}
+		}
+		for _, position := range []Position{{X: Size, Y: 2}, {X: 7, Y: Size}} {
+			if IsWall(position, wrap) {
+				t.Errorf("IsWall(%v, %t) = true outside the board", position, wrap)
+			}
+		}
+	}
+}
+
 func TestPlay(t *testing.T) {
 	for _, test := range []struct {
 		name string

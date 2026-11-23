@@ -30,21 +30,61 @@ func Won(position Position) bool {
 	return position.X == 7 && position.Y == 1
 }
 
+type Cell uint8
+
+const (
+	Open Cell = iota
+	Wall
+	WrapWall
+)
+
+// layout lists the rows from top to bottom and the cells from left to right.
+func layout() lean.Array[lean.Array[Cell]] {
+	return lean.Array[lean.Array[Cell]]{}.
+		Push(lean.Array[Cell]{}.Push(WrapWall).Push(Open).Push(Open).Push(Open).Push(Open).Push(Wall).Push(Open).Push(Open)).
+		Push(lean.Array[Cell]{}.Push(WrapWall).Push(Open).Push(Open).Push(Open).Push(Open).Push(Wall).Push(Open).Push(Open)).
+		Push(lean.Array[Cell]{}.Push(Open).Push(Open).Push(Open).Push(Open).Push(Open).Push(Open).Push(Wall).Push(Wall)).
+		Push(lean.Array[Cell]{}.Push(Open).Push(Open).Push(Open).Push(Open).Push(Open).Push(Open).Push(Open).Push(Open)).
+		Push(lean.Array[Cell]{}.Push(Open).Push(Open).Push(Open).Push(Open).Push(Open).Push(Open).Push(Open).Push(Open)).
+		Push(lean.Array[Cell]{}.Push(Open).Push(Open).Push(Open).Push(Open).Push(Open).Push(Open).Push(Open).Push(Open)).
+		Push(lean.Array[Cell]{}.Push(Open).Push(Open).Push(Open).Push(Open).Push(Open).Push(Open).Push(Open).Push(Open)).
+		Push(lean.Array[Cell]{}.Push(Open).Push(Open).Push(Open).Push(Open).Push(Open).Push(Open).Push(WrapWall).Push(WrapWall))
+}
+
 func IsWall(position Position, wrap bool) bool {
-	x, y := position.X, position.Y
-	if x == 5 && y <= 1 {
-		return true
+	row := layout().Get(cellIndex(position.Y)).UnwrapOr(lean.Array[Cell]{})
+	cell := row.Get(cellIndex(position.X)).UnwrapOr(Open)
+	return cell == Wall || (wrap && cell == WrapWall)
+}
+
+// cellIndex maps a byte coordinate to an array index in the modeled Go subset.
+// Size is the first out-of-bounds index.
+func cellIndex(coordinate uint8) uint {
+	if coordinate == 0 {
+		return 0
 	}
-	if x >= 6 && y == 2 {
-		return true
+	if coordinate == 1 {
+		return 1
 	}
-	if !wrap {
-		return false
+	if coordinate == 2 {
+		return 2
 	}
-	if x == 0 && y <= 1 {
-		return true
+	if coordinate == 3 {
+		return 3
 	}
-	return x >= 6 && y == Size-1
+	if coordinate == 4 {
+		return 4
+	}
+	if coordinate == 5 {
+		return 5
+	}
+	if coordinate == 6 {
+		return 6
+	}
+	if coordinate == 7 {
+		return 7
+	}
+	return Size
 }
 
 func backward(coordinate uint8, wrap bool) uint8 {

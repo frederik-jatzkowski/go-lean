@@ -19,6 +19,7 @@ import (
 const Curated = "github.com/frederik-jatzkowski/go-lean/pkg/lean"
 
 type Function struct {
+	Generated         bool
 	Package           *packages.Package
 	File              *ast.File
 	Decl              *ast.FuncDecl
@@ -32,6 +33,9 @@ type Function struct {
 }
 
 type Program struct {
+	EnumWrappers  map[*types.Func]*types.Func
+	Enums         map[string][]Enum
+	EnumFiles     map[string]EnumFile
 	Roots         []*types.Func
 	PackageRoots  map[string][]*types.Func
 	LawPackages   []string
@@ -44,7 +48,19 @@ type Program struct {
 }
 
 func Read(ctx context.Context, dir, pattern string) (*Program, error) {
-	cfg := &packages.Config{Context: ctx, Dir: dir, Mode: packages.LoadAllSyntax | packages.NeedModule}
+	enums, enumFiles, err := discoverEnums(ctx, dir, pattern)
+	if err != nil {
+		return nil, err
+	}
+	overlay := make(map[string][]byte)
+	for path, file := range enumFiles {
+		if file.Content != nil {
+			overlay[path] = file.Content
+		} else {
+			overlay[path] = []byte("//go:build ignore\n\npackage ignored\n")
+		}
+	}
+	cfg := &packages.Config{Context: ctx, Dir: dir, Mode: packages.LoadAllSyntax | packages.NeedModule, Overlay: overlay}
 	roots, err := packages.Load(cfg, pattern)
 	if err != nil {
 		return nil, err
@@ -60,6 +76,8 @@ func Read(ctx context.Context, dir, pattern string) (*Program, error) {
 		return nil, fmt.Errorf("%s", strings.Join(slices.Compact(diagnostics), "\n"))
 	}
 	program := &Program{
+		Enums: enums, EnumFiles: enumFiles,
+		EnumWrappers:  make(map[*types.Func]*types.Func),
 		PackageRoots:  make(map[string][]*types.Func),
 		PackageLaws:   make(map[string][]ir.Proposition),
 		LeanImports:   make(map[string][]string),
@@ -100,6 +118,7 @@ func Read(ctx context.Context, dir, pattern string) (*Program, error) {
 					continue
 				}
 				entry := Function{Package: p, File: file, Decl: f}
+				_, entry.Generated = enumFiles[p.Fset.PositionFor(file.Pos(), false).Filename]
 				entry.readDirectives()
 				program.Functions[obj] = entry
 				if p.PkgPath != Curated && entry.Selected {
@@ -108,11 +127,21 @@ func Read(ctx context.Context, dir, pattern string) (*Program, error) {
 			}
 		}
 		marked := program.PackageRoots[p.PkgPath]
+		if len(enums[p.PkgPath]) != 0 {
+			for _, fn := range marked {
+				if !fn.Exported() && fn.Signature().Recv() == nil && program.Functions[fn].Export {
+					wrapper, _ := p.Types.Scope().Lookup(publicName(fn.Name())).(*types.Func)
+					if wrapper != nil && program.Functions[wrapper].Generated {
+						program.EnumWrappers[wrapper] = fn
+					}
+				}
+			}
+		}
 		slices.SortFunc(marked, func(a, b *types.Func) int {
 			return strings.Compare(a.FullName(), b.FullName())
 		})
 		if p.PkgPath != Curated && requested[p.ID] {
-			if len(program.PackageLaws[p.PkgPath]) != 0 {
+			if len(program.PackageLaws[p.PkgPath]) != 0 || len(enums[p.PkgPath]) != 0 {
 				program.LawPackages = append(program.LawPackages, p.PkgPath)
 			} else {
 				program.Roots = append(program.Roots, marked...)
@@ -196,6 +225,8 @@ func (program *Program) readPackageDirectives(p *packages.Package, doc *ast.Comm
 				return
 			}
 			previous.Lean += "\n" + value
+		case "generate:enum", "generate:enum+":
+			continue
 		case "verify:import":
 			previous = nil
 			if !validModule(value) {

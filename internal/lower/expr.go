@@ -70,6 +70,14 @@ func (f *function) expr(node ast.Expr) (ir.Expr, error) {
 		return ir.Binary{Op: op, Kind: t.Kind, Left: left, Right: right}, err
 	case *ast.SelectorExpr:
 		sel := info.Selections[e]
+		if ident, ok := e.X.(*ast.Ident); ok {
+			if v, ok := info.Uses[ident].(*types.Var); ok {
+				if field, ok := f.variantLocals[v][e.Sel.Name]; ok {
+					field.used = true
+					return ir.Local{ID: field.id}, nil
+				}
+			}
+		}
 		if sel != nil && sel.Kind() == types.FieldVal && !sel.Indirect() && len(sel.Index()) == 1 {
 			t, err := f.goType(p, e.X.Pos(), sel.Recv())
 			if err != nil {
@@ -119,6 +127,9 @@ func (f *function) literal(e *ast.CompositeLit) (ir.Expr, error) {
 	t, err := f.goType(p, e.Pos(), typ)
 	if err != nil {
 		return nil, err
+	}
+	if t.Kind == ir.EnumType {
+		return nil, load.Error(p, e.Pos(), "enum values require a generated constructor")
 	}
 	if t.Kind > ir.Record && t.Kind != ir.FoldControl && len(e.Elts) == 0 {
 		return ir.Primitive{Op: ir.Empty, Type: t}, nil
@@ -203,6 +214,9 @@ func (f *function) call(e *ast.CallExpr) (ir.Expr, error) {
 	if fn == nil || fn.Pkg() == nil || e.Ellipsis.IsValid() {
 		return nil, load.Error(p, e.Pos(), "expected a direct call to a supported function")
 	}
+	if value, matched, err := f.enumCall(e, fn); matched {
+		return value, err
+	}
 	if fn.Pkg().Path() == load.Curated {
 		if kind := folds[fn.Name()]; selection == nil && kind != 0 {
 			return f.fold(e, kind)
@@ -229,9 +243,16 @@ func (f *function) call(e *ast.CallExpr) (ir.Expr, error) {
 		}
 		args, err := f.arguments(nodes)
 		if err == nil && op == ir.BoxGet {
+			typ := types.Unalias(selection.Recv()).(*types.Named).TypeArgs().At(0)
+			if f.containsEnum(typ, make(map[types.Type]bool)) {
+				return nil, load.Error(p, e.Pos(), "box zero fallback cannot contain an enum")
+			}
 			args = append(args, f.zero(*t.Element))
 		}
 		return ir.Primitive{Op: op, Type: t, Args: args}, err
+	}
+	if original := f.compiler.source.EnumWrappers[fn]; original != nil {
+		fn = original
 	}
 	nodes := e.Args
 	if selection != nil {
@@ -246,7 +267,7 @@ func (f *function) call(e *ast.CallExpr) (ir.Expr, error) {
 	if err != nil {
 		return nil, err
 	}
-	if fn == f.fn && f.source.Termination != "" {
+	if fn == f.fn && (f.source.Termination != "" || f.structural > 0) {
 		f.recursive = true
 		return ir.Call{Target: symbol(fn), Args: args}, nil
 	}
@@ -257,6 +278,8 @@ func (f *function) call(e *ast.CallExpr) (ir.Expr, error) {
 	if abstract {
 		return ir.AbstractCall{Target: symbol(fn), Args: args}, nil
 	}
+	caller := symbol(f.fn)
+	f.calls[caller] = append(f.calls[caller], symbol(fn))
 	return ir.Call{Target: symbol(fn), Args: args}, nil
 }
 
@@ -275,6 +298,9 @@ func (f *function) callTarget(fn *types.Func, pos token.Pos) (bool, error) {
 		}
 	}
 	if f.state[fn] == 1 {
+		if fn != f.fn && fn.Pkg() == f.fn.Pkg() && (f.structural > 0 || f.source.Termination != "") {
+			return false, nil
+		}
 		return false, load.Error(p, pos, "recursive call to %s", fn.FullName())
 	}
 	if err := f.function(fn); err != nil {

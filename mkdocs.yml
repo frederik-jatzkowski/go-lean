@@ -10,6 +10,7 @@ nav:
       - Supported Go: docs/supported-go.md
       - CLI and directives: docs/reference.md
   - Example walkthroughs:
+      - Recursive expressions: examples/proven/recursive_expr/README.md
       - Stack-machine compiler: examples/proven/stack_machine_compiler/README.md
       - Ten-pin bowling: examples/proven/bowling/README.md
       - Grid game: examples/proven/grid_game/README.md

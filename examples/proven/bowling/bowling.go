@@ -1,11 +1,23 @@
 // Package bowling scores one game of American ten-pin bowling.
 //
 //golean:verify:import bowling.bowling_rules
+//golean:verify:import bowling.bowling_grammar
+//golean:verify playInputMatchesSpec : ∀ input : ByteArray,
+//golean:verify+ input.size < UInt64.size →
+//golean:verify+ let actual := playInput input
+//golean:verify+ (actual = none ↔ ¬ ∃ attempts, Bowling.Grammar.Parses input.data.toList attempts) ∧
+//golean:verify+ ∀ attempts, Bowling.Grammar.Parses input.data.toList attempts →
+//golean:verify+   ∃ played, actual = some played ∧
+//golean:verify+     let reference := Bowling.Rules.play Bowling.Rules.initial (attempts.map Int64.toInt)
+//golean:verify+     let result := «gameState$score» played.«field:game»
+//golean:verify+     played.«field:decisions» = reference.1 ∧
+//golean:verify+     (result.«field:total», result.«field:complete») =
+//golean:verify+       Bowling.Rules.answer (Bowling.Rules.score reference.2.2)
 //golean:verify fromStartMatchesRules : ∀ attempts,
 //golean:verify+ let reference := Bowling.Rules.play Bowling.Rules.initial (attempts.map Int64.toInt)
 //golean:verify+ let actual := Replay attempts
-//golean:verify+ let result := «Game$score» actual.«field:Game»
-//golean:verify+ actual.«field:Decisions» = reference.1 ∧
+//golean:verify+ let result := «gameState$score» actual.«field:game»
+//golean:verify+ actual.«field:decisions» = reference.1 ∧
 //golean:verify+   (result.«field:total», result.«field:complete») =
 //golean:verify+     Bowling.Rules.answer (Bowling.Rules.score reference.2.2)
 package bowling
@@ -19,8 +31,8 @@ const (
 	fillBall
 )
 
-// Game tracks a player's rolls and score. Its zero value is ready to bowl.
-type Game struct {
+// gameState tracks a player's rolls and score. Its zero value is ready to bowl.
+type gameState struct {
 	frame       int64 // zero-based; 10 means complete
 	stage       int64
 	standing    int64
@@ -32,12 +44,12 @@ type Game struct {
 // Start returns a new game.
 //
 //golean:verify startEmpty : Start = ⟨0, 0, 0, 0, 0, 0⟩
-func Start() Game {
-	return Game{frame: 0, stage: firstBall, standing: 0, total: 0, bonusNext: 0, bonusSecond: 0}
+func Start() gameState {
+	return gameState{frame: 0, stage: firstBall, standing: 0, total: 0, bonusNext: 0, bonusSecond: 0}
 }
 
 type rollResult struct {
-	game     Game
+	game     gameState
 	accepted bool
 }
 
@@ -46,21 +58,17 @@ type scoreResult struct {
 	complete bool
 }
 
-// Roll returns the next game, or the original game if the delivery is illegal.
-func (game Game) Roll(pins int) (Game, bool) {
-	result := game.roll(int64(pins))
-	return result.game, result.accepted
-}
+func (game gameState) Roll(pins int64) rollResult { return game.roll(pins) }
+func (result rollResult) Game() gameState         { return result.game }
+func (result rollResult) Accepted() bool          { return result.accepted }
 
-// Score returns the final score once all required deliveries have been made.
-func (game Game) Score() (int, bool) {
-	result := game.score()
-	return int(result.total), result.complete
-}
+func (game gameState) Score() scoreResult { return game.score() }
+func (result scoreResult) Total() int64   { return result.total }
+func (result scoreResult) Complete() bool { return result.complete }
 
 //golean:verify rejectionUnchanged : ∀ s pins,
-//golean:verify+   («Game$roll» s pins).«field:accepted» = false → («Game$roll» s pins).«field:game» = s
-func (game Game) roll(pins int64) rollResult {
+//golean:verify+   («gameState$roll» s pins).«field:accepted» = false → («gameState$roll» s pins).«field:game» = s
+func (game gameState) roll(pins int64) rollResult {
 	if game.frame == 10 || pins < 0 || pins > game.rack() {
 		return rollResult{game: game, accepted: false}
 	}
@@ -88,7 +96,7 @@ func (game Game) roll(pins int64) rollResult {
 	return game.record(pins, game.frame+1, firstBall, 0, 0)
 }
 
-func (game Game) rack() int64 {
+func (game gameState) rack() int64 {
 	if game.stage == firstBall || game.stage == afterTenthStrike {
 		return 10
 	}
@@ -119,9 +127,9 @@ func secondBonus(balls int64) int64 {
 	return 0
 }
 
-func (game Game) record(pins, frame, stage, standing, balls int64) rollResult {
+func (game gameState) record(pins, frame, stage, standing, balls int64) rollResult {
 	return rollResult{
-		game: Game{
+		game: gameState{
 			frame:       frame,
 			stage:       stage,
 			standing:    standing,
@@ -134,27 +142,27 @@ func (game Game) record(pins, frame, stage, standing, balls int64) rollResult {
 }
 
 //golean:verify finalScore : ∀ s,
-//golean:verify+   «Game$score» s = if s.«field:frame» = 10 then ⟨s.«field:total», true⟩ else ⟨0, false⟩
+//golean:verify+   «gameState$score» s = if s.«field:frame» = 10 then ⟨s.«field:total», true⟩ else ⟨0, false⟩
 //golean:verify completedGameIsStable : ∀ game total pins,
-//golean:verify+   «Game$score» game = ⟨total, true⟩ →
-//golean:verify+   «Game$roll» game pins = ⟨game, false⟩ ∧
-//golean:verify+   «Game$score» («Game$roll» game pins).«field:game» = ⟨total, true⟩
-func (game Game) score() scoreResult {
+//golean:verify+   «gameState$score» game = ⟨total, true⟩ →
+//golean:verify+   «gameState$roll» game pins = ⟨game, false⟩ ∧
+//golean:verify+   «gameState$score» («gameState$roll» game pins).«field:game» = ⟨total, true⟩
+func (game gameState) score() scoreResult {
 	if game.frame == 10 {
 		return scoreResult{total: game.total, complete: true}
 	}
 	return scoreResult{total: 0, complete: false}
 }
 
-// ReplayResult records the final game and acceptance decisions in attempt order.
-type ReplayResult struct {
-	Game      Game
-	Decisions lean.List[bool]
+// replayResult records the final game and acceptance decisions in attempt order.
+type replayResult struct {
+	game      gameState
+	decisions lean.List[bool]
 }
 
-func replayAttempt(pins int64, state ReplayResult) ReplayResult {
-	result := state.Game.roll(pins)
-	return ReplayResult{Game: result.game, Decisions: lean.Cons(result.accepted, state.Decisions)}
+func replayAttempt(pins int64, state replayResult) replayResult {
+	result := state.game.roll(pins)
+	return replayResult{game: result.game, decisions: lean.Cons(result.accepted, state.decisions)}
 }
 
 func prependDecision(accepted bool, decisions lean.List[bool]) lean.List[bool] {
@@ -164,9 +172,12 @@ func prependDecision(accepted bool, decisions lean.List[bool]) lean.List[bool] {
 // Replay starts a new game and applies each attempt in order.
 //
 //golean:export
-func Replay(attempts lean.List[int64]) ReplayResult {
-	initial := ReplayResult{Game: Start(), Decisions: lean.Nil[bool]()}
+func Replay(attempts lean.List[int64]) replayResult {
+	initial := replayResult{game: Start(), decisions: lean.Nil[bool]()}
 	result := lean.FoldList(attempts, initial, replayAttempt)
-	ordered := lean.FoldList(result.Decisions, lean.Nil[bool](), prependDecision)
-	return ReplayResult{Game: result.Game, Decisions: ordered}
+	ordered := lean.FoldList(result.decisions, lean.Nil[bool](), prependDecision)
+	return replayResult{game: result.game, decisions: ordered}
 }
+
+func (result replayResult) Game() gameState            { return result.game }
+func (result replayResult) Decisions() lean.List[bool] { return result.decisions }

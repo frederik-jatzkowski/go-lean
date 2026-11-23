@@ -19,9 +19,9 @@ In the go-lean repository, use `go run ./cmd/go-lean` in place of `go tool go-le
 
 # Write the modeled Go
 
-Separate pure, total decision logic from I/O and other runtime behavior. Every modeled Go function has one unnamed result and a statically resolved call graph. Use named value structs with fully keyed literals, explicit immutable local initializers, `if`, early returns, scalar comparisons, Boolean operators, and integer addition or subtraction. Use integer constants or typed parameters for inputs. Fixed-width Go arithmetic wraps in Lean, and `int` and `uint` follow the Go target architecture. Strings model raw bytes in lexicographic order.
+Keep pure, total decision logic in modeled packages. Put I/O and other runtime behavior in separate packages. An export, verification law, or enum directive selects all build-selected production declarations in the package, including unused helpers. Go tests and explicitly contracted external dependencies remain outside the model. Use private data types and fields with public factories and operations. Every modeled Go function has one unnamed result and a statically resolved call graph. Use named value structs with fully keyed literals, explicit immutable local initializers, `if`, early returns, scalar comparisons, Boolean operators, and integer addition or subtraction. Use integer constants or typed parameters for inputs. Fixed-width Go arithmetic wraps in Lean, and `int` and `uint` follow the Go target architecture. Strings model raw bytes in lexicographic order.
 
-The modeled graph supports boolean, integer, and string scalars, value structs, and curated types. Pointers, raw slices and maps, interfaces, function values, reassignment, raw Go loops, unannotated or mutual recursion, switches, and user-defined generics are outside the subset. Ordinary Go can use these features outside the modeled graph. Use a curated fold when the complete bounded traversal belongs in the model.
+The modeled graph supports boolean, integer, and string scalars, value structs, and curated types. Pointers, raw slices and maps, interfaces, function values, reassignment, raw Go loops, ordinary switches, general function recursion without a measure, and user-defined generics are outside the subset. Ordinary Go can use these features outside the modeled graph. Use a curated fold when the complete bounded traversal belongs in the model.
 
 Direct calls to user-defined methods on supported concrete value receivers are modeled as functions with the receiver first. This includes `value.Method(args)` and `Type.Method(value, args)`. Refer to the generated method as `«Type$Method»` in Lean laws. Pointer receivers, implicit dereferences, promoted methods, and stored method values are outside the subset. Methods follow the same directive and single-result rules as functions. Name ordinary functions in dependency contracts.
 
@@ -36,6 +36,12 @@ Use the Go package `github.com/frederik-jatzkowski/go-lean/pkg/lean` for values 
 | `BitVec` | A width at most 64 paired with a `BitVec` of that width |
 
 Empty curated Go literals have empty Lean models. Updates preserve prior versions. Access outside the bounds yields `None`, and out-of-bounds writes preserve the input. Byte extraction uses clamped half-open bounds. `ByteArrayFromBytes` copies a raw Go slice at the boundary. Pass its result into a modeled function. When transferring a Lean statement about arbitrary collection sizes to Go, restrict inputs and intermediates to lengths representable by a Go `int`. Bit indexes count from the least significant bit, and a width above 64 yields `None`.
+
+## Model recursive enums
+
+Declare private variants in a package doc comment, for example `//golean:generate:enum expr { constant, add }`. Each variant is a package-local private struct with private fields. Use `lean.List` or `lean.Array` for recursive collections. Generate the Go API with `transpile` or `verify` and commit `lean.gen.go`.
+
+Use generated constructors such as `Expr_Constant` and `Expr_Add`. Use `MatchExpr` with inline callbacks or an exhaustive type switch over the private discriminator. Lean checks structural or measured termination for recursive enum functions. Mark a private function such as `eval` with `//golean:export` to generate `Eval`, a checked public Go entry point that rejects invalid zero enums in its inputs.
 
 ## Model iteration with folds
 
@@ -67,7 +73,7 @@ Use directives in function or package doc comments with the exact `//golean:` pr
 | Directive | Purpose |
 | --- | --- |
 | `//golean:export` | Model a function and permit concrete calls from other packages. Unmarked local helpers are modeled when reached. |
-| `//golean:verify name : proposition` | Declare a Lean proposition with a name unique within the package. On a function or method, also select that operation for modeling. Continue it on consecutive `//golean:verify+` lines. |
+| `//golean:verify name : proposition` | Select the whole package and declare a Lean proposition with a name unique within the package. Continue it on consecutive `//golean:verify+` lines. |
 | `//golean:verify:import Lean.Module` | In a package doc comment, import a Lean module into the generated model and law file. Use one dot-separated module name per directive. |
 | `//golean:assume name : proposition` | Declare an explicit law about a scalar function. Refer to the operation by its unqualified Go name. Continue it with `//golean:assume+`. |
 | `//golean:abstract alias.Function` | In a verified root, replace an explicitly named direct call with a contract parameter. Use the Go import alias or an unqualified local function name. |

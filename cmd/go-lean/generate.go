@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/frederik-jatzkowski/go-lean/internal/emit"
 	"github.com/frederik-jatzkowski/go-lean/internal/load"
@@ -81,6 +83,16 @@ func generate(ctx context.Context, pattern string) ([]string, error) {
 				return nil, err
 			}
 		} else if err := writeChanged(out.path, out.artifact.Content); err != nil {
+			return nil, err
+		}
+	}
+	for _, path := range slices.Sorted(maps.Keys(source.EnumFiles)) {
+		file := source.EnumFiles[path]
+		if file.Content == nil {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return nil, err
+			}
+		} else if err := writeChanged(path, string(file.Content)); err != nil {
 			return nil, err
 		}
 	}

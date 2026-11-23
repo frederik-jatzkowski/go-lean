@@ -15,7 +15,7 @@ func main() {
 	flag.Parse()
 
 	input := bufio.NewScanner(os.Stdin)
-	next := func() (game.Direction, bool) {
+	next := func() (uint8, bool) {
 		for input.Scan() {
 			switch strings.ToLower(strings.TrimSpace(input.Text())) {
 			case "w":
@@ -36,12 +36,12 @@ func main() {
 	}
 
 	fmt.Println("Move with W/A/S/D then Enter. Press Q then Enter to quit.")
-	game.Play(*wrap, next, func(player game.Position) {
+	play(*wrap, next, func(playerX, playerY uint8) {
 		for y := range uint8(game.Size) {
 			for x := range uint8(game.Size) {
-				cell := game.Position{X: x, Y: y}
+				cell := game.NewPosition(x, y)
 				switch {
-				case cell == player:
+				case x == playerX && y == playerY:
 					fmt.Print("@")
 				case game.Won(cell):
 					fmt.Print("G")

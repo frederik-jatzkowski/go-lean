@@ -30,11 +30,11 @@ A program contains one prefix expression. These are its forms:
 
 ## go-lean features
 
-`Compile` copies a Go slice into a modeled `lean.ByteArray`. Scanning, parsing, and VM execution use `FoldNUntil` with named steps. For example, the parser carries its input and partial roots in a value record:
+The runtime package copies a Go slice into a `lean.ByteArray` and calls the modeled compiler. Scanning, parsing, and VM execution use `FoldNUntil` with named steps. For example, the parser carries its input and partial roots in a value record:
 
 ```go
 func parse(words lean.Array[lexeme]) lean.FoldControl[parser] {
-	initial := parser{Words: words, Roots: lean.Array[expression]{}}
+	initial := parser{words: words, roots: lean.Array[expression]{}}
 	return lean.FoldNUntil(words.Size(), initial, parseWord)
 }
 ```

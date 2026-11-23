@@ -6,6 +6,7 @@ moreLeanArgs = ["-DwarningAsError=true"]
 name = "ExampleProofs"
 srcDir = "examples/proven"
 roots = [
+  'bowling.bowling_grammar',
   'bowling.bowling_rules',
   'nine_mens_morris.morris_rules',
   # BEGIN go-lean managed roots
@@ -27,6 +28,9 @@ roots = [
   'nine_mens_morris.morris',
   'nine_mens_morris.morris_proofs',
   'nine_mens_morris.morris_verify',
+  'recursive_expr.recursive_expr',
+  'recursive_expr.recursive_expr_proofs',
+  'recursive_expr.recursive_expr_verify',
   # END go-lean managed roots
 ]
 

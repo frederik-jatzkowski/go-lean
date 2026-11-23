@@ -29,6 +29,7 @@ const (
 	List
 	FoldControl
 	Box
+	EnumType
 )
 
 type Type struct {
@@ -239,3 +240,41 @@ func (AbstractCall) expression()       {}
 func (Primitive) expression()          {}
 func (Fold) expression()               {}
 func (FoldControlLiteral) expression() {}
+
+type Enum struct {
+	Symbol   Symbol
+	Variants []Variant
+}
+
+type Variant struct {
+	Name   string
+	Fields []Field
+}
+
+func (Enum) declaration() {}
+
+type EnumLiteral struct {
+	Type    Symbol
+	Variant string
+	Fields  []Expr
+}
+
+type Match struct {
+	Target   Expr
+	Branches []MatchBranch
+}
+
+type MatchBranch struct {
+	Variant  string
+	Bindings []int
+	Body     Expr
+}
+
+func (EnumLiteral) expression() {}
+func (Match) expression()       {}
+
+type Mutual struct {
+	Members []Declaration
+}
+
+func (Mutual) declaration() {}

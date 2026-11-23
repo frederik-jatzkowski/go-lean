@@ -20,6 +20,8 @@ type compiler struct {
 	state    map[types.Object]uint8
 	abstract map[*types.Func]bool
 	roots    []*types.Func
+	calls    map[ir.Symbol][]ir.Symbol
+	pending  []*packages.Package
 }
 
 func Program(source *load.Program) ([]*ir.Package, error) {
@@ -27,19 +29,38 @@ func Program(source *load.Program) ([]*ir.Package, error) {
 		source:   source,
 		packages: make(map[string]*ir.Package),
 		state:    make(map[types.Object]uint8),
+		calls:    make(map[ir.Symbol][]ir.Symbol),
 		abstract: make(map[*types.Func]bool),
 		roots:    slices.Clone(source.Roots),
 	}
 	for _, path := range source.LawPackages {
 		c.output(path)
 	}
-	for i := 0; i < len(c.roots); i++ {
-		if err := c.function(c.roots[i]); err != nil {
+	for lowered, checked := 0, 0; ; {
+		for checked < len(c.pending) {
+			p := c.pending[checked]
+			checked++
+			if err := c.checkPackage(p); err != nil {
+				return nil, err
+			}
+			for _, e := range source.Enums[p.PkgPath] {
+				obj := p.Types.Scope().Lookup(e.Name).(*types.TypeName)
+				if _, err := c.enumType(p, obj.Pos(), obj, e); err != nil {
+					return nil, err
+				}
+			}
+		}
+		if lowered == len(c.roots) {
+			break
+		}
+		if err := c.function(c.roots[lowered]); err != nil {
 			return nil, err
 		}
+		lowered++
 	}
 	result := make([]*ir.Package, 0, len(c.packages))
 	for _, p := range c.packages {
+		groupDeclarations(p, c.calls)
 		slices.Sort(p.Imports)
 		result = append(result, p)
 	}
@@ -91,6 +112,7 @@ func (c *compiler) output(path string) *ir.Package {
 		p.Word = ir.UInt32
 	}
 	c.packages[path] = p
+	c.pending = append(c.pending, source)
 	return p
 }
 
@@ -198,7 +220,7 @@ func (c *compiler) function(fn *types.Func) error {
 	if err != nil {
 		return err
 	}
-	if src.Termination != "" && !f.recursive {
+	if src.Termination != "" && !f.recursive && len(c.source.Enums[p.PkgPath]) == 0 {
 		return load.Error(p, pos, "termination measure requires a direct recursive call")
 	}
 	for _, name := range calleeNames {
@@ -221,12 +243,14 @@ func (c *compiler) function(fn *types.Func) error {
 
 type function struct {
 	*compiler
-	source    load.Function
-	fn        *types.Func
-	recursive bool
-	locals    map[*types.Var]int
-	next      int
-	contracts map[*types.Func]bool
+	source        load.Function
+	fn            *types.Func
+	recursive     bool
+	structural    int
+	variantLocals map[*types.Var]map[string]*variantField
+	locals        map[*types.Var]int
+	next          int
+	contracts     map[*types.Func]bool
 }
 
 func (f *function) bind(v *types.Var) int {
@@ -356,6 +380,8 @@ func (f *function) block(stmts []ast.Stmt, tail continuation) (ir.Expr, error) {
 			return nil, load.Error(p, stmts[1].Pos(), "unreachable statements after unconditional return")
 		}
 		return branch, nil
+	case *ast.TypeSwitchStmt:
+		return f.enumSwitch(s, stmts[1:])
 	case *ast.ForStmt, *ast.RangeStmt:
 		return nil, load.Error(p, statement.Pos(), "raw loops are unsupported in modeled Go; use lean.FoldN, lean.FoldNUntil, lean.FoldList, or lean.FoldListUntil")
 	case *ast.AssignStmt:

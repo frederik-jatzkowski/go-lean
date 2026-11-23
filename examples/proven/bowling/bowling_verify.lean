@@ -17,6 +17,9 @@ private def auditGoProof (companion proof law : Lean.Name) : Lean.Elab.Command.C
     unless [`propext, `Quot.sound, `Classical.choice].contains axiomName do
       throwError "required proof {proof} depends on unapproved axiom {axiomName}"
 
+run_cmd auditGoProof `«bowling».«bowling_proofs» `GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».Proofs.«playInputMatchesSpec» `GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».Laws.«playInputMatchesSpec»
+theorem GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».Checked.«playInputMatchesSpec» : GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».Laws.«playInputMatchesSpec» := GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».Proofs.«playInputMatchesSpec»
+
 run_cmd auditGoProof `«bowling».«bowling_proofs» `GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».Proofs.«fromStartMatchesRules» `GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».Laws.«fromStartMatchesRules»
 theorem GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».Checked.«fromStartMatchesRules» : GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».Laws.«fromStartMatchesRules» := GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».Proofs.«fromStartMatchesRules»
 

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler"
+	compiler "github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler/runtime"
 )
 
 func main() {

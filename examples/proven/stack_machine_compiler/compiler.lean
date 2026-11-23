@@ -4,14 +4,14 @@
 --
 -- all :
 --   let observe := fun result : machineResult =>
---   let state := result.«field:State»
---   (result.«field:Status», StackMachineCompiler.Spec.State.mk
---   state.«field:PC».toNat state.«field:Stack»)
+--   let state := result.«field:state»
+--   (result.«field:status», StackMachineCompiler.Spec.State.mk
+--   state.«field:pc».toNat state.«field:stack»)
 --   StackMachineCompiler.Spec.Requirements.all
 --   (fun source =>
 --   let result := compile source
---   let err := result.«field:Error»
---   ⟨result.«field:Code», result.«field:Type», err.«field:Kind», err.«field:Offset».toNat⟩)
+--   let err := result.«field:diagnostic»
+--   ⟨result.«field:code», result.«field:typeCode», err.«field:kind», err.«field:offset».toNat⟩)
 --   (fun code pc stack aligned => observe (step code ⟨pc, stack⟩ aligned))
 --   (fun code => observe (runCode code))
 
@@ -30,46 +30,100 @@ def countUntil {S : Type} (step : _root_.UInt64 → S → S × Bool) : Nat → _
 
 end «fold»
 
-structure «diagnostic» where
-  «field:Kind» : _root_.UInt8
-  «field:Offset» : _root_.UInt64
-
-structure «compilation» where
-  «field:Code» : _root_.ByteArray
-  «field:Type» : _root_.UInt8
-  «field:Error» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«diagnostic»
-
 structure «lexeme» where
-  «field:Kind» : _root_.UInt8
-  «field:Value» : _root_.UInt8
-  «field:Offset» : _root_.UInt64
+  «field:kind» : _root_.UInt8
+  «field:value» : _root_.UInt8
+  «field:offset» : _root_.UInt64
+
+structure «diagnostic» where
+  «field:kind» : _root_.UInt8
+  «field:offset» : _root_.UInt64
+
+structure «classification» where
+  «field:kind» : _root_.UInt8
+  «field:value» : _root_.UInt8
 
 structure «scanState» where
-  «field:Start» : _root_.UInt64
-  «field:InWord» : _root_.Bool
+  «field:start» : _root_.UInt64
+  «field:inWord» : _root_.Bool
+
+structure «scanResult» where
+  «field:state» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«scanState»
+  «field:closed» : _root_.Bool
 
 structure «lexer» where
-  «field:Source» : _root_.ByteArray
-  «field:Words» : (_root_.Array _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme»)
-  «field:Scan» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«scanState»
-  «field:Error» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«diagnostic»
+  «field:source» : _root_.ByteArray
+  «field:words» : (_root_.Array _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme»)
+  «field:scan» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«scanState»
+  «field:diagnostic» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«diagnostic»
+
+inductive «expression» where
+  | mk («field:word» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme») («field:left» : (_root_.Option «expression»)) («field:right» : (_root_.Option «expression»)) : «expression»
+
+def «expression».«field:word» : «expression» → _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme»
+  | .mk value _ _ => value
+
+def «expression».«field:left» : «expression» → (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»)
+  | .mk _ value _ => value
+
+@[local simp] theorem «expression».«box_size:left» (node fallback : «expression»)
+    (present : node.«field:left».isSome = true) :
+    sizeOf (node.«field:left».getD fallback) < sizeOf node := by
+  cases node with
+  | mk arg0 arg1 arg2 =>
+    cases arg1 <;> simp_all [«expression».«field:left»] <;> omega
+
+def «expression».«field:right» : «expression» → (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»)
+  | .mk _ _ value => value
+
+@[local simp] theorem «expression».«box_size:right» (node fallback : «expression»)
+    (present : node.«field:right».isSome = true) :
+    sizeOf (node.«field:right».getD fallback) < sizeOf node := by
+  cases node with
+  | mk arg0 arg1 arg2 =>
+    cases arg2 <;> simp_all [«expression».«field:right»] <;> omega
+
+structure «parser» where
+  «field:words» : (_root_.Array _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme»)
+  «field:roots» : (_root_.Array _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»)
+
+structure «signature» where
+  «field:operand» : _root_.UInt8
+  «field:result» : _root_.UInt8
+
+structure «typing» where
+  «field:typeCode» : _root_.UInt8
+  «field:diagnostic» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«diagnostic»
+
+structure «instruction» where
+  «field:opcode» : _root_.UInt8
+  «field:operand» : _root_.UInt8
+
+structure «compilation» where
+  «field:code» : _root_.ByteArray
+  «field:typeCode» : _root_.UInt8
+  «field:diagnostic» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«diagnostic»
+
+structure «machineState» where
+  «field:pc» : _root_.UInt64
+  «field:stack» : (_root_.Array _root_.UInt8)
+
+structure «machineResult» where
+  «field:state» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineState»
+  «field:status» : _root_.UInt8
+
+structure «runState» where
+  «field:code» : _root_.ByteArray
+  «field:result» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineResult»
 
 def «noDiagnostic» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«diagnostic» :=
   (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«diagnostic».mk (0 : _root_.UInt8) (0 : _root_.UInt64))
-
-structure «scanResult» where
-  «field:State» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«scanState»
-  «field:Closed» : _root_.Bool
 
 def «isSpace» («local:0» : _root_.UInt8) : _root_.Bool :=
   (if (if (if (_root_.Decidable.decide («local:0» = (32 : _root_.UInt8))) then _root_.Bool.true else (_root_.Decidable.decide («local:0» = (9 : _root_.UInt8)))) then _root_.Bool.true else (_root_.Decidable.decide («local:0» = (13 : _root_.UInt8)))) then _root_.Bool.true else (_root_.Decidable.decide («local:0» = (10 : _root_.UInt8))))
 
 def «scanByte» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«scanState») («local:1» : _root_.UInt64) («local:2» : _root_.UInt8) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«scanResult» :=
-  (if (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«isSpace» «local:2») then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«scanResult».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«scanState».mk («local:0»).«field:Start» _root_.Bool.false) («local:0»).«field:InWord») else (if («local:0»).«field:InWord» then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«scanResult».mk «local:0» _root_.Bool.false) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«scanResult».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«scanState».mk «local:1» _root_.Bool.true) _root_.Bool.false)))
-
-structure «classification» where
-  «field:Kind» : _root_.UInt8
-  «field:Value» : _root_.UInt8
+  (if (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«isSpace» «local:2») then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«scanResult».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«scanState».mk («local:0»).«field:start» _root_.Bool.false) («local:0»).«field:inWord») else (if («local:0»).«field:inWord» then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«scanResult».mk «local:0» _root_.Bool.false) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«scanResult».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«scanState».mk «local:1» _root_.Bool.true) _root_.Bool.false)))
 
 def «isDigit» («local:0» : _root_.UInt8) : _root_.Bool :=
   (if (_root_.Decidable.decide («local:0» ≥ (48 : _root_.UInt8))) then (_root_.Decidable.decide («local:0» ≤ (57 : _root_.UInt8))) else _root_.Bool.false)
@@ -84,49 +138,19 @@ def «classify» («local:0» : _root_.ByteArray) : _root_.GoLean.«github.com/f
   (let «local:1» := (_root_.UInt64.ofNat («local:0»).size); (let «local:2» := (_root_.Option.getD («local:0»)[((0 : _root_.UInt64)).toNat]? (0 : _root_.UInt8)); (let «local:3» := (_root_.Option.getD («local:0»)[((1 : _root_.UInt64)).toNat]? (0 : _root_.UInt8)); (let «local:4» := (_root_.Option.getD («local:0»)[((2 : _root_.UInt64)).toNat]? (0 : _root_.UInt8)); (let «local:5» := fun (_ : _root_.Unit) => (let «local:6» := fun (_ : _root_.Unit) => (if (if (if (if (if (_root_.Decidable.decide («local:1» = (4 : _root_.UInt64))) then (_root_.Decidable.decide («local:2» = (116 : _root_.UInt8))) else _root_.Bool.false) then (_root_.Decidable.decide («local:3» = (114 : _root_.UInt8))) else _root_.Bool.false) then (_root_.Decidable.decide («local:4» = (117 : _root_.UInt8))) else _root_.Bool.false) then (_root_.Decidable.decide ((_root_.Option.getD («local:0»)[((3 : _root_.UInt64)).toNat]? (0 : _root_.UInt8)) = (101 : _root_.UInt8))) else _root_.Bool.false) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«classification».mk (2 : _root_.UInt8) (1 : _root_.UInt8)) else (if (if (if (if (if (if (_root_.Decidable.decide («local:1» = (5 : _root_.UInt64))) then (_root_.Decidable.decide («local:2» = (102 : _root_.UInt8))) else _root_.Bool.false) then (_root_.Decidable.decide («local:3» = (97 : _root_.UInt8))) else _root_.Bool.false) then (_root_.Decidable.decide («local:4» = (108 : _root_.UInt8))) else _root_.Bool.false) then (_root_.Decidable.decide ((_root_.Option.getD («local:0»)[((3 : _root_.UInt64)).toNat]? (0 : _root_.UInt8)) = (115 : _root_.UInt8))) else _root_.Bool.false) then (_root_.Decidable.decide ((_root_.Option.getD («local:0»)[((4 : _root_.UInt64)).toNat]? (0 : _root_.UInt8)) = (101 : _root_.UInt8))) else _root_.Bool.false) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«classification».mk (2 : _root_.UInt8) (0 : _root_.UInt8)) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«decimal» «local:2» «local:3» «local:4» «local:1»))); (if (_root_.Decidable.decide («local:1» = (3 : _root_.UInt64))) then (if (if (if (_root_.Decidable.decide («local:2» = (97 : _root_.UInt8))) then (_root_.Decidable.decide («local:3» = (100 : _root_.UInt8))) else _root_.Bool.false) then (_root_.Decidable.decide («local:4» = (100 : _root_.UInt8))) else _root_.Bool.false) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«classification».mk (3 : _root_.UInt8) (0 : _root_.UInt8)) else (if (if (if (_root_.Decidable.decide («local:2» = (115 : _root_.UInt8))) then (_root_.Decidable.decide («local:3» = (117 : _root_.UInt8))) else _root_.Bool.false) then (_root_.Decidable.decide («local:4» = (98 : _root_.UInt8))) else _root_.Bool.false) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«classification».mk (4 : _root_.UInt8) (0 : _root_.UInt8)) else (if (if (if (_root_.Decidable.decide («local:2» = (97 : _root_.UInt8))) then (_root_.Decidable.decide («local:3» = (110 : _root_.UInt8))) else _root_.Bool.false) then (_root_.Decidable.decide («local:4» = (100 : _root_.UInt8))) else _root_.Bool.false) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«classification».mk (7 : _root_.UInt8) (0 : _root_.UInt8)) else (if (if (if (_root_.Decidable.decide («local:2» = (110 : _root_.UInt8))) then (_root_.Decidable.decide («local:3» = (111 : _root_.UInt8))) else _root_.Bool.false) then (_root_.Decidable.decide («local:4» = (116 : _root_.UInt8))) else _root_.Bool.false) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«classification».mk (8 : _root_.UInt8) (0 : _root_.UInt8)) else («local:6» ()))))) else («local:6» ()))); (if (_root_.Decidable.decide («local:1» = (2 : _root_.UInt64))) then (if (if (_root_.Decidable.decide («local:2» = (101 : _root_.UInt8))) then (_root_.Decidable.decide («local:3» = (113 : _root_.UInt8))) else _root_.Bool.false) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«classification».mk (5 : _root_.UInt8) (0 : _root_.UInt8)) else (if (if (_root_.Decidable.decide («local:2» = (108 : _root_.UInt8))) then (_root_.Decidable.decide («local:3» = (116 : _root_.UInt8))) else _root_.Bool.false) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«classification».mk (6 : _root_.UInt8) (0 : _root_.UInt8)) else («local:5» ()))) else («local:5» ())))))))
 
 def «lexError» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexer») («local:1» : _root_.UInt8) («local:2» : _root_.UInt64) : (_root_.Prod _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexer» _root_.Bool) :=
-  (_root_.Prod.mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexer».mk («local:0»).«field:Source» («local:0»).«field:Words» («local:0»).«field:Scan» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«diagnostic».mk «local:1» «local:2»)) _root_.Bool.true)
+  (_root_.Prod.mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexer».mk («local:0»).«field:source» («local:0»).«field:words» («local:0»).«field:scan» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«diagnostic».mk «local:1» «local:2»)) _root_.Bool.true)
 
 def «closeWord» («local:0» : _root_.UInt64) («local:1» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexer») («local:2» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«scanState») : (_root_.Prod _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexer» _root_.Bool) :=
-  (let «local:3» := («local:2»).«field:Start»; (let «local:4» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«classify» (_root_.ByteArray.extract («local:1»).«field:Source» («local:3»).toNat («local:0»).toNat)); (if (_root_.Decidable.decide ((«local:4»).«field:Kind» = (0 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexError» «local:1» (2 : _root_.UInt8) «local:3») else (let «local:5» := (_root_.Array.push («local:1»).«field:Words» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme».mk («local:4»).«field:Kind» («local:4»).«field:Value» «local:3»)); (_root_.Prod.mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexer».mk («local:1»).«field:Source» «local:5» «local:2» («local:1»).«field:Error») _root_.Bool.false)))))
+  (let «local:3» := («local:2»).«field:start»; (let «local:4» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«classify» (_root_.ByteArray.extract («local:1»).«field:source» («local:3»).toNat («local:0»).toNat)); (if (_root_.Decidable.decide ((«local:4»).«field:kind» = (0 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexError» «local:1» (2 : _root_.UInt8) «local:3») else (let «local:5» := (_root_.Array.push («local:1»).«field:words» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme».mk («local:4»).«field:kind» («local:4»).«field:value» «local:3»)); (_root_.Prod.mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexer».mk («local:1»).«field:source» «local:5» «local:2» («local:1»).«field:diagnostic») _root_.Bool.false)))))
 
 def «scanSourceByte» («local:0» : _root_.UInt64) («local:1» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexer») : (_root_.Prod _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexer» _root_.Bool) :=
-  (let «local:2» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«scanByte» («local:1»).«field:Scan» «local:0» (_root_.Option.getD ((«local:1»).«field:Source»)[(«local:0»).toNat]? (32 : _root_.UInt8))); (if (!(«local:2»).«field:Closed») then (_root_.Prod.mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexer».mk («local:1»).«field:Source» («local:1»).«field:Words» («local:2»).«field:State» («local:1»).«field:Error») _root_.Bool.false) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«closeWord» «local:0» «local:1» («local:2»).«field:State»)))
+  (let «local:2» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«scanByte» («local:1»).«field:scan» «local:0» (_root_.Option.getD ((«local:1»).«field:source»)[(«local:0»).toNat]? (32 : _root_.UInt8))); (if (!(«local:2»).«field:closed») then (_root_.Prod.mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexer».mk («local:1»).«field:source» («local:1»).«field:words» («local:2»).«field:state» («local:1»).«field:diagnostic») _root_.Bool.false) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«closeWord» «local:0» «local:1» («local:2»).«field:state»)))
 
 def «tokenize» («local:0» : _root_.ByteArray) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexer» :=
-  (let «local:1» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexer».mk «local:0» (#[] : (_root_.Array _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme»)) (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«scanState».mk (0 : _root_.UInt64) _root_.Bool.false) (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«noDiagnostic»)); (let «local:2» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«fold».countUntil _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«scanSourceByte» ((_root_.UInt64.ofNat («local:0»).size)).toNat 0 «local:1»); (if (if («local:2»).2 then _root_.Bool.true else (!(((«local:2»).1).«field:Scan»).«field:InWord»)) then («local:2»).1 else ((_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«closeWord» (_root_.UInt64.ofNat («local:0»).size) («local:2»).1 (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«scanState».mk (((«local:2»).1).«field:Scan»).«field:Start» _root_.Bool.false))).1)))
+  (let «local:1» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexer».mk «local:0» (#[] : (_root_.Array _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme»)) (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«scanState».mk (0 : _root_.UInt64) _root_.Bool.false) (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«noDiagnostic»)); (let «local:2» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«fold».countUntil _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«scanSourceByte» ((_root_.UInt64.ofNat («local:0»).size)).toNat 0 «local:1»); (if (if («local:2»).2 then _root_.Bool.true else (!(((«local:2»).1).«field:scan»).«field:inWord»)) then («local:2»).1 else ((_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«closeWord» (_root_.UInt64.ofNat («local:0»).size) («local:2»).1 (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«scanState».mk (((«local:2»).1).«field:scan»).«field:start» _root_.Bool.false))).1)))
 
 def «failed» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«diagnostic») : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«compilation» :=
   (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«compilation».mk _root_.ByteArray.empty (0 : _root_.UInt8) «local:0»)
-
-inductive «expression» where
-  | mk («field:Word» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme») («field:Left» : (_root_.Option «expression»)) («field:Right» : (_root_.Option «expression»)) : «expression»
-
-def «expression».«field:Word» : «expression» → _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme»
-  | .mk value _ _ => value
-
-def «expression».«field:Left» : «expression» → (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»)
-  | .mk _ value _ => value
-
-@[local simp] theorem «expression».«box_size:Left» (node fallback : «expression»)
-    (present : node.«field:Left».isSome = true) :
-    sizeOf (node.«field:Left».getD fallback) < sizeOf node := by
-  cases node with
-  | mk arg0 arg1 arg2 =>
-    cases arg1 <;> simp_all [«expression».«field:Left»] <;> omega
-
-def «expression».«field:Right» : «expression» → (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»)
-  | .mk _ _ value => value
-
-@[local simp] theorem «expression».«box_size:Right» (node fallback : «expression»)
-    (present : node.«field:Right».isSome = true) :
-    sizeOf (node.«field:Right».getD fallback) < sizeOf node := by
-  cases node with
-  | mk arg0 arg1 arg2 =>
-    cases arg2 <;> simp_all [«expression».«field:Right»] <;> omega
-
-structure «parser» where
-  «field:Words» : (_root_.Array _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme»)
-  «field:Roots» : (_root_.Array _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»)
 
 def «arity» («local:0» : _root_.UInt8) : _root_.UInt64 :=
   (if (if (_root_.Decidable.decide («local:0» = (1 : _root_.UInt8))) then _root_.Bool.true else (_root_.Decidable.decide («local:0» = (2 : _root_.UInt8)))) then (0 : _root_.UInt64) else (if (_root_.Decidable.decide («local:0» = (8 : _root_.UInt8))) then (1 : _root_.UInt64) else (2 : _root_.UInt64)))
@@ -138,24 +162,16 @@ def «emptyExpression» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean
   (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«leaf» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme».mk (0 : _root_.UInt8) (0 : _root_.UInt8) (0 : _root_.UInt64)))
 
 def «parseWord» («local:0» : _root_.UInt64) («local:1» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«parser») : (_root_.Prod _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«parser» _root_.Bool) :=
-  (let «local:2» := (_root_.Option.getD ((«local:1»).«field:Words»)[((((_root_.UInt64.ofNat ((«local:1»).«field:Words»).size) - (1 : _root_.UInt64)) - «local:0»)).toNat]? (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme».mk (0 : _root_.UInt8) (0 : _root_.UInt8) (0 : _root_.UInt64))); (let «local:3» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«arity» («local:2»).«field:Kind»); (let «local:4» := («local:1»).«field:Roots»; (let «local:5» := (_root_.UInt64.ofNat («local:4»).size); (if (_root_.Decidable.decide («local:5» < «local:3»)) then (_root_.Prod.mk «local:1» _root_.Bool.true) else (if (_root_.Decidable.decide («local:3» = (0 : _root_.UInt64))) then (_root_.Prod.mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«parser».mk («local:1»).«field:Words» (_root_.Array.push «local:4» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«leaf» «local:2»))) _root_.Bool.false) else (let «local:6» := (_root_.Option.getD («local:4»)[((«local:5» - (1 : _root_.UInt64))).toNat]? (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«emptyExpression»)); (if (_root_.Decidable.decide («local:3» = (1 : _root_.UInt64))) then (let «local:7» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression».mk «local:2» (_root_.Option.some «local:6») (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»))); (_root_.Prod.mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«parser».mk («local:1»).«field:Words» (_root_.Array.push (_root_.Array.pop «local:4») «local:7»)) _root_.Bool.false)) else (let «local:8» := (_root_.Option.getD («local:4»)[((«local:5» - (2 : _root_.UInt64))).toNat]? (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«emptyExpression»)); (let «local:9» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression».mk «local:2» (_root_.Option.some «local:6») (_root_.Option.some «local:8»)); (_root_.Prod.mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«parser».mk («local:1»).«field:Words» (_root_.Array.push (_root_.Array.pop (_root_.Array.pop «local:4»)) «local:9»)) _root_.Bool.false)))))))))))
+  (let «local:2» := (_root_.Option.getD ((«local:1»).«field:words»)[((((_root_.UInt64.ofNat ((«local:1»).«field:words»).size) - (1 : _root_.UInt64)) - «local:0»)).toNat]? (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme».mk (0 : _root_.UInt8) (0 : _root_.UInt8) (0 : _root_.UInt64))); (let «local:3» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«arity» («local:2»).«field:kind»); (let «local:4» := («local:1»).«field:roots»; (let «local:5» := (_root_.UInt64.ofNat («local:4»).size); (if (_root_.Decidable.decide («local:5» < «local:3»)) then (_root_.Prod.mk «local:1» _root_.Bool.true) else (if (_root_.Decidable.decide («local:3» = (0 : _root_.UInt64))) then (_root_.Prod.mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«parser».mk («local:1»).«field:words» (_root_.Array.push «local:4» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«leaf» «local:2»))) _root_.Bool.false) else (let «local:6» := (_root_.Option.getD («local:4»)[((«local:5» - (1 : _root_.UInt64))).toNat]? (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«emptyExpression»)); (if (_root_.Decidable.decide («local:3» = (1 : _root_.UInt64))) then (let «local:7» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression».mk «local:2» (_root_.Option.some «local:6») (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»))); (_root_.Prod.mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«parser».mk («local:1»).«field:words» (_root_.Array.push (_root_.Array.pop «local:4») «local:7»)) _root_.Bool.false)) else (let «local:8» := (_root_.Option.getD («local:4»)[((«local:5» - (2 : _root_.UInt64))).toNat]? (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«emptyExpression»)); (let «local:9» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression».mk «local:2» (_root_.Option.some «local:6») (_root_.Option.some «local:8»)); (_root_.Prod.mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«parser».mk («local:1»).«field:words» (_root_.Array.push (_root_.Array.pop (_root_.Array.pop «local:4»)) «local:9»)) _root_.Bool.false)))))))))))
 
 def «parse» («local:0» : (_root_.Array _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme»)) : (_root_.Prod _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«parser» _root_.Bool) :=
   (let «local:1» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«parser».mk «local:0» (#[] : (_root_.Array _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»))); (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«fold».countUntil _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«parseWord» ((_root_.UInt64.ofNat («local:0»).size)).toNat 0 «local:1»))
-
-structure «typing» where
-  «field:Type» : _root_.UInt8
-  «field:Error» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«diagnostic»
 
 def «typed» («local:0» : _root_.UInt8) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«typing» :=
   (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«typing».mk «local:0» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«noDiagnostic»))
 
 def «mismatch» («local:0» : _root_.UInt64) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«typing» :=
   (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«typing».mk (0 : _root_.UInt8) (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«diagnostic».mk (4 : _root_.UInt8) «local:0»))
-
-structure «signature» where
-  «field:Operand» : _root_.UInt8
-  «field:Result» : _root_.UInt8
 
 def «operatorTypes» («local:0» : _root_.UInt8) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«signature» :=
   (if (if (_root_.Decidable.decide («local:0» = (3 : _root_.UInt8))) then _root_.Bool.true else (_root_.Decidable.decide («local:0» = (4 : _root_.UInt8)))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«signature».mk (1 : _root_.UInt8) (1 : _root_.UInt8)) else (if (if (_root_.Decidable.decide («local:0» = (5 : _root_.UInt8))) then _root_.Bool.true else (_root_.Decidable.decide («local:0» = (6 : _root_.UInt8)))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«signature».mk (1 : _root_.UInt8) (2 : _root_.UInt8)) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«signature».mk (2 : _root_.UInt8) (2 : _root_.UInt8))))
@@ -164,7 +180,7 @@ set_option linter.unusedVariables false in
 set_option linter.unusedSimpArgs false in
 
 def «checkExpression» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression») : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«typing» :=
-  (let «local:1» := («local:0»).«field:Word»; (if «_guard» : (_root_.Decidable.decide ((«local:1»).«field:Kind» = (1 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«typed» (1 : _root_.UInt8)) else (if «_guard» : (_root_.Decidable.decide ((«local:1»).«field:Kind» = (2 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«typed» (2 : _root_.UInt8)) else (if «_guard» : (_root_.Option.isSome («local:0»).«field:Left») then (if «_guard» : (_root_.Option.isSome («local:0»).«field:Right») then (let «local:2» := («checkExpression» (_root_.Option.getD («local:0»).«field:Right» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme».mk (0 : _root_.UInt8) (0 : _root_.UInt8) (0 : _root_.UInt64)) (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»)) (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»))))); (if «_guard» : (_root_.Decidable.decide (((«local:2»).«field:Error»).«field:Kind» ≠ (0 : _root_.UInt8))) then «local:2» else (let «local:3» := («checkExpression» (_root_.Option.getD («local:0»).«field:Left» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme».mk (0 : _root_.UInt8) (0 : _root_.UInt8) (0 : _root_.UInt64)) (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»)) (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»))))); (if «_guard» : (_root_.Decidable.decide (((«local:3»).«field:Error»).«field:Kind» ≠ (0 : _root_.UInt8))) then «local:3» else (let «local:4» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«operatorTypes» («local:1»).«field:Kind»); (if «_guard» : (if (_root_.Decidable.decide ((«local:3»).«field:Type» ≠ («local:4»).«field:Operand»)) then _root_.Bool.true else (_root_.Decidable.decide ((«local:2»).«field:Type» ≠ («local:4»).«field:Operand»))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«mismatch» («local:1»).«field:Offset») else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«typed» («local:4»).«field:Result»))))))) else (let «local:5» := («checkExpression» (_root_.Option.getD («local:0»).«field:Left» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme».mk (0 : _root_.UInt8) (0 : _root_.UInt8) (0 : _root_.UInt64)) (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»)) (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»))))); (if «_guard» : (_root_.Decidable.decide (((«local:5»).«field:Error»).«field:Kind» ≠ (0 : _root_.UInt8))) then «local:5» else (if «_guard» : (_root_.Decidable.decide ((«local:5»).«field:Type» ≠ (2 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«mismatch» («local:1»).«field:Offset») else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«typed» (2 : _root_.UInt8)))))) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«mismatch» («local:1»).«field:Offset»)))))
+  (let «local:1» := («local:0»).«field:word»; (if «_guard» : (_root_.Decidable.decide ((«local:1»).«field:kind» = (1 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«typed» (1 : _root_.UInt8)) else (if «_guard» : (_root_.Decidable.decide ((«local:1»).«field:kind» = (2 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«typed» (2 : _root_.UInt8)) else (if «_guard» : (_root_.Option.isSome («local:0»).«field:left») then (if «_guard» : (_root_.Option.isSome («local:0»).«field:right») then (let «local:2» := («checkExpression» (_root_.Option.getD («local:0»).«field:right» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme».mk (0 : _root_.UInt8) (0 : _root_.UInt8) (0 : _root_.UInt64)) (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»)) (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»))))); (if «_guard» : (_root_.Decidable.decide (((«local:2»).«field:diagnostic»).«field:kind» ≠ (0 : _root_.UInt8))) then «local:2» else (let «local:3» := («checkExpression» (_root_.Option.getD («local:0»).«field:left» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme».mk (0 : _root_.UInt8) (0 : _root_.UInt8) (0 : _root_.UInt64)) (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»)) (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»))))); (if «_guard» : (_root_.Decidable.decide (((«local:3»).«field:diagnostic»).«field:kind» ≠ (0 : _root_.UInt8))) then «local:3» else (let «local:4» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«operatorTypes» («local:1»).«field:kind»); (if «_guard» : (if (_root_.Decidable.decide ((«local:3»).«field:typeCode» ≠ («local:4»).«field:operand»)) then _root_.Bool.true else (_root_.Decidable.decide ((«local:2»).«field:typeCode» ≠ («local:4»).«field:operand»))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«mismatch» («local:1»).«field:offset») else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«typed» («local:4»).«field:result»))))))) else (let «local:5» := («checkExpression» (_root_.Option.getD («local:0»).«field:left» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme».mk (0 : _root_.UInt8) (0 : _root_.UInt8) (0 : _root_.UInt64)) (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»)) (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»))))); (if «_guard» : (_root_.Decidable.decide (((«local:5»).«field:diagnostic»).«field:kind» ≠ (0 : _root_.UInt8))) then «local:5» else (if «_guard» : (_root_.Decidable.decide ((«local:5»).«field:typeCode» ≠ (2 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«mismatch» («local:1»).«field:offset») else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«typed» (2 : _root_.UInt8)))))) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«mismatch» («local:1»).«field:offset»)))))
 termination_by (let «expr» := «local:0»; (sizeOf expr : _root_.Nat))
 decreasing_by
   all_goals simp_wf
@@ -180,21 +196,17 @@ decreasing_by
 def «codeFits» («local:0» : _root_.UInt64) : _root_.Bool :=
   (_root_.Decidable.decide («local:0» ≤ (4611686018427387902 : _root_.UInt64)))
 
-structure «instruction» where
-  «field:Opcode» : _root_.UInt8
-  «field:Operand» : _root_.UInt8
-
 def «encode» («local:0» : _root_.UInt8) («local:1» : _root_.UInt8) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«instruction» :=
   (if (if (_root_.Decidable.decide («local:0» = (1 : _root_.UInt8))) then _root_.Bool.true else (_root_.Decidable.decide («local:0» = (2 : _root_.UInt8)))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«instruction».mk (1 : _root_.UInt8) «local:1») else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«instruction».mk ((«local:0» - (3 : _root_.UInt8)) + (2 : _root_.UInt8)) (0 : _root_.UInt8)))
 
 def «emitWord» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme») («local:1» : _root_.ByteArray) : _root_.ByteArray :=
-  (let «local:2» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«encode» («local:0»).«field:Kind» («local:0»).«field:Value»); (_root_.ByteArray.push (_root_.ByteArray.push «local:1» («local:2»).«field:Opcode») («local:2»).«field:Operand»))
+  (let «local:2» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«encode» («local:0»).«field:kind» («local:0»).«field:value»); (_root_.ByteArray.push (_root_.ByteArray.push «local:1» («local:2»).«field:opcode») («local:2»).«field:operand»))
 
 set_option linter.unusedVariables false in
 set_option linter.unusedSimpArgs false in
 
 def «emitExpression» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression») («local:1» : _root_.ByteArray) : _root_.ByteArray :=
-  (if «_guard» : (_root_.Option.isSome («local:0»).«field:Left») then (if «_guard» : (_root_.Option.isSome («local:0»).«field:Right») then (let «local:2» := («emitExpression» (_root_.Option.getD («local:0»).«field:Right» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme».mk (0 : _root_.UInt8) (0 : _root_.UInt8) (0 : _root_.UInt64)) (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»)) (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»)))) «local:1»); (let «local:3» := («emitExpression» (_root_.Option.getD («local:0»).«field:Left» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme».mk (0 : _root_.UInt8) (0 : _root_.UInt8) (0 : _root_.UInt64)) (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»)) (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»)))) «local:2»); (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«emitWord» («local:0»).«field:Word» «local:3»))) else (let «local:4» := («emitExpression» (_root_.Option.getD («local:0»).«field:Left» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme».mk (0 : _root_.UInt8) (0 : _root_.UInt8) (0 : _root_.UInt64)) (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»)) (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»)))) «local:1»); (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«emitWord» («local:0»).«field:Word» «local:4»))) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«emitWord» («local:0»).«field:Word» «local:1»))
+  (if «_guard» : (_root_.Option.isSome («local:0»).«field:left») then (if «_guard» : (_root_.Option.isSome («local:0»).«field:right») then (let «local:2» := («emitExpression» (_root_.Option.getD («local:0»).«field:right» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme».mk (0 : _root_.UInt8) (0 : _root_.UInt8) (0 : _root_.UInt64)) (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»)) (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»)))) «local:1»); (let «local:3» := («emitExpression» (_root_.Option.getD («local:0»).«field:left» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme».mk (0 : _root_.UInt8) (0 : _root_.UInt8) (0 : _root_.UInt64)) (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»)) (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»)))) «local:2»); (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«emitWord» («local:0»).«field:word» «local:3»))) else (let «local:4» := («emitExpression» (_root_.Option.getD («local:0»).«field:left» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«lexeme».mk (0 : _root_.UInt8) (0 : _root_.UInt8) (0 : _root_.UInt64)) (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»)) (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«expression»)))) «local:1»); (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«emitWord» («local:0»).«field:word» «local:4»))) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«emitWord» («local:0»).«field:word» «local:1»))
 termination_by (let «expr» := «local:0»; let «code» := «local:1»; (sizeOf expr : _root_.Nat))
 decreasing_by
   all_goals simp_wf
@@ -211,22 +223,10 @@ def «emit» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-le
   (_root_.ByteArray.push (_root_.ByteArray.push (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«emitExpression» «local:0» _root_.ByteArray.empty) (0 : _root_.UInt8)) (0 : _root_.UInt8))
 
 def «compile» («local:0» : _root_.ByteArray) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«compilation» :=
-  (let «local:1» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«tokenize» «local:0»); (if (_root_.Decidable.decide (((«local:1»).«field:Error»).«field:Kind» ≠ (0 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«failed» («local:1»).«field:Error») else (let «local:2» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«parse» («local:1»).«field:Words»); (if (if («local:2»).2 then _root_.Bool.true else (_root_.Decidable.decide ((_root_.UInt64.ofNat (((«local:2»).1).«field:Roots»).size) ≠ (1 : _root_.UInt64)))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«failed» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«diagnostic».mk (3 : _root_.UInt8) (_root_.UInt64.ofNat («local:0»).size))) else (let «local:3» := (_root_.Option.getD (((«local:2»).1).«field:Roots»)[((0 : _root_.UInt64)).toNat]? (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«emptyExpression»)); (let «local:4» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«checkExpression» «local:3»); (if (_root_.Decidable.decide (((«local:4»).«field:Error»).«field:Kind» ≠ (0 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«failed» («local:4»).«field:Error») else (if (!(_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«codeFits» (_root_.UInt64.ofNat ((«local:1»).«field:Words»).size))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«failed» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«diagnostic».mk (1 : _root_.UInt8) (_root_.UInt64.ofNat («local:0»).size))) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«compilation».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«emit» «local:3») («local:4»).«field:Type» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«noDiagnostic»))))))))))
-
-structure «machineState» where
-  «field:PC» : _root_.UInt64
-  «field:Stack» : (_root_.Array _root_.UInt8)
-
-structure «machineResult» where
-  «field:State» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineState»
-  «field:Status» : _root_.UInt8
-
-structure «runState» where
-  «field:Code» : _root_.ByteArray
-  «field:Result» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineResult»
+  (let «local:1» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«tokenize» «local:0»); (if (_root_.Decidable.decide (((«local:1»).«field:diagnostic»).«field:kind» ≠ (0 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«failed» («local:1»).«field:diagnostic») else (let «local:2» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«parse» («local:1»).«field:words»); (if (if («local:2»).2 then _root_.Bool.true else (_root_.Decidable.decide ((_root_.UInt64.ofNat (((«local:2»).1).«field:roots»).size) ≠ (1 : _root_.UInt64)))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«failed» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«diagnostic».mk (3 : _root_.UInt8) (_root_.UInt64.ofNat («local:0»).size))) else (let «local:3» := (_root_.Option.getD (((«local:2»).1).«field:roots»)[((0 : _root_.UInt64)).toNat]? (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«emptyExpression»)); (let «local:4» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«checkExpression» «local:3»); (if (_root_.Decidable.decide (((«local:4»).«field:diagnostic»).«field:kind» ≠ (0 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«failed» («local:4»).«field:diagnostic») else (if (!(_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«codeFits» (_root_.UInt64.ofNat ((«local:1»).«field:words»).size))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«failed» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«diagnostic».mk (1 : _root_.UInt8) (_root_.UInt64.ofNat («local:0»).size))) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«compilation».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«emit» «local:3») («local:4»).«field:typeCode» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«noDiagnostic»))))))))))
 
 def «advance» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineState») («local:1» : (_root_.Array _root_.UInt8)) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineResult» :=
-  (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineResult».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineState».mk ((«local:0»).«field:PC» + (2 : _root_.UInt64)) «local:1») (0 : _root_.UInt8))
+  (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineResult».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineState».mk ((«local:0»).«field:pc» + (2 : _root_.UInt64)) «local:1») (0 : _root_.UInt8))
 
 def «truthByte» («local:0» : _root_.Bool) : _root_.UInt8 :=
   (if «local:0» then (1 : _root_.UInt8) else (0 : _root_.UInt8))
@@ -235,13 +235,43 @@ def «binaryResult» («local:0» : _root_.UInt8) («local:1» : _root_.UInt8) (
   (if (_root_.Decidable.decide («local:0» = (2 : _root_.UInt8))) then («local:1» + «local:2») else (if (_root_.Decidable.decide («local:0» = (3 : _root_.UInt8))) then («local:1» - «local:2») else (if (_root_.Decidable.decide («local:0» = (4 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«truthByte» (_root_.Decidable.decide («local:1» = «local:2»))) else (if (_root_.Decidable.decide («local:0» = (5 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«truthByte» (_root_.Decidable.decide («local:1» < «local:2»))) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«truthByte» (if (_root_.Decidable.decide («local:1» ≠ (0 : _root_.UInt8))) then (_root_.Decidable.decide («local:2» ≠ (0 : _root_.UInt8))) else _root_.Bool.false))))))
 
 def «step» («local:0» : _root_.ByteArray) («local:1» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineState») («local:2» : _root_.Bool) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineResult» :=
-  (let «local:3» := («local:1»).«field:PC»; (if (if (if (!«local:2») then _root_.Bool.true else (_root_.Decidable.decide («local:3» ≥ (_root_.UInt64.ofNat («local:0»).size)))) then _root_.Bool.true else (_root_.Decidable.decide (((_root_.UInt64.ofNat («local:0»).size) - «local:3») < (2 : _root_.UInt64)))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineResult».mk «local:1» (2 : _root_.UInt8)) else (let «local:4» := (_root_.Option.getD («local:0»)[(«local:3»).toNat]? (0 : _root_.UInt8)); (if (_root_.Decidable.decide («local:4» > (7 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineResult».mk «local:1» (4 : _root_.UInt8)) else (if (_root_.Decidable.decide («local:4» = (0 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineResult».mk «local:1» (1 : _root_.UInt8)) else (let «local:5» := (_root_.UInt64.ofNat ((«local:1»).«field:Stack»).size); (if (_root_.Decidable.decide («local:4» = (1 : _root_.UInt8))) then (if (_root_.Decidable.decide («local:5» = (9223372036854775807 : _root_.UInt64))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineResult».mk «local:1» (3 : _root_.UInt8)) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«advance» «local:1» (_root_.Array.push («local:1»).«field:Stack» (_root_.Option.getD («local:0»)[((«local:3» + (1 : _root_.UInt64))).toNat]? (0 : _root_.UInt8))))) else (if (_root_.Decidable.decide («local:4» = (7 : _root_.UInt8))) then (if (_root_.Decidable.decide («local:5» = (0 : _root_.UInt64))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineResult».mk «local:1» (3 : _root_.UInt8)) else (let «local:6» := (_root_.Option.getD ((«local:1»).«field:Stack»)[((«local:5» - (1 : _root_.UInt64))).toNat]? (0 : _root_.UInt8)); (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«advance» «local:1» (_root_.Array.set! («local:1»).«field:Stack» ((«local:5» - (1 : _root_.UInt64))).toNat (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«truthByte» (_root_.Decidable.decide («local:6» = (0 : _root_.UInt8)))))))) else (if (_root_.Decidable.decide («local:5» < (2 : _root_.UInt64))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineResult».mk «local:1» (3 : _root_.UInt8)) else (let «local:7» := (_root_.Option.getD ((«local:1»).«field:Stack»)[((«local:5» - (1 : _root_.UInt64))).toNat]? (0 : _root_.UInt8)); (let «local:8» := (_root_.Option.getD ((«local:1»).«field:Stack»)[((«local:5» - (2 : _root_.UInt64))).toNat]? (0 : _root_.UInt8)); (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«advance» «local:1» (_root_.Array.set! (_root_.Array.pop («local:1»).«field:Stack») ((«local:5» - (2 : _root_.UInt64))).toNat (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«binaryResult» «local:4» «local:7» «local:8»))))))))))))))
+  (let «local:3» := («local:1»).«field:pc»; (if (if (if (!«local:2») then _root_.Bool.true else (_root_.Decidable.decide («local:3» ≥ (_root_.UInt64.ofNat («local:0»).size)))) then _root_.Bool.true else (_root_.Decidable.decide (((_root_.UInt64.ofNat («local:0»).size) - «local:3») < (2 : _root_.UInt64)))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineResult».mk «local:1» (2 : _root_.UInt8)) else (let «local:4» := (_root_.Option.getD («local:0»)[(«local:3»).toNat]? (0 : _root_.UInt8)); (if (_root_.Decidable.decide («local:4» > (7 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineResult».mk «local:1» (4 : _root_.UInt8)) else (if (_root_.Decidable.decide («local:4» = (0 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineResult».mk «local:1» (1 : _root_.UInt8)) else (let «local:5» := (_root_.UInt64.ofNat ((«local:1»).«field:stack»).size); (if (_root_.Decidable.decide («local:4» = (1 : _root_.UInt8))) then (if (_root_.Decidable.decide («local:5» = (9223372036854775807 : _root_.UInt64))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineResult».mk «local:1» (3 : _root_.UInt8)) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«advance» «local:1» (_root_.Array.push («local:1»).«field:stack» (_root_.Option.getD («local:0»)[((«local:3» + (1 : _root_.UInt64))).toNat]? (0 : _root_.UInt8))))) else (if (_root_.Decidable.decide («local:4» = (7 : _root_.UInt8))) then (if (_root_.Decidable.decide («local:5» = (0 : _root_.UInt64))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineResult».mk «local:1» (3 : _root_.UInt8)) else (let «local:6» := (_root_.Option.getD ((«local:1»).«field:stack»)[((«local:5» - (1 : _root_.UInt64))).toNat]? (0 : _root_.UInt8)); (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«advance» «local:1» (_root_.Array.set! («local:1»).«field:stack» ((«local:5» - (1 : _root_.UInt64))).toNat (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«truthByte» (_root_.Decidable.decide («local:6» = (0 : _root_.UInt8)))))))) else (if (_root_.Decidable.decide («local:5» < (2 : _root_.UInt64))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineResult».mk «local:1» (3 : _root_.UInt8)) else (let «local:7» := (_root_.Option.getD ((«local:1»).«field:stack»)[((«local:5» - (1 : _root_.UInt64))).toNat]? (0 : _root_.UInt8)); (let «local:8» := (_root_.Option.getD ((«local:1»).«field:stack»)[((«local:5» - (2 : _root_.UInt64))).toNat]? (0 : _root_.UInt8)); (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«advance» «local:1» (_root_.Array.set! (_root_.Array.pop («local:1»).«field:stack») ((«local:5» - (2 : _root_.UInt64))).toNat (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«binaryResult» «local:4» «local:7» «local:8»))))))))))))))
 
 def «runInstruction» (_ : _root_.UInt64) («local:1» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«runState») : (_root_.Prod _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«runState» _root_.Bool) :=
-  (let «local:2» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«step» («local:1»).«field:Code» ((«local:1»).«field:Result»).«field:State» _root_.Bool.true); (_root_.Prod.mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«runState».mk («local:1»).«field:Code» «local:2») (_root_.Decidable.decide ((«local:2»).«field:Status» ≠ (0 : _root_.UInt8)))))
+  (let «local:2» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«step» («local:1»).«field:code» ((«local:1»).«field:result»).«field:state» _root_.Bool.true); (_root_.Prod.mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«runState».mk («local:1»).«field:code» «local:2») (_root_.Decidable.decide ((«local:2»).«field:status» ≠ (0 : _root_.UInt8)))))
 
 def «runCode» («local:0» : _root_.ByteArray) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineResult» :=
-  (let «local:1» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineResult».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineState».mk (0 : _root_.UInt64) (#[] : (_root_.Array _root_.UInt8))) (0 : _root_.UInt8)); (let «local:2» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«fold».countUntil _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«runInstruction» (((_root_.UInt64.ofNat («local:0»).size) + (1 : _root_.UInt64))).toNat 0 (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«runState».mk «local:0» «local:1»)); ((«local:2»).1).«field:Result»))
+  (let «local:1» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineResult».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineState».mk (0 : _root_.UInt64) (#[] : (_root_.Array _root_.UInt8))) (0 : _root_.UInt8)); (let «local:2» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«fold».countUntil _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«runInstruction» (((_root_.UInt64.ofNat («local:0»).size) + (1 : _root_.UInt64))).toNat 0 (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«runState».mk «local:0» «local:1»)); ((«local:2»).1).«field:result»))
+
+def «CompileBytes» («local:0» : _root_.ByteArray) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«compilation» :=
+  (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«compile» «local:0»)
+
+def «compilation$Code» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«compilation») : _root_.ByteArray :=
+  («local:0»).«field:code»
+
+def «compilation$Type» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«compilation») : _root_.UInt8 :=
+  («local:0»).«field:typeCode»
+
+def «compilation$DiagnosticKind» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«compilation») : _root_.UInt8 :=
+  ((«local:0»).«field:diagnostic»).«field:kind»
+
+def «compilation$DiagnosticOffset» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«compilation») : _root_.UInt64 :=
+  ((«local:0»).«field:diagnostic»).«field:offset»
+
+def «RunBytes» («local:0» : _root_.ByteArray) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineResult» :=
+  (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«runCode» «local:0»)
+
+def «StepBytes» («local:0» : _root_.ByteArray) («local:1» : _root_.UInt64) («local:2» : (_root_.Array _root_.UInt8)) («local:3» : _root_.Bool) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineResult» :=
+  (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«step» «local:0» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineState».mk «local:1» «local:2») «local:3»)
+
+def «machineResult$PC» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineResult») : _root_.UInt64 :=
+  ((«local:0»).«field:state»).«field:pc»
+
+def «machineResult$Stack» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineResult») : (_root_.Array _root_.UInt8) :=
+  ((«local:0»).«field:state»).«field:stack»
+
+def «machineResult$Status» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».«machineResult») : _root_.UInt8 :=
+  («local:0»).«field:status»
 
 end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler»
 
@@ -251,14 +281,14 @@ set_option autoImplicit false
 
 def «all» : Prop :=
   let observe := fun result : machineResult =>
-  let state := result.«field:State»
-  (result.«field:Status», StackMachineCompiler.Spec.State.mk
-  state.«field:PC».toNat state.«field:Stack»)
+  let state := result.«field:state»
+  (result.«field:status», StackMachineCompiler.Spec.State.mk
+  state.«field:pc».toNat state.«field:stack»)
   StackMachineCompiler.Spec.Requirements.all
   (fun source =>
   let result := compile source
-  let err := result.«field:Error»
-  ⟨result.«field:Code», result.«field:Type», err.«field:Kind», err.«field:Offset».toNat⟩)
+  let err := result.«field:diagnostic»
+  ⟨result.«field:code», result.«field:typeCode», err.«field:kind», err.«field:offset».toNat⟩)
   (fun code pc stack aligned => observe (step code ⟨pc, stack⟩ aligned))
   (fun code => observe (runCode code))
 

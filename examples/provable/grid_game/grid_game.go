@@ -1,6 +1,8 @@
 // Package grid_game implements a grid game with an unreachable goal.
 package grid_game
 
+import "github.com/frederik-jatzkowski/go-lean/pkg/lean"
+
 const Size = 8
 
 type Position struct {
@@ -23,7 +25,7 @@ func Start() Position {
 }
 
 //golean:verify youCantWin : ∀ (wrap : Bool) (moves : List UInt8),
-//golean:verify+   Won (moves.foldl (fun position direction => Step position direction wrap) Start) = false
+//golean:verify+   Won (Replay moves wrap) = false
 func Won(position Position) bool {
 	return position.X == 7 && position.Y == 1
 }
@@ -115,4 +117,20 @@ func moveIfOpen(position, target Position, wrap bool) Position {
 		return position
 	}
 	return target
+}
+
+type replayState struct {
+	Position Position
+	Wrap     bool
+}
+
+func replayMove(move Direction, state replayState) replayState {
+	return replayState{Position: Step(state.Position, move, state.Wrap), Wrap: state.Wrap}
+}
+
+// Replay applies a finite history of moves from the start position.
+//
+//golean:export
+func Replay(moves lean.List[Direction], wrap bool) Position {
+	return lean.FoldList(moves, replayState{Position: Start(), Wrap: wrap}, replayMove).Position
 }

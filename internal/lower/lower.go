@@ -19,6 +19,7 @@ type compiler struct {
 	packages map[string]*ir.Package
 	state    map[types.Object]uint8
 	abstract map[*types.Func]bool
+	roots    []*types.Func
 }
 
 func Program(source *load.Program) ([]*ir.Package, error) {
@@ -27,9 +28,13 @@ func Program(source *load.Program) ([]*ir.Package, error) {
 		packages: make(map[string]*ir.Package),
 		state:    make(map[types.Object]uint8),
 		abstract: make(map[*types.Func]bool),
+		roots:    slices.Clone(source.Roots),
 	}
-	for _, root := range source.Roots {
-		if err := c.function(root); err != nil {
+	for _, path := range source.LawPackages {
+		c.output(path)
+	}
+	for i := 0; i < len(c.roots); i++ {
+		if err := c.function(c.roots[i]); err != nil {
 			return nil, err
 		}
 	}
@@ -39,6 +44,11 @@ func Program(source *load.Program) ([]*ir.Package, error) {
 		result = append(result, p)
 	}
 	slices.SortFunc(result, func(a, b *ir.Package) int { return strings.Compare(a.Path, b.Path) })
+	for _, p := range result {
+		if issue := source.PackageIssues[p.Path]; issue != nil {
+			return nil, issue
+		}
+	}
 	return result, nil
 }
 
@@ -66,6 +76,16 @@ func (c *compiler) output(path string) *ir.Package {
 	}
 	source := c.source.Packages[path]
 	p := &ir.Package{Path: path, Name: source.Name, Dir: load.Dir(source)}
+	p.LeanImports = slices.Clone(c.source.LeanImports[path])
+	slices.Sort(p.LeanImports)
+	p.LeanImports = slices.Compact(p.LeanImports)
+	if laws := c.source.PackageLaws[path]; len(laws) != 0 {
+		for _, law := range laws {
+			p.Laws = append(p.Laws, ir.Law{Proposition: law})
+		}
+		// Focused generation must retain the marked functions that a package law can reference.
+		c.roots = append(c.roots, c.source.PackageRoots[path]...)
+	}
 	p.Word = ir.UInt64
 	if source.TypesSizes.Sizeof(types.Typ[types.Uint]) == 4 {
 		p.Word = ir.UInt32
@@ -120,10 +140,10 @@ func (c *compiler) function(fn *types.Func) error {
 	}
 	out := c.output(p.PkgPath)
 	f := function{
-		compiler: c, source: src, locals: make(map[*types.Var]int),
+		compiler: c, source: src, fn: fn, locals: make(map[*types.Var]int),
 		contracts: make(map[*types.Func]bool),
 	}
-	model := ir.Function{Symbol: symbol(fn)}
+	model := ir.Function{Symbol: symbol(fn), Termination: src.Termination}
 	params := make([]*types.Var, 0, sig.Params().Len()+1)
 	if sig.Recv() != nil {
 		params = append(params, sig.Recv())
@@ -136,12 +156,15 @@ func (c *compiler) function(fn *types.Func) error {
 		if err != nil {
 			return err
 		}
-		model.Params = append(model.Params, ir.Binding{ID: f.bind(param), Type: t})
+		model.Params = append(model.Params, ir.Binding{ID: f.bind(param), Name: param.Name(), Type: t, Unused: param.Name() == "_" || param.Name() == ""})
 	}
 	var err error
 	model.Result, err = c.goType(p, pos, sig.Results().At(0).Type())
 	if err != nil {
 		return err
+	}
+	if src.Termination != "" && len(src.Abstract) != 0 {
+		return load.Error(p, pos, "measured recursion does not support caller-local contracts")
 	}
 	if len(src.Abstract) != 0 && len(src.Laws) == 0 {
 		return load.Error(p, pos, "go-lean abstraction requires a verified root")
@@ -175,15 +198,18 @@ func (c *compiler) function(fn *types.Func) error {
 	if err != nil {
 		return err
 	}
+	if src.Termination != "" && !f.recursive {
+		return load.Error(p, pos, "termination measure requires a direct recursive call")
+	}
 	for _, name := range calleeNames {
 		if !f.contracts[src.ResolveCallee(name)] {
 			return load.Error(p, pos, "unused abstract callee %q", name)
 		}
 	}
-	for _, law := range src.Laws {
+	for i, law := range src.Laws {
 		for _, existing := range out.Laws {
 			if existing.Name == law.Name {
-				return load.Error(p, pos, "duplicate package law %s", law.Name)
+				return load.Error(p, src.LawPositions[i], "duplicate package law %s", law.Name)
 			}
 		}
 		out.Laws = append(out.Laws, ir.Law{Proposition: law, Caller: model.Symbol, Contracts: model.Contracts})
@@ -196,6 +222,8 @@ func (c *compiler) function(fn *types.Func) error {
 type function struct {
 	*compiler
 	source    load.Function
+	fn        *types.Func
+	recursive bool
 	locals    map[*types.Var]int
 	next      int
 	contracts map[*types.Func]bool
@@ -328,6 +356,8 @@ func (f *function) block(stmts []ast.Stmt, tail continuation) (ir.Expr, error) {
 			return nil, load.Error(p, stmts[1].Pos(), "unreachable statements after unconditional return")
 		}
 		return branch, nil
+	case *ast.ForStmt, *ast.RangeStmt:
+		return nil, load.Error(p, statement.Pos(), "raw loops are unsupported in modeled Go; use lean.FoldN, lean.FoldNUntil, lean.FoldList, or lean.FoldListUntil")
 	case *ast.AssignStmt:
 		if s.Tok != token.DEFINE || len(s.Lhs) != len(s.Rhs) {
 			return nil, load.Error(p, s.Pos(), "only immutable short declarations with explicit values are supported")

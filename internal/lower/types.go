@@ -50,7 +50,7 @@ func basic(p *packages.Package, pos token.Pos, b *types.Basic) (ir.Type, error) 
 
 var curatedTypes = map[string]ir.Kind{
 	"Array": ir.Array, "ByteArray": ir.ByteArray, "RBMap": ir.RBMap, "RBSet": ir.RBSet,
-	"Option": ir.Option, "BitVec": ir.BitVec, "List": ir.List,
+	"Box": ir.Box, "Option": ir.Option, "BitVec": ir.BitVec, "List": ir.List, "FoldControl": ir.FoldControl,
 }
 
 func (c *compiler) goType(p *packages.Package, pos token.Pos, typ types.Type) (ir.Type, error) {
@@ -112,6 +112,12 @@ func (c *compiler) goType(p *packages.Package, pos token.Pos, typ types.Type) (i
 					if field.Embedded() || field.Name() == "_" {
 						return ir.Type{}, load.Error(owner, field.Pos(), "embedded and blank fields are unsupported")
 					}
+					if isSelfBox(field.Type(), obj) {
+						elem := ir.Type{Kind: ir.Record, Record: id}
+						record.Fields = append(record.Fields, ir.Field{Name: field.Name(), Type: ir.Type{Kind: ir.Box, Element: &elem}})
+						record.Recursive = true
+						continue
+					}
 					ft, err := c.goType(owner, field.Pos(), field.Type())
 					if err != nil {
 						return ir.Type{}, err
@@ -126,4 +132,40 @@ func (c *compiler) goType(p *packages.Package, pos token.Pos, typ types.Type) (i
 		}
 	}
 	return ir.Type{}, load.Error(p, pos, "unsupported type %s", typ)
+}
+
+func isSelfBox(typ types.Type, owner *types.TypeName) bool {
+	box, ok := types.Unalias(typ).(*types.Named)
+	if !ok || box.Obj().Pkg() == nil || box.Obj().Pkg().Path() != load.Curated || box.Obj().Name() != "Box" {
+		return false
+	}
+	payload, ok := types.Unalias(box.TypeArgs().At(0)).(*types.Named)
+	return ok && payload.Obj() == owner
+}
+
+func (c *compiler) zero(t ir.Type) ir.Expr {
+	switch t.Kind {
+	case ir.Record:
+		for _, decl := range c.output(t.Record.Package).Decls {
+			if record, ok := decl.(ir.Struct); ok && record.Symbol == t.Record {
+				fields := make([]ir.Expr, len(record.Fields))
+				for i, field := range record.Fields {
+					fields[i] = c.zero(field.Type)
+				}
+				return ir.StructLiteral{Type: t.Record, Fields: fields}
+			}
+		}
+		panic("missing record for Go zero value")
+	case ir.Bool:
+		return ir.Constant{Type: t, Value: "false"}
+	case ir.String:
+		return ir.Constant{Type: t}
+	case ir.FoldControl:
+		return ir.FoldControlLiteral{State: c.zero(*t.Element), Stop: c.zero(ir.Type{Kind: ir.Bool})}
+	default:
+		if t.Kind < ir.Record {
+			return ir.Constant{Type: t, Value: "0"}
+		}
+		return ir.Primitive{Op: ir.Empty, Type: t}
+	}
 }

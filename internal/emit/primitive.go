@@ -26,7 +26,7 @@ func (r renderer) primitive(v ir.Primitive) string {
 			return as("_root_.Std.TreeMap.empty")
 		case ir.RBSet:
 			return as("_root_.Std.TreeSet.empty")
-		case ir.Option:
+		case ir.Option, ir.Box:
 			return as("_root_.Option.none")
 		case ir.List:
 			return as("[]")
@@ -45,7 +45,7 @@ func (r renderer) primitive(v ir.Primitive) string {
 		return call("List.isEmpty")
 	case ir.IsSome:
 		return call("Option.isSome")
-	case ir.UnwrapOr:
+	case ir.UnwrapOr, ir.BoxGet:
 		return call("Option.getD")
 	case ir.Push:
 		if v.Type.Kind == ir.Array {

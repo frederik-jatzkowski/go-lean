@@ -230,15 +230,43 @@ theorem millGeometry : Laws.millGeometry := by
 private def points : List UInt64 := [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
 
 set_option maxHeartbeats 3000000 in
+private def indices : Nat → UInt64 → List UInt64
+  | 0, _ => []
+  | n + 1, i => i :: indices n (i + 1)
+
+private theorem scanMatchesAny (predicate : UInt64 → boardScan → Bool) (state : boardScan)
+    (n : Nat) (i : UInt64) :
+    («fold».countUntil (fun point state => (state, predicate point state)) n i state).2 =
+      (indices n i).any (fun point => predicate point state) := by
+  induction n generalizing i with
+  | zero => rfl
+  | succ n ih =>
+    cases hit : predicate i state <;> simp [«fold».countUntil, indices, hit, ih]
+
+private theorem countMatchesFold (b : Board) (player : UInt8) (total : UInt8) (n : Nat) (i : UInt64) :
+    («fold».count countStone n i (stoneCount.mk b player total)).«field:Total» =
+      ((indices n i).map (fun p => «matches» («Board$stoneAt» b p) player)).foldl (· + ·) total := by
+  induction n generalizing i total with
+  | zero => rfl
+  | succ n ih =>
+    simp only [«fold».count, countStone, indices, List.map_cons, List.foldl_cons]
+    exact ih _ _
+
 theorem countedStones : Laws.countedStones := by
   intro b player
   change «Board$count» b player = (points.map (fun p => if «Board$stoneAt» b p = player then 1 else 0)).foldl (· + ·) 0
-  simp [«Board$count», «matches», points, «Board$stoneAt»]
+  rw [«Board$count», countMatchesFold]
+  change (points.map (fun p => «matches» («Board$stoneAt» b p) player)).foldl (· + ·) 0 = _
+  simp [«matches»]
 
 theorem unprotectedStones : Laws.unprotectedStones := by
   intro b player
   change «Board$hasUnprotected» b player = points.any (fun p => decide («Board$stoneAt» b p = player) && !«Board$inMill» b p player)
-  simp [«Board$hasUnprotected», «Board$unprotected», points, Bool.or_assoc]
+  change («fold».countUntil (fun point state => (state,
+    «Board$unprotected» state.«field:Board» point state.«field:Player»)) 24 0 (boardScan.mk b player)).2 = _
+  rw [scanMatchesAny]
+  change points.any _ = _
+  simp [«Board$unprotected»]
 
 private def adjacentVacancy (b : Board) (f : UInt64) : Bool :=
   points.any (fun t => decide («Board$stoneAt» b t = 0) && adjacent f t)
@@ -253,7 +281,19 @@ set_option maxHeartbeats 3000000 in
 theorem slideAvailability : Laws.slideAvailability := by
   intro b player
   change «Board$hasSlide» b player = points.any (fun f => decide («Board$stoneAt» b f = player) && adjacentVacancy b f)
-  simp [«Board$hasSlide», «Board$hasSlideFrom», points, ← exitAvailability, Bool.or_assoc]
+  change («fold».countUntil (fun point state => (state,
+    «Board$hasSlideFrom» state.«field:Board» point state.«field:Player»)) 24 0 (boardScan.mk b player)).2 = _
+  rw [scanMatchesAny]
+  change points.any _ = _
+  apply Bool.eq_iff_iff.mpr
+  simp only [List.any_eq_true]
+  apply exists_congr
+  intro p
+  constructor <;> rintro ⟨member, yes⟩ <;> refine ⟨member, ?_⟩ <;>
+    have valid : p < 24 := of_decide_eq_true
+      (List.all_eq_true.mp (by decide : points.all (fun p => decide (p < 24)) = true) p member) <;>
+    by_cases owns : «Board$stoneAt» b p = player <;>
+      simp [«Board$hasSlideFrom», exitAvailability b p valid, owns] at yes ⊢ <;> exact yes
 
 private theorem cellAgrees (b : Board) (p : UInt64) : «Board$stoneAt» b p = Rules.cell b p := by
   by_cases h : p < 24

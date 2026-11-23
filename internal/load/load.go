@@ -23,7 +23,9 @@ type Function struct {
 	File              *ast.File
 	Decl              *ast.FuncDecl
 	Export            bool
+	Termination       string
 	Laws, Assumptions []ir.Proposition
+	LawPositions      []token.Pos
 	Abstract          []string
 	Err               error
 	Selected          bool
@@ -31,6 +33,10 @@ type Function struct {
 
 type Program struct {
 	Roots         []*types.Func
+	PackageRoots  map[string][]*types.Func
+	LawPackages   []string
+	PackageLaws   map[string][]ir.Proposition
+	LeanImports   map[string][]string
 	Functions     map[*types.Func]Function
 	Packages      map[string]*packages.Package
 	PackageIssues map[string]error
@@ -54,6 +60,9 @@ func Read(ctx context.Context, dir, pattern string) (*Program, error) {
 		return nil, fmt.Errorf("%s", strings.Join(slices.Compact(diagnostics), "\n"))
 	}
 	program := &Program{
+		PackageRoots:  make(map[string][]*types.Func),
+		PackageLaws:   make(map[string][]ir.Proposition),
+		LeanImports:   make(map[string][]string),
 		Functions:     make(map[*types.Func]Function),
 		Packages:      make(map[string]*packages.Package),
 		PackageIssues: make(map[string]error),
@@ -65,10 +74,12 @@ func Read(ctx context.Context, dir, pattern string) (*Program, error) {
 	}
 	packages.Visit(roots, nil, func(p *packages.Package) {
 		program.Packages[p.PkgPath] = p
-		for _, file := range p.Syntax {
-			if pos := firstDirective(file.Doc); pos.IsValid() && program.PackageIssues[p.PkgPath] == nil {
-				program.PackageIssues[p.PkgPath] = Error(p, pos, "package directives are unsupported; attach laws to functions")
-			}
+		files := slices.Clone(p.Syntax)
+		slices.SortFunc(files, func(a, b *ast.File) int {
+			return strings.Compare(p.Fset.PositionFor(a.Pos(), false).Filename, p.Fset.PositionFor(b.Pos(), false).Filename)
+		})
+		for _, file := range files {
+			program.readPackageDirectives(p, file.Doc)
 			for _, decl := range file.Decls {
 				if d, ok := decl.(*ast.GenDecl); ok && d.Tok == token.TYPE {
 					for _, raw := range d.Specs {
@@ -91,12 +102,24 @@ func Read(ctx context.Context, dir, pattern string) (*Program, error) {
 				entry := Function{Package: p, File: file, Decl: f}
 				entry.readDirectives()
 				program.Functions[obj] = entry
-				if p.PkgPath != Curated && requested[p.ID] && entry.Selected {
-					program.Roots = append(program.Roots, obj)
+				if p.PkgPath != Curated && entry.Selected {
+					program.PackageRoots[p.PkgPath] = append(program.PackageRoots[p.PkgPath], obj)
 				}
 			}
 		}
+		marked := program.PackageRoots[p.PkgPath]
+		slices.SortFunc(marked, func(a, b *types.Func) int {
+			return strings.Compare(a.FullName(), b.FullName())
+		})
+		if p.PkgPath != Curated && requested[p.ID] {
+			if len(program.PackageLaws[p.PkgPath]) != 0 {
+				program.LawPackages = append(program.LawPackages, p.PkgPath)
+			} else {
+				program.Roots = append(program.Roots, marked...)
+			}
+		}
 	})
+	slices.Sort(program.LawPackages)
 	slices.SortFunc(program.Roots, func(a, b *types.Func) int {
 		return strings.Compare(a.FullName(), b.FullName())
 	})
@@ -110,6 +133,82 @@ func Read(ctx context.Context, dir, pattern string) (*Program, error) {
 		return nil, fmt.Errorf("%s", diagnostics[0])
 	}
 	return program, nil
+}
+
+func directive(text string) (kind, value string, ok bool) {
+	text, ok = strings.CutPrefix(text, "//golean:")
+	kind = strings.TrimSpace(text)
+	if i := strings.IndexFunc(kind, unicode.IsSpace); i >= 0 {
+		kind, value = kind[:i], strings.TrimSpace(kind[i:])
+	}
+	return kind, value, ok
+}
+
+func proposition(value string) (ir.Proposition, bool) {
+	name, lean, ok := strings.Cut(value, ":")
+	name, lean = strings.TrimSpace(name), strings.TrimSpace(lean)
+	return ir.Proposition{Name: name, Lean: lean}, ok && token.IsIdentifier(name) && name != "_" && lean != ""
+}
+
+func validModule(value string) bool {
+	for part := range strings.SplitSeq(value, ".") {
+		if !token.IsIdentifier(part) || part == "_" {
+			return false
+		}
+	}
+	return true
+}
+
+func (program *Program) readPackageDirectives(p *packages.Package, doc *ast.CommentGroup) {
+	path := p.PkgPath
+	if doc == nil || program.PackageIssues[path] != nil {
+		return
+	}
+	laws := program.PackageLaws[path]
+	var previous *ir.Proposition
+	for _, comment := range doc.List {
+		kind, value, ok := directive(comment.Text)
+		if !ok {
+			previous = nil
+			continue
+		}
+		fail := func(message string, args ...any) {
+			program.PackageIssues[path] = Error(p, comment.Pos(), message, args...)
+		}
+		switch kind {
+		case "verify":
+			law, valid := proposition(value)
+			if !valid {
+				fail("expected golean:verify name : proposition")
+				return
+			}
+			for _, existing := range laws {
+				if existing.Name == law.Name {
+					fail("duplicate package law %s", law.Name)
+					return
+				}
+			}
+			laws = append(laws, law)
+			previous = &laws[len(laws)-1]
+		case "verify+":
+			if previous == nil || value == "" {
+				fail("unexpected golean:verify+ continuation")
+				return
+			}
+			previous.Lean += "\n" + value
+		case "verify:import":
+			previous = nil
+			if !validModule(value) {
+				fail("expected golean:verify:import Lean.Module")
+				return
+			}
+			program.LeanImports[path] = append(program.LeanImports[path], value)
+		default:
+			fail("unsupported package golean:%s directive", kind)
+			return
+		}
+	}
+	program.PackageLaws[path] = laws
 }
 
 func firstDirective(groups ...*ast.CommentGroup) token.Pos {
@@ -144,14 +243,10 @@ func (f *Function) readDirectives() {
 	var previous *ir.Proposition
 	var continuation string
 	for _, comment := range f.Decl.Doc.List {
-		text, ok := strings.CutPrefix(comment.Text, "//golean:")
+		kind, value, ok := directive(comment.Text)
 		if !ok {
 			previous = nil
 			continue
-		}
-		kind, value := strings.TrimSpace(text), ""
-		if i := strings.IndexFunc(kind, unicode.IsSpace); i >= 0 {
-			kind, value = kind[:i], strings.TrimSpace(kind[i:])
 		}
 		if kind == "verify" || kind == "export" || strings.HasPrefix(kind, "verify") || kind == "abstract" {
 			f.Selected = true
@@ -176,28 +271,34 @@ func (f *Function) readDirectives() {
 				fail("expected one bare golean:export")
 			}
 			f.Export = true
+		case "termination:by":
+			if value == "" || f.Termination != "" {
+				fail("expected one nonempty golean:termination:by measure")
+			}
+			f.Termination = value
 		case "abstract":
 			if value == "" || slices.Contains(f.Abstract, value) {
 				fail("expected a unique golean:abstract callee")
 			}
 			f.Abstract = append(f.Abstract, value)
 		case "assume", "verify":
-			name, proposition, ok := strings.Cut(value, ":")
-			name, proposition = strings.TrimSpace(name), strings.TrimSpace(proposition)
-			if !ok || !token.IsIdentifier(name) || name == "_" || proposition == "" {
+			law, ok := proposition(value)
+			if !ok {
 				fail("expected golean:%s name : proposition", kind)
 				continue
 			}
 			list := &f.Laws
 			if kind == "assume" {
 				list = &f.Assumptions
+			} else {
+				f.LawPositions = append(f.LawPositions, comment.Pos())
 			}
 			for _, existing := range *list {
-				if existing.Name == name {
-					fail("duplicate golean:%s law %s", kind, name)
+				if existing.Name == law.Name {
+					fail("duplicate golean:%s law %s", kind, law.Name)
 				}
 			}
-			*list = append(*list, ir.Proposition{Name: name, Lean: proposition})
+			*list = append(*list, law)
 			previous, continuation = &(*list)[len(*list)-1], kind+"+"
 		default:
 			fail("unsupported golean:%s directive", kind)

@@ -71,11 +71,12 @@ func (f *function) expr(node ast.Expr) (ir.Expr, error) {
 	case *ast.SelectorExpr:
 		sel := info.Selections[e]
 		if sel != nil && sel.Kind() == types.FieldVal && !sel.Indirect() && len(sel.Index()) == 1 {
-			if _, err := f.goType(p, e.X.Pos(), sel.Recv()); err != nil {
+			t, err := f.goType(p, e.X.Pos(), sel.Recv())
+			if err != nil {
 				return nil, err
 			}
 			receiver, err := f.expr(e.X)
-			return ir.FieldRead{Record: receiver, Name: sel.Obj().Name()}, err
+			return ir.FieldRead{Record: receiver, Name: sel.Obj().Name(), Control: t.Kind == ir.FoldControl}, err
 		}
 	case *ast.CompositeLit:
 		return f.literal(e)
@@ -119,10 +120,10 @@ func (f *function) literal(e *ast.CompositeLit) (ir.Expr, error) {
 	if err != nil {
 		return nil, err
 	}
-	if t.Kind > ir.Record && len(e.Elts) == 0 {
+	if t.Kind > ir.Record && t.Kind != ir.FoldControl && len(e.Elts) == 0 {
 		return ir.Primitive{Op: ir.Empty, Type: t}, nil
 	}
-	if t.Kind != ir.Record {
+	if t.Kind != ir.Record && t.Kind != ir.FoldControl {
 		return nil, load.Error(p, e.Pos(), "expected a record literal or an empty curated value")
 	}
 	record := typ.Underlying().(*types.Struct)
@@ -147,11 +148,14 @@ func (f *function) literal(e *ast.CompositeLit) (ir.Expr, error) {
 			break
 		}
 	}
+	if t.Kind == ir.FoldControl {
+		return ir.FoldControlLiteral{State: fields[0], Stop: fields[1]}, nil
+	}
 	return ir.StructLiteral{Type: t.Record, Fields: fields}, nil
 }
 
 var constructors = map[string]ir.PrimitiveOp{
-	"Some": ir.Some, "None": ir.None, "Nil": ir.Nil, "Cons": ir.Cons, "NewBitVec": ir.NewBitVec,
+	"NewBox": ir.Some, "Some": ir.Some, "None": ir.None, "Nil": ir.Nil, "Cons": ir.Cons, "NewBitVec": ir.NewBitVec,
 }
 
 var methods = map[ir.Kind]map[string]ir.PrimitiveOp{
@@ -159,6 +163,7 @@ var methods = map[ir.Kind]map[string]ir.PrimitiveOp{
 	ir.ByteArray: {"Push": ir.Push, "Get": ir.Get, "Set": ir.Set, "Size": ir.Size, "Extract": ir.Extract},
 	ir.RBMap:     {"Find": ir.Find, "Contains": ir.Contains, "Insert": ir.Insert, "Erase": ir.Erase},
 	ir.RBSet:     {"Contains": ir.Contains, "Insert": ir.Insert, "Erase": ir.Erase},
+	ir.Box:       {"IsSome": ir.IsSome, "Get": ir.BoxGet},
 	ir.Option:    {"IsSome": ir.IsSome, "UnwrapOr": ir.UnwrapOr},
 	ir.List:      {"IsEmpty": ir.IsEmpty},
 	ir.BitVec:    {"Get": ir.Get, "Set": ir.Set, "Width": ir.Width, "ToUint64": ir.ToUint64},
@@ -199,6 +204,9 @@ func (f *function) call(e *ast.CallExpr) (ir.Expr, error) {
 		return nil, load.Error(p, e.Pos(), "expected a direct call to a supported function")
 	}
 	if fn.Pkg().Path() == load.Curated {
+		if kind := folds[fn.Name()]; selection == nil && kind != 0 {
+			return f.fold(e, kind)
+		}
 		var t ir.Type
 		var op ir.PrimitiveOp
 		var err error
@@ -220,6 +228,9 @@ func (f *function) call(e *ast.CallExpr) (ir.Expr, error) {
 			return nil, load.Error(p, e.Pos(), "unsupported curated operation %s", fn.Name())
 		}
 		args, err := f.arguments(nodes)
+		if err == nil && op == ir.BoxGet {
+			args = append(args, f.zero(*t.Element))
+		}
 		return ir.Primitive{Op: op, Type: t, Args: args}, err
 	}
 	nodes := e.Args
@@ -235,28 +246,44 @@ func (f *function) call(e *ast.CallExpr) (ir.Expr, error) {
 	if err != nil {
 		return nil, err
 	}
+	if fn == f.fn && f.source.Termination != "" {
+		f.recursive = true
+		return ir.Call{Target: symbol(fn), Args: args}, nil
+	}
+	abstract, err := f.callTarget(fn, e.Pos())
+	if err != nil {
+		return nil, err
+	}
+	if abstract {
+		return ir.AbstractCall{Target: symbol(fn), Args: args}, nil
+	}
+	return ir.Call{Target: symbol(fn), Args: args}, nil
+}
+
+func (f *function) callTarget(fn *types.Func, pos token.Pos) (bool, error) {
+	p := f.source.Package
 	if _, ok := f.contracts[fn]; ok {
 		f.contracts[fn] = true
-		return ir.AbstractCall{Target: symbol(fn), Args: args}, nil
+		return true, nil
 	}
 	if fn.Pkg().Path() != p.PkgPath {
 		if !f.compiler.source.Functions[fn].Export {
-			return nil, load.Error(p, e.Pos(), "cross-package call to %s requires golean:export or a contract", fn.FullName())
+			return false, load.Error(p, pos, "cross-package call to %s requires golean:export or a contract", fn.FullName())
 		}
-		if err := f.depend(p, fn.Pkg().Path(), e.Pos()); err != nil {
-			return nil, err
+		if err := f.depend(p, fn.Pkg().Path(), pos); err != nil {
+			return false, err
 		}
 	}
 	if f.state[fn] == 1 {
-		return nil, load.Error(p, e.Pos(), "recursive call to %s", fn.FullName())
+		return false, load.Error(p, pos, "recursive call to %s", fn.FullName())
 	}
 	if err := f.function(fn); err != nil {
-		return nil, err
+		return false, err
 	}
 	if f.abstract[fn] {
-		return nil, load.Error(p, e.Pos(), "cannot call a function with caller-local contracts")
+		return false, load.Error(p, pos, "cannot call a function with caller-local contracts")
 	}
-	return ir.Call{Target: symbol(fn), Args: args}, nil
+	return false, nil
 }
 
 func (f *function) arguments(nodes []ast.Expr) ([]ir.Expr, error) {

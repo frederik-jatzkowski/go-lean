@@ -20,7 +20,10 @@ type Artifact struct {
 }
 
 type renderer struct {
-	word string
+	word          string
+	foldNamespace string
+	measured      bool
+	self          ir.Symbol
 }
 
 func identifier(name string) string { return "«" + name + "»" }
@@ -37,7 +40,7 @@ func Module(relativeDir, stem string) string {
 }
 
 func Render(p *ir.Package, modules map[string]string) []Artifact {
-	r := renderer{word: scalar[p.Word]}
+	r := renderer{word: scalar[p.Word], foldNamespace: "_root_." + namespace(p.Path) + ".«fold»"}
 	model := p.Name
 	artifacts := []Artifact{{Stem: model, Content: r.model(p, modules)}}
 	if len(p.Laws) == 0 {
@@ -85,10 +88,12 @@ func leanType(t ir.Type) string {
 		return "(_root_.Std.TreeMap " + leanType(*t.Key) + " " + leanType(*t.Element) + " _root_.Ord.compare)"
 	case ir.RBSet:
 		return "(_root_.Std.TreeSet " + leanType(*t.Key) + " _root_.Ord.compare)"
-	case ir.Option:
+	case ir.Option, ir.Box:
 		return "(_root_.Option " + leanType(*t.Element) + ")"
 	case ir.List:
 		return "(_root_.List " + leanType(*t.Element) + ")"
+	case ir.FoldControl:
+		return "(_root_.Prod " + leanType(*t.Element) + " _root_.Bool)"
 	case ir.BitVec:
 		return "(_root_.Sigma (fun w : {n : _root_.Nat // n ≤ 64} => _root_.BitVec w.val))"
 	default:
@@ -107,17 +112,28 @@ func (r renderer) model(p *ir.Package, modules map[string]string) string {
 		b.WriteByte('\n')
 	}
 	b.WriteString("import Std\n")
+	imported := map[string]bool{identifier("Std"): true}
 	for _, path := range p.Imports {
-		fmt.Fprintln(&b, "import "+modules[path])
+		module := modules[path]
+		fmt.Fprintln(&b, "import "+module)
+		imported[module] = true
+	}
+	for _, path := range p.LeanImports {
+		parts := strings.Split(path, ".")
+		for i, part := range parts {
+			parts[i] = identifier(part)
+		}
+		module := strings.Join(parts, ".")
+		if !imported[module] {
+			fmt.Fprintln(&b, "import "+module)
+		}
 	}
 	fmt.Fprintf(&b, "\nnamespace %s\n", namespace(p.Path))
+	r.writeFolds(&b, p.Folds)
 	for _, decl := range p.Decls {
 		switch d := decl.(type) {
 		case ir.Struct:
-			fmt.Fprintf(&b, "\nstructure %s where\n", identifier(d.Symbol.Name))
-			for _, f := range d.Fields {
-				fmt.Fprintf(&b, "  %s : %s\n", field(f.Name), leanType(f.Type))
-			}
+			writeStruct(&b, d)
 		case ir.Contract:
 			fmt.Fprintf(&b, "\nstructure %s where\n  operation : ", contractName(d.Caller, d.Callee))
 			for _, t := range d.Params {
@@ -128,14 +144,27 @@ func (r renderer) model(p *ir.Package, modules map[string]string) string {
 				fmt.Fprintf(&b, "  %s : (let %s := operation;\n    %s)\n", identifier(law.Name), identifier(d.Callee.Name), indent(law.Lean, 4))
 			}
 		case ir.Function:
+			if d.Termination != "" {
+				b.WriteString("\nset_option linter.unusedVariables false in\nset_option linter.unusedSimpArgs false in\n")
+			}
 			fmt.Fprintf(&b, "\ndef %s", identifier(d.Symbol.Name))
 			for _, callee := range d.Contracts {
 				fmt.Fprintf(&b, " (%s : %s)", contractVar(callee), contractName(d.Symbol, callee))
 			}
 			for _, param := range d.Params {
-				fmt.Fprintf(&b, " (%s : %s)", local(param.ID), leanType(param.Type))
+				name := local(param.ID)
+				if param.Unused {
+					name = "_"
+				}
+				fmt.Fprintf(&b, " (%s : %s)", name, leanType(param.Type))
 			}
-			fmt.Fprintf(&b, " : %s :=\n  %s\n", leanType(d.Result), r.expr(d.Body))
+			body := r
+			body.measured = d.Termination != ""
+			body.self = d.Symbol
+			fmt.Fprintf(&b, " : %s :=\n  %s\n", leanType(d.Result), body.expr(d.Body))
+			if body.measured {
+				writeTermination(&b, d)
+			}
 		}
 	}
 	fmt.Fprintf(&b, "\nend %s\n", namespace(p.Path))
@@ -222,6 +251,12 @@ func (r renderer) expr(e ir.Expr) string {
 	case ir.Let:
 		return "(let " + local(v.ID) + " := " + r.expr(v.Value) + "; " + r.expr(v.Body) + ")"
 	case ir.If:
+		if r.measured {
+			if neg, ok := v.Cond.(ir.Unary); ok && neg.Op == ir.Not {
+				v.Cond, v.Then, v.Else = neg.Value, v.Else, v.Then
+			}
+			return "(if «_guard» : " + r.expr(v.Cond) + " then " + r.expr(v.Then) + " else " + r.expr(v.Else) + ")"
+		}
 		return "(if " + r.expr(v.Cond) + " then " + r.expr(v.Then) + " else " + r.expr(v.Else) + ")"
 	case ir.Join:
 		return "(let " + local(v.ID) + " := fun (_ : _root_.Unit) => " + r.expr(v.Next) + "; " + r.expr(v.Body) + ")"
@@ -232,15 +267,29 @@ func (r renderer) expr(e ir.Expr) string {
 	case ir.Binary:
 		return r.binary(v)
 	case ir.FieldRead:
+		if v.Control {
+			projection := ".1"
+			if v.Name == "Stop" {
+				projection = ".2"
+			}
+			return "(" + r.expr(v.Record) + ")" + projection
+		}
 		return "(" + r.expr(v.Record) + ")." + field(v.Name)
 	case ir.StructLiteral:
 		return r.apply(qualified(v.Type)+".mk", v.Fields)
 	case ir.Call:
+		if r.measured && v.Target == r.self {
+			return r.apply(identifier(v.Target.Name), v.Args)
+		}
 		return r.apply(qualified(v.Target), v.Args)
 	case ir.AbstractCall:
 		return r.apply(contractVar(v.Target)+".operation", v.Args)
 	case ir.Primitive:
 		return r.primitive(v)
+	case ir.Fold:
+		return r.fold(v)
+	case ir.FoldControlLiteral:
+		return r.apply("_root_.Prod.mk", []ir.Expr{v.State, v.Stop})
 	default:
 		panic(fmt.Sprintf("unexpected IR expression %T", e))
 	}
@@ -283,5 +332,66 @@ func (r renderer) binary(v ir.Binary) string {
 	default:
 		op := map[ir.BinaryOp]string{ir.Eq: "=", ir.Ne: "≠", ir.Lt: "<", ir.Le: "≤", ir.Gt: ">", ir.Ge: "≥"}[v.Op]
 		return "(_root_.Decidable.decide (" + a + " " + op + " " + b + "))"
+	}
+}
+
+func writeTermination(b *strings.Builder, d ir.Function) {
+	fmt.Fprint(b, "termination_by (")
+	for _, param := range d.Params {
+		if !param.Unused {
+			fmt.Fprintf(b, "let %s := %s; ", identifier(param.Name), local(param.ID))
+		}
+	}
+	fmt.Fprintf(b, "(%s : _root_.Nat))\n", d.Termination)
+	b.WriteString(`decreasing_by
+  all_goals simp_wf
+  all_goals first
+    | solve_by_elim
+    | (try simp_all); omega
+    | simp_all [UInt8.toNat_sub, UInt16.toNat_sub, UInt32.toNat_sub, UInt64.toNat_sub,
+        UInt8.lt_iff_toNat_lt, UInt16.lt_iff_toNat_lt, UInt32.lt_iff_toNat_lt, UInt64.lt_iff_toNat_lt,
+        UInt8.le_iff_toNat_le, UInt16.le_iff_toNat_le, UInt32.le_iff_toNat_le, UInt64.le_iff_toNat_le,
+        ← UInt8.toNat_inj, ← UInt16.toNat_inj, ← UInt32.toNat_inj, ← UInt64.toNat_inj] <;> omega
+    | fail "go-lean could not prove that the recursive call decreases its termination measure"
+`)
+}
+
+func selfBox(t ir.Type, record ir.Symbol) bool {
+	return t.Kind == ir.Box && t.Element.Kind == ir.Record && t.Element.Record == record
+}
+
+func writeStruct(b *strings.Builder, d ir.Struct) {
+	name := identifier(d.Symbol.Name)
+	if !d.Recursive {
+		fmt.Fprintf(b, "\nstructure %s where\n", name)
+		for _, f := range d.Fields {
+			fmt.Fprintf(b, "  %s : %s\n", field(f.Name), leanType(f.Type))
+		}
+		return
+	}
+	fmt.Fprintf(b, "\ninductive %s where\n  | mk", name)
+	for _, f := range d.Fields {
+		typ := leanType(f.Type)
+		if selfBox(f.Type, d.Symbol) {
+			typ = "(_root_.Option " + name + ")"
+		}
+		fmt.Fprintf(b, " (%s : %s)", field(f.Name), typ)
+	}
+	fmt.Fprintf(b, " : %s\n", name)
+	for i, f := range d.Fields {
+		pattern := make([]string, len(d.Fields))
+		for j := range pattern {
+			pattern[j] = "_"
+		}
+		pattern[i] = "value"
+		projection := field(f.Name)
+		fmt.Fprintf(b, "\ndef %s.%s : %s → %s\n  | .mk %s => value\n", name, projection, name, leanType(f.Type), strings.Join(pattern, " "))
+		if selfBox(f.Type, d.Symbol) {
+			fmt.Fprintf(b, "\n@[local simp] theorem %s.%s (node fallback : %s)\n    (present : node.%s.isSome = true) :\n    sizeOf (node.%s.getD fallback) < sizeOf node := by\n", name, identifier("box_size:"+f.Name), name, projection, projection)
+			for j := range pattern {
+				pattern[j] = fmt.Sprintf("arg%d", j)
+			}
+			fmt.Fprintf(b, "  cases node with\n  | mk %s =>\n    cases %s <;> simp_all [%s.%s] <;> omega\n", strings.Join(pattern, " "), pattern[i], name, projection)
+		}
 	}
 }

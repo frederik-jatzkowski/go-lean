@@ -137,3 +137,24 @@ func TestBitVec(t *testing.T) {
 	check(t, lowBit.Get(0), Some(true))
 	check(t, lowBit.Get(63), Some(false))
 }
+
+func TestBoxCopiesValues(t *testing.T) {
+	type node struct {
+		value byte
+		child Box[node]
+	}
+
+	input := node{value: 12}
+	box := NewBox(input)
+	input.value = 0
+	got := box.Get()
+	check(t, got.value, byte(12))
+	got.value = 1
+	check(t, box.Get().value, byte(12))
+
+	var empty Box[node]
+	check(t, empty.IsSome(), false)
+	check(t, empty.Get().value, byte(0))
+	check(t, empty.Get().child.IsSome(), false)
+	check(t, NewBox(empty.Get()).IsSome(), true)
+}

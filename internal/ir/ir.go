@@ -27,6 +27,8 @@ const (
 	Option
 	BitVec
 	List
+	FoldControl
+	Box
 )
 
 type Type struct {
@@ -44,23 +46,27 @@ type Field struct {
 type Declaration interface{ declaration() }
 
 type Struct struct {
-	Symbol Symbol
-	Fields []Field
+	Symbol    Symbol
+	Fields    []Field
+	Recursive bool
 }
 
 func (Struct) declaration() {}
 
 type Binding struct {
-	ID   int
-	Type Type
+	Unused bool
+	Name   string
+	ID     int
+	Type   Type
 }
 
 type Function struct {
-	Symbol    Symbol
-	Params    []Binding
-	Result    Type
-	Body      Expr
-	Contracts []Symbol
+	Symbol      Symbol
+	Params      []Binding
+	Result      Type
+	Body        Expr
+	Contracts   []Symbol
+	Termination string
 }
 
 func (Function) declaration() {}
@@ -89,8 +95,10 @@ type Package struct {
 	Path, Name, Dir string
 	Word            Kind
 	Imports         []string
+	LeanImports     []string
 	Decls           []Declaration
 	Laws            []Law
+	Folds           FoldKind
 }
 
 type Expr interface{ expression() }
@@ -146,8 +154,9 @@ type Binary struct {
 	Left, Right Expr
 }
 type FieldRead struct {
-	Record Expr
-	Name   string
+	Record  Expr
+	Name    string
+	Control bool
 }
 type StructLiteral struct {
 	Type   Symbol
@@ -160,6 +169,26 @@ type Call struct {
 type AbstractCall struct {
 	Target Symbol
 	Args   []Expr
+}
+
+type FoldKind uint8
+
+const (
+	FoldN FoldKind = 1 << iota
+	FoldNUntil
+	FoldList
+	FoldListUntil
+)
+
+type Fold struct {
+	Kind           FoldKind
+	Input, Initial Expr
+	Step           Symbol
+	Abstract       bool
+}
+
+type FoldControlLiteral struct {
+	State, Stop Expr
 }
 
 type PrimitiveOp uint8
@@ -186,6 +215,7 @@ const (
 	NewBitVec
 	Width
 	ToUint64
+	BoxGet
 )
 
 type Primitive struct {
@@ -194,16 +224,18 @@ type Primitive struct {
 	Args []Expr
 }
 
-func (Constant) expression()      {}
-func (Local) expression()         {}
-func (Let) expression()           {}
-func (If) expression()            {}
-func (Join) expression()          {}
-func (Jump) expression()          {}
-func (Unary) expression()         {}
-func (Binary) expression()        {}
-func (FieldRead) expression()     {}
-func (StructLiteral) expression() {}
-func (Call) expression()          {}
-func (AbstractCall) expression()  {}
-func (Primitive) expression()     {}
+func (Constant) expression()           {}
+func (Local) expression()              {}
+func (Let) expression()                {}
+func (If) expression()                 {}
+func (Join) expression()               {}
+func (Jump) expression()               {}
+func (Unary) expression()              {}
+func (Binary) expression()             {}
+func (FieldRead) expression()          {}
+func (StructLiteral) expression()      {}
+func (Call) expression()               {}
+func (AbstractCall) expression()       {}
+func (Primitive) expression()          {}
+func (Fold) expression()               {}
+func (FoldControlLiteral) expression() {}

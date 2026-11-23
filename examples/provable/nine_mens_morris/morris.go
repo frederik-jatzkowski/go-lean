@@ -508,30 +508,17 @@ func (board Board) inMill(point uint, player Player) bool {
 //golean:verify+   let points := (List.range 24).map UInt64.ofNat
 //golean:verify+   «Board$count» b player = (points.map (fun p => if «Board$stoneAt» b p = player then 1 else 0)).foldl (· + ·) 0
 func (board Board) count(player Player) uint8 {
-	return matches(board.stoneAt(0), player) +
-		matches(board.stoneAt(1), player) +
-		matches(board.stoneAt(2), player) +
-		matches(board.stoneAt(3), player) +
-		matches(board.stoneAt(4), player) +
-		matches(board.stoneAt(5), player) +
-		matches(board.stoneAt(6), player) +
-		matches(board.stoneAt(7), player) +
-		matches(board.stoneAt(8), player) +
-		matches(board.stoneAt(9), player) +
-		matches(board.stoneAt(10), player) +
-		matches(board.stoneAt(11), player) +
-		matches(board.stoneAt(12), player) +
-		matches(board.stoneAt(13), player) +
-		matches(board.stoneAt(14), player) +
-		matches(board.stoneAt(15), player) +
-		matches(board.stoneAt(16), player) +
-		matches(board.stoneAt(17), player) +
-		matches(board.stoneAt(18), player) +
-		matches(board.stoneAt(19), player) +
-		matches(board.stoneAt(20), player) +
-		matches(board.stoneAt(21), player) +
-		matches(board.stoneAt(22), player) +
-		matches(board.stoneAt(23), player)
+	return lean.FoldN(24, stoneCount{Board: board, Player: player, Total: 0}, countStone).Total
+}
+
+type stoneCount struct {
+	Board  Board
+	Player Player
+	Total  uint8
+}
+
+func countStone(point uint, state stoneCount) stoneCount {
+	return stoneCount{Board: state.Board, Player: state.Player, Total: state.Total + matches(state.Board.stoneAt(point), state.Player)}
 }
 
 func matches(cell, player Player) uint8 {
@@ -545,30 +532,16 @@ func matches(cell, player Player) uint8 {
 //golean:verify+   let points := (List.range 24).map UInt64.ofNat
 //golean:verify+   «Board$hasUnprotected» b player = points.any (fun p => decide («Board$stoneAt» b p = player) && !«Board$inMill» b p player)
 func (board Board) hasUnprotected(player Player) bool {
-	return board.unprotected(0, player) ||
-		board.unprotected(1, player) ||
-		board.unprotected(2, player) ||
-		board.unprotected(3, player) ||
-		board.unprotected(4, player) ||
-		board.unprotected(5, player) ||
-		board.unprotected(6, player) ||
-		board.unprotected(7, player) ||
-		board.unprotected(8, player) ||
-		board.unprotected(9, player) ||
-		board.unprotected(10, player) ||
-		board.unprotected(11, player) ||
-		board.unprotected(12, player) ||
-		board.unprotected(13, player) ||
-		board.unprotected(14, player) ||
-		board.unprotected(15, player) ||
-		board.unprotected(16, player) ||
-		board.unprotected(17, player) ||
-		board.unprotected(18, player) ||
-		board.unprotected(19, player) ||
-		board.unprotected(20, player) ||
-		board.unprotected(21, player) ||
-		board.unprotected(22, player) ||
-		board.unprotected(23, player)
+	return lean.FoldNUntil(24, boardScan{Board: board, Player: player}, findUnprotected).Stop
+}
+
+type boardScan struct {
+	Board  Board
+	Player Player
+}
+
+func findUnprotected(point uint, state boardScan) lean.FoldControl[boardScan] {
+	return lean.FoldControl[boardScan]{State: state, Stop: state.Board.unprotected(point, state.Player)}
 }
 
 func (board Board) unprotected(point uint, player Player) bool {
@@ -580,30 +553,11 @@ func (board Board) unprotected(point uint, player Player) bool {
 //golean:verify+   «Board$hasSlide» b player = points.any (fun f => decide («Board$stoneAt» b f = player) &&
 //golean:verify+     points.any (fun t => decide («Board$stoneAt» b t = 0) && adjacent f t))
 func (board Board) hasSlide(player Player) bool {
-	return board.hasSlideFrom(0, player) ||
-		board.hasSlideFrom(1, player) ||
-		board.hasSlideFrom(2, player) ||
-		board.hasSlideFrom(3, player) ||
-		board.hasSlideFrom(4, player) ||
-		board.hasSlideFrom(5, player) ||
-		board.hasSlideFrom(6, player) ||
-		board.hasSlideFrom(7, player) ||
-		board.hasSlideFrom(8, player) ||
-		board.hasSlideFrom(9, player) ||
-		board.hasSlideFrom(10, player) ||
-		board.hasSlideFrom(11, player) ||
-		board.hasSlideFrom(12, player) ||
-		board.hasSlideFrom(13, player) ||
-		board.hasSlideFrom(14, player) ||
-		board.hasSlideFrom(15, player) ||
-		board.hasSlideFrom(16, player) ||
-		board.hasSlideFrom(17, player) ||
-		board.hasSlideFrom(18, player) ||
-		board.hasSlideFrom(19, player) ||
-		board.hasSlideFrom(20, player) ||
-		board.hasSlideFrom(21, player) ||
-		board.hasSlideFrom(22, player) ||
-		board.hasSlideFrom(23, player)
+	return lean.FoldNUntil(24, boardScan{Board: board, Player: player}, findSlide).Stop
+}
+
+func findSlide(point uint, state boardScan) lean.FoldControl[boardScan] {
+	return lean.FoldControl[boardScan]{State: state, Stop: state.Board.hasSlideFrom(point, state.Player)}
 }
 
 func (board Board) hasSlideFrom(point uint, player Player) bool {

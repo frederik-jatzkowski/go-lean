@@ -126,7 +126,7 @@ func helper(x int64) int64 { return x + 1 }
 	put(t, "client/client.go", strings.Replace(source, "return numbers.Increment(x)",
 		"for x > 0 { x-- }; return numbers.Increment(x)", 1))
 	err := command("transpile", "./...")
-	if err == nil || !strings.Contains(err.Error(), "client.go:4:") || !strings.Contains(err.Error(), "unsupported statement") {
+	if err == nil || !strings.Contains(err.Error(), "client.go:4:") || !strings.Contains(err.Error(), "raw loops are unsupported") {
 		t.Fatalf("expected source-located loop rejection, got %v", err)
 	}
 	if get(t, "client/client.lean") != client || get(t, "math/math.lean") != numbers || get(t, "lakefile.toml") != lake {
@@ -134,9 +134,90 @@ func helper(x int64) int64 { return x + 1 }
 	}
 }
 
+func TestPackageLaws(t *testing.T) {
+	workspace(t, false)
+	put(t, "spec/Spec.lean", "def expected : Int64 := 1\n")
+	put(t, "model/a.go", `//golean:verify:import spec.Spec
+//golean:verify fromBoth : Step 0 = expected ∧
+//golean:verify+ Initial = 0
+package model
+
+//golean:export
+func Step(n int64) int64 { return n + 1 }
+
+//golean:export
+func Initial() int64 { return 0 }
+`)
+	put(t, "model/b.go", `//golean:verify:import spec.Spec
+//golean:verify afterFirst : Initial = 0
+package model
+`)
+	put(t, "model/excluded.go", "//go:build ignore\n\n//golean:verify+ This is ignored.\npackage model\n")
+	put(t, "client/client.go", `package client
+import "example.test/model/model"
+//golean:export
+func Call(n int64) int64 { return model.Step(n) }
+`)
+	put(t, "standalone/doc.go", "//golean:verify onlyLaw : True\npackage standalone\n")
+	if err := command("transpile", "./client"); err != nil {
+		t.Fatal(err)
+	}
+	modelFile := "model/model.lean"
+	model := get(t, modelFile)
+	if strings.Count(model, "import «spec».«Spec»") != 1 ||
+		!strings.Contains(model, "-- fromBoth :\n--   Step 0 = expected ∧\n--   Initial = 0") ||
+		!strings.Contains(model, "def «Initial»") ||
+		!strings.Contains(model, "def «fromBoth» : Prop :=\n  Step 0 = expected ∧\n  Initial = 0") ||
+		strings.Index(model, "-- afterFirst :") <= strings.Index(model, "-- fromBoth :") {
+		t.Fatalf("unexpected model:\n%s", model)
+	}
+	missing(t, "model/model_laws.lean")
+	missing(t, "standalone/standalone.lean")
+	proofFile := "model/model_proofs.lean"
+	if !strings.Contains(get(t, proofFile), "theorem «fromBoth» : Laws.«fromBoth»") ||
+		!strings.Contains(get(t, "model/model_verify.lean"), "Checked.«fromBoth»") {
+		t.Fatal("missing proof scaffold or checked theorem")
+	}
+	const handwritten = "import model.model\n-- A handwritten companion.\n"
+	put(t, proofFile, handwritten)
+	if err := command("transpile", "./client"); err != nil {
+		t.Fatal(err)
+	}
+	if get(t, modelFile) != model || get(t, proofFile) != handwritten {
+		t.Fatal("focused regeneration changed the dependency model or its handwritten proof")
+	}
+	if err := command("transpile", "./standalone"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(get(t, "standalone/standalone.lean"), "def «onlyLaw» : Prop") {
+		t.Fatal("a package law must select a package with no modeled functions")
+	}
+}
+
+func TestPackageDirectiveDiagnostics(t *testing.T) {
+	workspace(t, false)
+	for _, tc := range []struct{ source, diagnostic, position string }{
+		{"//golean:verify:import spec..Bad\npackage example\n", "expected golean:verify:import Lean.Module", "f.go:1:"},
+		{"//golean:verify:import Good Other\npackage example\n", "expected golean:verify:import Lean.Module", "f.go:1:"},
+		{"//golean:verify+ True\npackage example\n", "unexpected golean:verify+ continuation", "f.go:1:"},
+		{"//golean:verify law :\npackage example\n", "expected golean:verify name : proposition", "f.go:1:"},
+		{"//golean:verify law : True\n//golean:verify law : True\npackage example\n", "duplicate package law law", "f.go:2:"},
+		{"//golean:verify law : True\npackage example\n//golean:verify law : F = true\nfunc F() bool { return true }\n", "duplicate package law law", "f.go:3:"},
+	} {
+		put(t, "f.go", tc.source)
+		err := command("transpile", ".")
+		if err == nil || !strings.Contains(err.Error(), tc.diagnostic) || !strings.Contains(err.Error(), tc.position) {
+			t.Errorf("got %v, expected %q at %s", err, tc.diagnostic, tc.position)
+		}
+	}
+	missing(t, "example.lean")
+}
+
 func TestSubsetDiagnostics(t *testing.T) {
 	workspace(t, false)
 	for _, tc := range []struct{ body, diagnostic string }{
+		{"func F() bool { for { return true } }", "raw loops are unsupported"},
+		{"func F() bool { return helper() }; func helper() bool { for range 1 { return true }; return false }", "raw loops are unsupported"},
 		{"func F(x int64) int64 { return F(x) }", "recursive call"},
 		{"func F(x int64) int64 { y := x; y = 1; return y }", "only immutable"},
 		{"func F(x *[]int64) int64 { return 0 }", "unsupported type"},
@@ -160,6 +241,32 @@ func TestSubsetDiagnostics(t *testing.T) {
 	err := command("transpile", ".")
 	if err == nil || !strings.Contains(err.Error(), "would overwrite a handwritten file") || get(t, "example.lean") != handwritten {
 		t.Fatalf("expected the handwritten file to be preserved, got %v", err)
+	}
+}
+
+func TestFoldCallbackDiagnostics(t *testing.T) {
+	workspace(t, true)
+	for _, tc := range []struct{ body, diagnostic string }{
+		{"return lean.FoldN(1, n, func(i, state uint) uint { return i + state })", "directly named"},
+		{"return lean.FoldN(1, n, saved)", "directly named"},
+		{"return lean.FoldN(1, n, generic[uint])", "non-generic"},
+		{"return lean.FoldN(1, n, receiver{}.step)", "directly named"},
+		{"return lean.FoldN(1, n, recursive)", "recursive call"},
+	} {
+		put(t, "f.go", `package example
+import "github.com/frederik-jatzkowski/go-lean/pkg/lean"
+func add(i, state uint) uint { return i + state }
+var saved = add
+func generic[T ~uint](i uint, state T) T { return state }
+func recursive(i, state uint) uint { return F(i + state) }
+type receiver struct{}
+func (receiver) step(i, state uint) uint { return i + state }
+//golean:export
+func F(n uint) uint { `+tc.body+" }\n")
+		err := command("transpile", ".")
+		if err == nil || !strings.Contains(err.Error(), tc.diagnostic) {
+			t.Errorf("%s: got %v, expected %q", tc.body, err, tc.diagnostic)
+		}
 	}
 }
 
@@ -198,15 +305,20 @@ func Run(first First, second Second, n int64) int64 {
 }
 
 func TestTargetWordSize(t *testing.T) {
-	workspace(t, false)
+	workspace(t, true)
 	t.Setenv("GOOS", "linux")
 	t.Setenv("GOARCH", "386")
-	put(t, "word.go", "package word\n//golean:export\nfunc Next(x uint) uint { return x+1 }\n")
+	put(t, "word.go", `package word
+import "github.com/frederik-jatzkowski/go-lean/pkg/lean"
+func next(index, x uint) uint { return x + index }
+//golean:export
+func Sum(n uint) uint { return lean.FoldN(n, uint(0), next) }
+`)
 	if err := command("transpile", "."); err != nil {
 		t.Fatal(err)
 	}
 	model := get(t, "word.lean")
-	if !strings.Contains(model, "_root_.UInt32") || strings.Contains(model, "_root_.UInt64") {
+	if !strings.Contains(model, "step : _root_.UInt32") || strings.Contains(model, "_root_.UInt64") {
 		t.Fatalf("Go 386 word size did not reach the model:\n%s", model)
 	}
 }
@@ -230,7 +342,7 @@ func TestCuratedLeanSemantics(t *testing.T) {
 	if !errors.As(err, &failure) || !strings.Contains(string(output), "unapproved axiom sorryAx") {
 		t.Fatalf("expected scaffold to fail axiom audit, got %v\n%s", err, output)
 	}
-	for _, law := range []string{"arrays", "bits", "bytes", "branches", "lists", "options", "ordered", "overflow", "signedMinimum"} {
+	for _, law := range []string{"arrays", "bits", "bytes", "branches", "folds", "lists", "options", "ordered", "overflow", "signedMinimum"} {
 		proof := "theorem «" + law + "» : Laws.«" + law + "» := by\n"
 		scaffold = strings.Replace(scaffold, proof+"  sorry", proof+"  unfold Laws.«"+law+"»\n  decide", 1)
 	}
@@ -325,4 +437,130 @@ func Overflow(x int8) int8 { return x + 1 }
 
 //golean:verify signedMinimum : SignedMinimum = true
 func SignedMinimum() bool { return Overflow(127) == -128 }
+
+func grow(index uint, state uint) uint { return state + state + index }
+func nested(index uint, state uint) uint { return curated.FoldN(index, state, grow) }
+func stopAtOne(index uint, state uint) curated.FoldControl[uint] {
+	return curated.FoldControl[uint]{Stop: index == 1, State: grow(index, state)}
+}
+func record(value int8, state int8) int8 { return state + state + value }
+func stopAtTwo(value int8, state int8) curated.FoldControl[int8] {
+	return curated.FoldControl[int8]{State: record(value, state), Stop: value == 2}
+}
+
+//golean:verify folds : Folds = true
+func Folds() bool {
+	one := curated.FoldN(1, uint(2), grow)
+	count := curated.FoldN(3, one, nested)
+	empty := curated.FoldNUntil(0, uint(1), stopAtOne)
+	done := curated.FoldNUntil(8, uint(1), stopAtOne)
+	last := curated.FoldNUntil(2, uint(1), stopAtOne)
+	exhausted := curated.FoldNUntil(1, uint(1), stopAtOne)
+	items := curated.Cons(int8(2), curated.Cons(int8(3), curated.Nil[int8]()))
+	first := curated.FoldListUntil(items, int8(1), stopAtTwo)
+	return count == 33 && empty.State == 1 && !empty.Stop &&
+		done.Stop && done.State == 5 && last.Stop && last.State == 5 &&
+		!exhausted.Stop && exhausted.State == 2 &&
+		first.Stop && first.State == 4 && curated.FoldList(items, int8(1), record) == 11
+}
 `
+
+func TestBoxedRecursion(t *testing.T) {
+	if _, err := exec.LookPath("lake"); err != nil {
+		t.Skip("lake is unavailable")
+	}
+	workspace(t, true)
+	put(t, "model.go", `package model
+import "github.com/frederik-jatzkowski/go-lean/pkg/lean"
+
+type Tree struct {
+	Value byte
+	Left, Right lean.Box[Tree]
+}
+
+//golean:termination:by sizeOf tree
+func Sum(tree Tree) byte {
+	if tree.Left.IsSome() {
+		left := Sum(tree.Left.Get())
+		if tree.Right.IsSome() {
+			return tree.Value + left + Sum(tree.Right.Get())
+		}
+		return tree.Value + left
+	}
+	return tree.Value
+}
+
+//golean:termination:by n.toNat
+func Countdown(n byte) byte {
+	if n > 0 {
+		return Countdown(n - 1) + 1
+	}
+	return 0
+}
+
+//golean:verify result : Demo = 10
+func Demo() byte {
+	empty := lean.Box[Tree]{}
+	zero := empty.Get()
+	boxedZero := lean.NewBox(zero)
+	leaf := Tree{Value: 2, Left: empty, Right: empty}
+	tree := Tree{Value: 3, Left: lean.NewBox(leaf), Right: lean.NewBox(leaf)}
+	if !empty.IsSome() && boxedZero.IsSome() && !zero.Left.IsSome() && !zero.Right.IsSome() {
+		return Sum(tree) + Countdown(3)
+	}
+	return 0
+}
+`)
+	if err := command("transpile", "."); err != nil {
+		t.Fatal(err)
+	}
+	proofs := "model_proofs.lean"
+	put(t, proofs, strings.Replace(get(t, proofs), "  sorry", "  simp [Laws.«result», Demo, Sum.eq_def, Countdown.eq_def, Tree.«field:Left», Tree.«field:Right», Tree.«field:Value»]", 1))
+	if err := command("verify", "."); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRejectInvalidBoxedRecursion(t *testing.T) {
+	for _, tc := range []struct {
+		name, declaration, want string
+	}{
+		{"slice", "func F(x lean.Box[[]byte]) byte { return 0 }", "unsupported type []byte"},
+		{"map", "func F(x lean.Box[map[byte]byte]) byte { return 0 }", "unsupported type map"},
+		{"pointer", "func F(x lean.Box[*byte]) byte { return 0 }", "unsupported type *byte"},
+		{"unannotated", "func F(x lean.Box[byte]) byte { return F(x) }", "recursive call"},
+		{"mutual", "//golean:termination:by x.toNat\nfunc F(x byte) byte { return other(x) }\nfunc other(x byte) byte { return F(x) }", "recursive call"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workspace(t, true)
+			imports := ""
+			if strings.Contains(tc.declaration, "lean.Box") {
+				imports = "import \"github.com/frederik-jatzkowski/go-lean/pkg/lean\"\n"
+			}
+			put(t, "model.go", "package model\n"+imports+"//golean:export\n"+tc.declaration+"\n")
+			if err := command("transpile", "."); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func TestRejectNondecreasingCall(t *testing.T) {
+	if _, err := exec.LookPath("lake"); err != nil {
+		t.Skip("lake is unavailable")
+	}
+	workspace(t, false)
+	put(t, "model.go", `package model
+
+//golean:export
+//golean:termination:by n.toNat
+func Bad(n byte) byte { return Bad(n + 1) }
+`)
+	if err := command("transpile", "."); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("lake", "build", "+model").CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "could not prove that the recursive call decreases") {
+		t.Fatalf("expected Lean to reject the decrease, got %v\n%s", err, out)
+	}
+}

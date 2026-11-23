@@ -49,15 +49,26 @@
 --
 -- youCantWin :
 --   ∀ (wrap : Bool) (moves : List UInt8),
---   Won (moves.foldl (fun position direction => Step position direction wrap) Start) = false
+--   Won (Replay moves wrap) = false
 
 import Std
 
 namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game»
 
+namespace «fold»
+
+def list {T S : Type} (step : T → S → S) (items : List T) (state : S) : S :=
+  items.foldl (fun state item => step item state) state
+
+end «fold»
+
 structure «Position» where
   «field:X» : _root_.UInt8
   «field:Y» : _root_.UInt8
+
+structure «replayState» where
+  «field:Position» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«Position»
+  «field:Wrap» : _root_.Bool
 
 def «Start» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«Position» :=
   (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«Position».mk (1 : _root_.UInt8) (1 : _root_.UInt8))
@@ -76,6 +87,12 @@ def «forward» («local:0» : _root_.UInt8) («local:1» : _root_.Bool) : _root
 
 def «Step» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«Position») («local:1» : _root_.UInt8) («local:2» : _root_.Bool) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«Position» :=
   (if (_root_.Decidable.decide («local:1» = (0 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«moveIfOpen» «local:0» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«Position».mk («local:0»).«field:X» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«backward» («local:0»).«field:Y» «local:2»)) «local:2») else (if (_root_.Decidable.decide («local:1» = (1 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«moveIfOpen» «local:0» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«Position».mk («local:0»).«field:X» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«forward» («local:0»).«field:Y» «local:2»)) «local:2») else (if (_root_.Decidable.decide («local:1» = (2 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«moveIfOpen» «local:0» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«Position».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«backward» («local:0»).«field:X» «local:2») («local:0»).«field:Y») «local:2») else (if (_root_.Decidable.decide («local:1» = (3 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«moveIfOpen» «local:0» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«Position».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«forward» («local:0»).«field:X» «local:2») («local:0»).«field:Y») «local:2») else «local:0»))))
+
+def «replayMove» («local:0» : _root_.UInt8) («local:1» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«replayState») : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«replayState» :=
+  (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«replayState».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«Step» («local:1»).«field:Position» «local:0» («local:1»).«field:Wrap») («local:1»).«field:Wrap»)
+
+def «Replay» («local:0» : (_root_.List _root_.UInt8)) («local:1» : _root_.Bool) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«Position» :=
+  ((_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«fold».list _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«replayMove» «local:0» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«replayState».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«Start») «local:1»))).«field:Position»
 
 def «Won» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».«Position») : _root_.Bool :=
   (if (_root_.Decidable.decide ((«local:0»).«field:X» = (7 : _root_.UInt8))) then (_root_.Decidable.decide ((«local:0»).«field:Y» = (1 : _root_.UInt8))) else _root_.Bool.false)
@@ -133,6 +150,6 @@ def «stepUnknownDirection» : Prop :=
 
 def «youCantWin» : Prop :=
   ∀ (wrap : Bool) (moves : List UInt8),
-  Won (moves.foldl (fun position direction => Step position direction wrap) Start) = false
+  Won (Replay moves wrap) = false
 
 end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».Laws

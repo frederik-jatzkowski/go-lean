@@ -85,11 +85,20 @@ private theorem replaySafe (wrap : Bool) (position : Position) (moves : List UIn
   | cons direction moves ih =>
     exact ih (Step position direction wrap) (stepSafe wrap position direction h)
 
+private theorem replayAgrees (wrap : Bool) (position : Position) (moves : List UInt8) :
+    («fold».list replayMove moves (replayState.mk position wrap)).«field:Position» =
+      replay wrap position moves := by
+  induction moves generalizing position with
+  | nil => rfl
+  | cons move moves ih => exact ih (Step position move wrap)
+
 /-- No finite list of directions from the Go start position wins in either board mode. -/
 theorem youCantWin : Laws.youCantWin := by
   intro wrap moves
   have h := replaySafe wrap Start moves (startSafe wrap)
   simp only [safe, Bool.and_eq_true, and_assoc] at h
-  simpa [replay] using h.2.2.2.2
+  change Won (Replay moves wrap) = false
+  rw [Replay, replayAgrees]
+  simpa using h.2.2.2.2
 
 end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/provable/grid_game».Proofs

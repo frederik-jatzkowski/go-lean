@@ -1,16 +1,20 @@
 name = "goLean"
-defaultTargets = ["ExampleProofs"]
+defaultTargets = ["ExampleProofs", "StackMachineCompiler"]
 moreLeanArgs = ["-DwarningAsError=true"]
 
 [[lean_lib]]
 name = "ExampleProofs"
 srcDir = "examples/provable"
 roots = [
+  'bowling.bowling_rules',
   'nine_mens_morris.morris_rules',
   # BEGIN go-lean managed roots
   'assumed_worker.assumed_worker',
   'assumed_worker.assumed_worker_proofs',
   'assumed_worker.assumed_worker_verify',
+  'bowling.bowling',
+  'bowling.bowling_proofs',
+  'bowling.bowling_verify',
   'clampimport.clampimport',
   'clampimport.clampimport_proofs',
   'clampimport.clampimport_verify',
@@ -23,5 +27,17 @@ roots = [
   'nine_mens_morris.morris',
   'nine_mens_morris.morris_proofs',
   'nine_mens_morris.morris_verify',
+  # END go-lean managed roots
+]
+
+[[lean_lib]]
+name = "StackMachineCompiler"
+srcDir = "examples/provable/stack-machine-compiler"
+roots = [
+  'spec',
+  # BEGIN go-lean managed roots
+  'compiler',
+  'compiler_proofs',
+  'compiler_verify',
   # END go-lean managed roots
 ]

@@ -51,3 +51,53 @@ func (value Lexeme) Case() interface{} {
 	}
 	return value.payload
 }
+
+type expression struct {
+	_       [0]func()
+	payload interface{}
+}
+
+func NewexpressionMissingExpr(value MissingExpr) expression {
+	return expression{payload: value}
+}
+
+func NewexpressionIntegerExpr(value IntegerExpr) expression {
+	return expression{payload: value}
+}
+
+func NewexpressionBooleanExpr(value BooleanExpr) expression {
+	return expression{payload: value}
+}
+
+func NewexpressionNotExpr(value NotExpr) expression {
+	return expression{payload: value}
+}
+
+func NewexpressionAddExpr(value AddExpr) expression {
+	return expression{payload: value}
+}
+
+func NewexpressionSubExpr(value SubExpr) expression {
+	return expression{payload: value}
+}
+
+func NewexpressionEqExpr(value EqExpr) expression {
+	return expression{payload: value}
+}
+
+func NewexpressionLtExpr(value LtExpr) expression {
+	return expression{payload: value}
+}
+
+func NewexpressionAndExpr(value AndExpr) expression {
+	return expression{payload: value}
+}
+
+func (value expression) Case() interface{} {
+	var empty interface{}
+	if value.payload == empty {
+		var zero MissingExpr
+		return zero
+	}
+	return value.payload
+}

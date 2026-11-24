@@ -490,4 +490,19 @@ func writeRecordProjections(b *strings.Builder, d ir.Struct, members map[ir.Symb
 			fmt.Fprintf(b, "local grind_pattern %s.%s => node.%s\n", name, identifier("field_size:"+f.Name), projection)
 		}
 	}
+	// Only simplify projections on known constructors. Keep a projection on
+	// an arbitrary value intact so recursive size lemmas can still match it.
+	if len(members) > 0 {
+		args := make([]string, len(d.Fields))
+		binders := make([]string, len(d.Fields))
+		for i, f := range d.Fields {
+			args[i] = fmt.Sprintf("arg%d", i)
+			binders[i] = fmt.Sprintf("(%s : %s)", args[i], leanType(f.Type))
+		}
+		for i, f := range d.Fields {
+			fmt.Fprintf(b, "\n@[simp] theorem %s.%s %s :\n    (%s.mk %s).%s = %s := rfl\n",
+				name, identifier("field_mk:"+f.Name), strings.Join(binders, " "),
+				name, strings.Join(args, " "), field(f.Name), args[i])
+		}
+	}
 }

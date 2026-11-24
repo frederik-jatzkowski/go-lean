@@ -91,7 +91,7 @@ func TestRuntime(t *testing.T) {
 	}
 	proofs := "model_proofs.lean"
 	text := strings.Replace(get(t, proofs), "  sorry", "  rfl", 1)
-	text = strings.Replace(text, "  sorry", "  simp [Laws.«enumResult», demo, evaluate.eq_def, continued, Add.«field:Children», Children.«field:Left», Children.«field:Right»]", 1)
+	text = strings.Replace(text, "  sorry", "  simp [Laws.«enumResult», demo, evaluate.eq_def, continued]", 1)
 	put(t, proofs, text)
 	if err := command("verify", "."); err != nil {
 		t.Fatal(err)
@@ -172,7 +172,7 @@ func demo() byte {
 		t.Fatal(err)
 	}
 	proof := "model_proofs.lean"
-	put(t, proof, strings.Replace(get(t, proof), "  sorry", "  simp [Laws.«boxedZero», demo, count.eq_def, Branch.«field:Next»]", 1))
+	put(t, proof, strings.Replace(get(t, proof), "  sorry", "  simp [Laws.«boxedZero», demo, count.eq_def]", 1))
 	if err := command("verify", "."); err != nil {
 		t.Fatal(err)
 	}

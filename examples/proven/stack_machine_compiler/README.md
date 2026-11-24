@@ -23,7 +23,7 @@ A program contains one prefix expression. These are its forms:
 ## Follow the passes
 
 1. `tokenize` scans source bytes into tokens with their starting offsets. ASCII whitespace separates tokens, and decimal literals range from 0 to 255 with no leading zeros except for `0`.
-2. `parse` reads tokens right to left and builds a tree of boxed expressions. An operator takes one or two subtrees from the stack according to its arity.
+2. `parse` reads tokens right to left and builds a tree of expression variants. An operator takes one or two subtrees from the stack according to its arity.
 3. `checkExpression` checks children right before left and then checks the operator. Arithmetic and comparisons take unsigned byte operands. `and` and `not` take Boolean operands.
 4. `emitExpression` emits a binary operator's right operand first so the left operand is on top for operations such as subtraction. Instructions are opcode and payload pairs. The compiler appends a final halt.
 5. The VM fetches a pair at the byte-offset program counter, checks the instruction and stack, then executes it. The runner stops at the first halt or fault. [Compiler](model/compiler.go), [VM](model/vm.go), and [runner](model/run.go)
@@ -33,13 +33,13 @@ A program contains one prefix expression. These are its forms:
 `Compile` copies a Go slice into a modeled `lean.ByteArray`. Scanning, parsing, and VM execution use `FoldNUntil` with named steps. For example, the parser carries its input and partial roots in a value record:
 
 ```go
-func parse(words lean.Array[lexeme]) lean.FoldControl[parser] {
+func parse(words lean.Array[Lexeme]) lean.FoldControl[parser] {
 	initial := parser{Words: words, Roots: lean.Array[expression]{}}
 	return lean.FoldNUntil(words.Size(), initial, parseWord)
 }
 ```
 
-Expression children use `lean.Box[expression]`. Both type checking and emission recurse into those children with `//golean:termination:by sizeOf expr`. The package imports `spec` with `//golean:verify:import` and gives the independent requirements the modeled compilation, step, and run functions. [Specification](spec.lean)
+Expression variants carry the children their operators require. Literals have no children, `not` has one, and binary operators have two. The zero value is `MissingExpr`, which serves as the parser’s lookup fallback. Type checking and emission recurse into the children with `//golean:termination:by sizeOf expr`. The package imports `spec` with `//golean:verify:import` and gives the independent requirements the modeled compilation, step, and run functions. [Specification](spec.lean)
 
 ## Proof challenge
 

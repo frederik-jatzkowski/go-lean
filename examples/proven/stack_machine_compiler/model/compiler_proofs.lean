@@ -821,10 +821,11 @@ private theorem tokenizeRecognized (source : ByteArray) (fits : source.size ≤ 
   rw [sizeNat fits]
   simpa [finishScan, Bool.or_eq_true] using eq
 private def modelExpr : Expr → expression
-  | .literal v offset => leaf (locatedLexeme (.literal v, offset))
-  | .not offset operand => .mk (locatedLexeme (.not, offset)) (some (modelExpr operand)) none
+  | .literal v offset => buildExpression (locatedLexeme (.literal v, offset)) (.MissingExpr ⟨⟩) (.MissingExpr ⟨⟩)
+  | .not offset operand =>
+      buildExpression (locatedLexeme (.not, offset)) (modelExpr operand) (.MissingExpr ⟨⟩)
   | .binary op offset left right =>
-      .mk (locatedLexeme (.binary op, offset)) (some (modelExpr left)) (some (modelExpr right))
+      buildExpression (locatedLexeme (.binary op, offset)) (modelExpr left) (modelExpr right)
 
 private def modelRoots : List Expr → Array expression
   | [] => #[]
@@ -994,36 +995,34 @@ private theorem checkCorrect (e : Expr) :
     rw [checkExpression.eq_def]
     cases h : operand.check with
     | error err =>
-      simp [modelExpr, locatedLexeme, lexemeAt, expression.«field:Word», expression.«field:Left»,
-        expression.«field:Right», literalType, ih, h, Expr.check, Bind.bind, Except.bind, mismatch]
+      simp [modelExpr, buildExpression, locatedLexeme, lexemeAt, requireType, ih, h, Expr.check,
+        Bind.bind, Except.bind, mismatch]
     | ok ty =>
-      cases ty <;> simp [modelExpr, locatedLexeme, lexemeAt, expression.«field:Word»,
-        expression.«field:Left», expression.«field:Right», literalType, lexemeOffset, ih, h, Expr.check, Bind.bind, Except.bind,
-        typed, noDiagnostic, mismatch, Requirements.Ty.tag, Pure.pure, Except.pure, throw, throwThe, MonadExceptOf.throw]
+      cases ty <;> simp [modelExpr, buildExpression, locatedLexeme, lexemeAt, requireType, ih, h,
+        Expr.check, Bind.bind, Except.bind, typed, noDiagnostic, mismatch, Requirements.Ty.tag,
+        Pure.pure, Except.pure, throw, throwThe, MonadExceptOf.throw]
   | binary op offset l r il ir =>
     rw [checkExpression.eq_def]
-    cases hr : r.check <;> cases hl : l.check <;>
-      simp [modelExpr, locatedLexeme, expression.«field:Word», expression.«field:Left»,
-        expression.«field:Right», il, ir, hr, hl, Expr.check, Bind.bind, Except.bind, typed,
-        noDiagnostic, mismatch, Requirements.Ty.tag, Pure.pure, Except.pure, throw, throwThe, MonadExceptOf.throw]
+    cases op <;> cases hr : r.check <;> cases hl : l.check <;>
+      simp [modelExpr, buildExpression, locatedLexeme, lexemeAt, il, ir, hr, hl, Expr.check,
+        requireType, Bind.bind, Except.bind, typed, noDiagnostic, mismatch, Requirements.Ty.tag,
+        Pure.pure, Except.pure, throw, throwThe, MonadExceptOf.throw]
     all_goals rename_i lt rt
-    all_goals cases op <;> cases lt <;> cases rt <;> rfl
+    all_goals cases lt <;> cases rt <;> rfl
 
 private theorem emitCorrect (e : Expr) (code : ByteArray) :
     (emitExpression (modelExpr e) code).data.toList = code.data.toList ++ e.instructions := by
   induction e generalizing code with
   | literal v offset =>
-    cases v <;> rw [emitExpression.eq_def] <;> simp [modelExpr, leaf, locatedLexeme, lexemeAt,
-      expression.«field:Left», expression.«field:Word», emitWord, Expr.instructions, Value.byte, boolByte]
-    split <;> simp_all
+    cases v <;> rw [emitExpression.eq_def] <;> simp [modelExpr, buildExpression, locatedLexeme,
+      lexemeAt, Expr.instructions, Value.byte, boolByte, truthByte]
   | not offset operand ih =>
     rw [emitExpression.eq_def]
-    simp [modelExpr, locatedLexeme, lexemeAt, expression.«field:Left», expression.«field:Right»,
-      expression.«field:Word», emitWord, Expr.instructions, ih, List.append_assoc]
+    simp [modelExpr, buildExpression, locatedLexeme, lexemeAt, Expr.instructions, ih, List.append_assoc]
   | binary op offset l r il ir =>
     rw [emitExpression.eq_def]
-    cases op <;> simp [modelExpr, locatedLexeme, lexemeAt, expression.«field:Left», expression.«field:Right»,
-      expression.«field:Word», emitWord, Expr.instructions, BinOp.opcode, il, ir, List.append_assoc]
+    cases op <;> simp [modelExpr, buildExpression, locatedLexeme, lexemeAt,
+      Expr.instructions, BinOp.opcode, il, ir, List.append_assoc]
 
 private theorem codeFitsIff (n : Nat) (repr : n ≤ maxInt) :
     codeFits (UInt64.ofNat n) = true ↔ 2 * n + 2 ≤ maxInt := by

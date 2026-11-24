@@ -1,6 +1,7 @@
 // Package compiler translates typed prefix expressions to stack bytecode.
 //
 //golean:generate:enum Lexeme { MissingLexeme default, IntegerLexeme, BooleanLexeme, AddLexeme, SubLexeme, EqLexeme, LtLexeme, AndLexeme, NotLexeme }
+//golean:generate:enum expression { MissingExpr default, IntegerExpr, BooleanExpr, NotExpr, AddExpr, SubExpr, EqExpr, LtExpr, AndExpr }
 //golean:verify:import spec
 //golean:verify all : let observe := fun result : machineResult =>
 //golean:verify+     let state := result.«field:State»
@@ -84,30 +85,6 @@ func missingLexeme(word Lexeme) bool {
 		return false
 	}
 	return false
-}
-
-func lexemeOffset(word Lexeme) uint {
-	switch token := word.Case().(type) {
-	case MissingLexeme:
-		return 0
-	case IntegerLexeme:
-		return token.Offset
-	case BooleanLexeme:
-		return token.Offset
-	case AddLexeme:
-		return token.Offset
-	case SubLexeme:
-		return token.Offset
-	case EqLexeme:
-		return token.Offset
-	case LtLexeme:
-		return token.Offset
-	case AndLexeme:
-		return token.Offset
-	case NotLexeme:
-		return token.Offset
-	}
-	return 0
 }
 
 type Diagnostic struct {
@@ -263,18 +240,70 @@ func tokenize(source lean.ByteArray) lexer {
 	return closeWord(source.Size(), scanned.State, scanState{Start: scanned.State.Scan.Start, InWord: false}).State
 }
 
-type expression struct {
-	Word  Lexeme
-	Left  lean.Box[expression]
-	Right lean.Box[expression]
+type MissingExpr struct{}
+
+type IntegerExpr struct {
+	Offset uint
+	Value  byte
 }
 
-func leaf(word Lexeme) expression {
-	return expression{Word: word, Left: lean.Box[expression]{}, Right: lean.Box[expression]{}}
+type BooleanExpr struct {
+	Offset uint
+	Value  bool
 }
 
-func emptyExpression() expression {
-	return leaf(Lexeme{})
+type NotExpr struct {
+	Offset  uint
+	Operand expression
+}
+
+type AddExpr struct {
+	Offset      uint
+	Left, Right expression
+}
+
+type SubExpr struct {
+	Offset      uint
+	Left, Right expression
+}
+
+type EqExpr struct {
+	Offset      uint
+	Left, Right expression
+}
+
+type LtExpr struct {
+	Offset      uint
+	Left, Right expression
+}
+
+type AndExpr struct {
+	Offset      uint
+	Left, Right expression
+}
+
+func buildExpression(word Lexeme, left, right expression) expression {
+	switch token := word.Case().(type) {
+	case MissingLexeme:
+		return expression{}
+	case IntegerLexeme:
+		return NewexpressionIntegerExpr(IntegerExpr{Offset: token.Offset, Value: token.Value})
+	case BooleanLexeme:
+		return NewexpressionBooleanExpr(BooleanExpr{Offset: token.Offset, Value: token.Value})
+	case NotLexeme:
+		return NewexpressionNotExpr(NotExpr{Offset: token.Offset, Operand: left})
+	case AddLexeme:
+		return NewexpressionAddExpr(AddExpr{Offset: token.Offset, Left: left, Right: right})
+	case SubLexeme:
+		return NewexpressionSubExpr(SubExpr{Offset: token.Offset, Left: left, Right: right})
+	case EqLexeme:
+		return NewexpressionEqExpr(EqExpr{Offset: token.Offset, Left: left, Right: right})
+	case LtLexeme:
+		return NewexpressionLtExpr(LtExpr{Offset: token.Offset, Left: left, Right: right})
+	case AndLexeme:
+		return NewexpressionAndExpr(AndExpr{Offset: token.Offset, Left: left, Right: right})
+	}
+	return expression{}
 }
 
 type parser struct {
@@ -315,74 +344,21 @@ func parseWord(index uint, state parser) lean.FoldControl[parser] {
 		return lean.FoldControl[parser]{State: state, Stop: true}
 	}
 	if operands == 0 {
-		return lean.FoldControl[parser]{State: parser{Words: state.Words, Roots: roots.Push(leaf(word))}, Stop: false}
+		return lean.FoldControl[parser]{State: parser{Words: state.Words, Roots: roots.Push(buildExpression(word, expression{}, expression{}))}, Stop: false}
 	}
-	left := roots.Get(depth - 1).UnwrapOr(emptyExpression())
+	left := roots.Get(depth - 1).UnwrapOr(expression{})
 	if operands == 1 {
-		node := expression{Word: word, Left: lean.NewBox(left), Right: lean.Box[expression]{}}
+		node := buildExpression(word, left, expression{})
 		return lean.FoldControl[parser]{State: parser{Words: state.Words, Roots: roots.Pop().Push(node)}, Stop: false}
 	}
-	right := roots.Get(depth - 2).UnwrapOr(emptyExpression())
-	node := expression{Word: word, Left: lean.NewBox(left), Right: lean.NewBox(right)}
+	right := roots.Get(depth - 2).UnwrapOr(expression{})
+	node := buildExpression(word, left, right)
 	return lean.FoldControl[parser]{State: parser{Words: state.Words, Roots: roots.Pop().Pop().Push(node)}, Stop: false}
 }
 
 func parse(words lean.Array[Lexeme]) lean.FoldControl[parser] {
 	initial := parser{Words: words, Roots: lean.Array[expression]{}}
 	return lean.FoldNUntil(words.Size(), initial, parseWord)
-}
-
-type signature struct {
-	Operand Type
-	Result  Type
-}
-
-func operatorTypes(word Lexeme) signature {
-	switch word.Case().(type) {
-	case MissingLexeme:
-		return signature{Operand: Bool, Result: Bool}
-	case IntegerLexeme:
-		return signature{Operand: Bool, Result: Bool}
-	case BooleanLexeme:
-		return signature{Operand: Bool, Result: Bool}
-	case AddLexeme:
-		return signature{Operand: U8, Result: U8}
-	case SubLexeme:
-		return signature{Operand: U8, Result: U8}
-	case EqLexeme:
-		return signature{Operand: U8, Result: Bool}
-	case LtLexeme:
-		return signature{Operand: U8, Result: Bool}
-	case AndLexeme:
-		return signature{Operand: Bool, Result: Bool}
-	case NotLexeme:
-		return signature{Operand: Bool, Result: Bool}
-	}
-	return signature{Operand: Bool, Result: Bool}
-}
-
-func literalType(word Lexeme) Type {
-	switch word.Case().(type) {
-	case MissingLexeme:
-		return 0
-	case IntegerLexeme:
-		return U8
-	case BooleanLexeme:
-		return Bool
-	case AddLexeme:
-		return 0
-	case SubLexeme:
-		return 0
-	case EqLexeme:
-		return 0
-	case LtLexeme:
-		return 0
-	case AndLexeme:
-		return 0
-	case NotLexeme:
-		return 0
-	}
-	return 0
 }
 
 type typing struct {
@@ -398,80 +374,124 @@ func mismatch(offset uint) typing {
 	return typing{Type: 0, Error: Diagnostic{Kind: TypeMismatch, Offset: offset}}
 }
 
+func requireType(value typing, want Type, offset uint) typing {
+	if value.Error.Kind != NoDiagnostic {
+		return value
+	}
+	if value.Type != want {
+		return mismatch(offset)
+	}
+	return value
+}
+
 //golean:termination:by sizeOf expr
 func checkExpression(expr expression) typing {
-	word := expr.Word
-	literal := literalType(word)
-	if literal != 0 {
-		return typed(literal)
-	}
-	if !expr.Left.IsSome() {
-		return mismatch(lexemeOffset(word))
-	}
-	if expr.Right.IsSome() {
-		right := checkExpression(expr.Right.Get())
+	switch node := expr.Case().(type) {
+	case MissingExpr:
+		return mismatch(0)
+	case IntegerExpr:
+		return typed(U8)
+	case BooleanExpr:
+		return typed(Bool)
+	case NotExpr:
+		return requireType(checkExpression(node.Operand), Bool, node.Offset)
+	case AddExpr:
+		right := checkExpression(node.Right)
 		if right.Error.Kind != NoDiagnostic {
 			return right
 		}
-		left := checkExpression(expr.Left.Get())
+		left := requireType(checkExpression(node.Left), U8, node.Offset)
 		if left.Error.Kind != NoDiagnostic {
 			return left
 		}
-		sig := operatorTypes(word)
-		if left.Type != sig.Operand || right.Type != sig.Operand {
-			return mismatch(lexemeOffset(word))
+		if right.Type != U8 {
+			return mismatch(node.Offset)
 		}
-		return typed(sig.Result)
-	}
-	operand := checkExpression(expr.Left.Get())
-	if operand.Error.Kind != NoDiagnostic {
-		return operand
-	}
-	if operand.Type != Bool {
-		return mismatch(lexemeOffset(word))
-	}
-	return typed(Bool)
-}
-
-func emitWord(word Lexeme, code lean.ByteArray) lean.ByteArray {
-	switch token := word.Case().(type) {
-	case MissingLexeme:
-		return code.Push(255).Push(0)
-	case IntegerLexeme:
-		return code.Push(Push).Push(token.Value)
-	case BooleanLexeme:
-		if token.Value {
-			return code.Push(Push).Push(1)
+		return typed(U8)
+	case SubExpr:
+		right := checkExpression(node.Right)
+		if right.Error.Kind != NoDiagnostic {
+			return right
 		}
-		return code.Push(Push).Push(0)
-	case AddLexeme:
-		return code.Push(Add).Push(0)
-	case SubLexeme:
-		return code.Push(Sub).Push(0)
-	case EqLexeme:
-		return code.Push(Eq).Push(0)
-	case LtLexeme:
-		return code.Push(Lt).Push(0)
-	case AndLexeme:
-		return code.Push(And).Push(0)
-	case NotLexeme:
-		return code.Push(Not).Push(0)
+		left := requireType(checkExpression(node.Left), U8, node.Offset)
+		if left.Error.Kind != NoDiagnostic {
+			return left
+		}
+		if right.Type != U8 {
+			return mismatch(node.Offset)
+		}
+		return typed(U8)
+	case EqExpr:
+		right := checkExpression(node.Right)
+		if right.Error.Kind != NoDiagnostic {
+			return right
+		}
+		left := requireType(checkExpression(node.Left), U8, node.Offset)
+		if left.Error.Kind != NoDiagnostic {
+			return left
+		}
+		if right.Type != U8 {
+			return mismatch(node.Offset)
+		}
+		return typed(Bool)
+	case LtExpr:
+		right := checkExpression(node.Right)
+		if right.Error.Kind != NoDiagnostic {
+			return right
+		}
+		left := requireType(checkExpression(node.Left), U8, node.Offset)
+		if left.Error.Kind != NoDiagnostic {
+			return left
+		}
+		if right.Type != U8 {
+			return mismatch(node.Offset)
+		}
+		return typed(Bool)
+	case AndExpr:
+		right := checkExpression(node.Right)
+		if right.Error.Kind != NoDiagnostic {
+			return right
+		}
+		left := requireType(checkExpression(node.Left), Bool, node.Offset)
+		if left.Error.Kind != NoDiagnostic {
+			return left
+		}
+		if right.Type != Bool {
+			return mismatch(node.Offset)
+		}
+		return typed(Bool)
 	}
-	return code
+	return mismatch(0)
 }
 
 //golean:termination:by sizeOf expr
 func emitExpression(expr expression, code lean.ByteArray) lean.ByteArray {
-	if !expr.Left.IsSome() {
-		return emitWord(expr.Word, code)
+	switch node := expr.Case().(type) {
+	case MissingExpr:
+		return code.Push(255).Push(0)
+	case IntegerExpr:
+		return code.Push(Push).Push(node.Value)
+	case BooleanExpr:
+		return code.Push(Push).Push(truthByte(node.Value))
+	case NotExpr:
+		return emitExpression(node.Operand, code).Push(Not).Push(0)
+	case AddExpr:
+		right := emitExpression(node.Right, code)
+		return emitExpression(node.Left, right).Push(Add).Push(0)
+	case SubExpr:
+		right := emitExpression(node.Right, code)
+		return emitExpression(node.Left, right).Push(Sub).Push(0)
+	case EqExpr:
+		right := emitExpression(node.Right, code)
+		return emitExpression(node.Left, right).Push(Eq).Push(0)
+	case LtExpr:
+		right := emitExpression(node.Right, code)
+		return emitExpression(node.Left, right).Push(Lt).Push(0)
+	case AndExpr:
+		right := emitExpression(node.Right, code)
+		return emitExpression(node.Left, right).Push(And).Push(0)
 	}
-	if expr.Right.IsSome() {
-		right := emitExpression(expr.Right.Get(), code)
-		left := emitExpression(expr.Left.Get(), right)
-		return emitWord(expr.Word, left)
-	}
-	operand := emitExpression(expr.Left.Get(), code)
-	return emitWord(expr.Word, operand)
+	return code
 }
 
 func emit(expr expression) lean.ByteArray {
@@ -502,7 +522,7 @@ func Compile(source lean.ByteArray) compilation {
 	if parsed.Stop || parsed.State.Roots.Size() != 1 {
 		return failed(Diagnostic{Kind: SyntaxError, Offset: source.Size()})
 	}
-	root := parsed.State.Roots.Get(0).UnwrapOr(emptyExpression())
+	root := parsed.State.Roots.Get(0).UnwrapOr(expression{})
 	checked := checkExpression(root)
 	if checked.Error.Kind != NoDiagnostic {
 		return failed(checked.Error)

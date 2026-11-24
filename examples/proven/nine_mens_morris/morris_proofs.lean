@@ -9,16 +9,16 @@ theorem startRules : Laws.startRules := by
   intro p
   by_cases h : p < 24
   · have board : Start.«field:board».«field:points» = Array.replicate 24 0 := rfl
-    simp [«boardState$stoneAt», UInt64.not_le.mpr h, board, Array.getElem?_replicate]
+    simp [«Board$stoneAt», UInt64.not_le.mpr h, board, Array.getElem?_replicate]
     split <;> rfl
-  · simp [«boardState$stoneAt», UInt64.not_lt.mp h]
+  · simp [«Board$stoneAt», UInt64.not_lt.mp h]
 
 theorem startIsValid : Laws.startIsValid := by
   rfl
 
 theorem validTurn : Laws.validTurn := by
   intro s
-  by_cases white : s.«field:turn» = 1 <;> simp [«gameState$IsValid», white]
+  by_cases white : s.«field:turn» = 1 <;> simp [«Game$IsValid», white]
 
 theorem boardSnapshot : Laws.boardSnapshot := by
   intro s
@@ -34,30 +34,30 @@ theorem pendingCapture : Laws.pendingCapture := by
 
 theorem placementPhase : Laws.placementPhase := by
   intro s
-  simp [«gameState$Placing»]
+  simp [«Game$Placing»]
 
 theorem outsideBoardIsEmpty : Laws.outsideBoardIsEmpty := by
   intro b p outside
-  simp [«boardState$stoneAt», outside]
+  simp [«Board$stoneAt», outside]
 
 theorem movementAvailability : Laws.movementAvailability := by
   intro b player
-  unfold «boardState$hasMove»
+  unfold «Board$hasMove»
   have ordering : ∀ n : UInt8, n < 3 ∨ n = 3 ∨ 3 < n := by
     intro n
     simp only [UInt8.lt_iff_toNat_lt, ← UInt8.toNat_inj]
     omega
-  by_cases less : «boardState$count» b player < 3
-  · have different : «boardState$count» b player ≠ 3 := by
+  by_cases less : «Board$count» b player < 3
+  · have different : «Board$count» b player ≠ 3 := by
       intro equal
       rw [equal] at less
       contradiction
-    have greater : ¬ 3 < «boardState$count» b player := by
+    have greater : ¬ 3 < «Board$count» b player := by
       simpa using UInt8.le_of_lt less
     simp [less, different, greater]
-  · by_cases equal : «boardState$count» b player = 3
+  · by_cases equal : «Board$count» b player = 3
     · simp [equal]
-    · have greater := ((ordering («boardState$count» b player)).resolve_left less).resolve_left equal
+    · have greater := ((ordering («Board$count» b player)).resolve_left less).resolve_left equal
       simp [less, equal, greater]
 
 theorem outcomeRules : Laws.outcomeRules := by
@@ -65,29 +65,29 @@ theorem outcomeRules : Laws.outcomeRules := by
   by_cases pending : s.«field:pending» = true <;>
     by_cases rw : s.«field:whiteReserve» = 0 <;>
     by_cases rb : s.«field:blackReserve» = 0 <;>
-    by_cases can : «boardState$hasMove» s.«field:board» s.«field:turn» = false <;>
+    by_cases can : «Board$hasMove» s.«field:board» s.«field:turn» = false <;>
     by_cases white : s.«field:turn» = 1 <;>
-    simp_all [«gameState$Outcome», «gameState$Placing», winner, opponent]
+    simp_all [«Game$Outcome», «Game$Placing», winner, opponent]
 
-private theorem ongoingAfterOpening (s : gameState)
+private theorem ongoingAfterOpening (s : Game)
     (pending : s.«field:pending» = false) (rw : s.«field:whiteReserve» = 0)
     (rb : s.«field:blackReserve» = 0) :
-    «gameState$Outcome» s = 0 ↔ «boardState$hasMove» s.«field:board» s.«field:turn» = true ∧ s.«field:quiet» < 50 := by
-  rw [show «gameState$Outcome» s = _ from outcomeRules s]
-  by_cases can : «boardState$hasMove» s.«field:board» s.«field:turn» = true <;>
+    «Game$Outcome» s = 0 ↔ «Board$hasMove» s.«field:board» s.«field:turn» = true ∧ s.«field:quiet» < 50 := by
+  rw [show «Game$Outcome» s = _ from outcomeRules s]
+  by_cases can : «Board$hasMove» s.«field:board» s.«field:turn» = true <;>
     by_cases white : s.«field:turn» = 1 <;>
     by_cases quiet : 50 ≤ s.«field:quiet» <;>
     simp_all [UInt8.not_lt.mpr, UInt8.not_le.mp]
 
 theorem placementLegality : Laws.placementLegality := by
   intro s p
-  unfold «gameState$canPlace» «gameState$reserve»
-  by_cases valid : «gameState$IsValid» s = true <;> simp [valid, and_assoc]
+  unfold «Game$canPlace» «Game$reserve»
+  by_cases valid : «Game$IsValid» s = true <;> simp [valid, and_assoc]
 
 theorem movementLegality : Laws.movementLegality := by
   intro s f t
-  unfold «gameState$canMove» «gameState$Placing»
-  by_cases valid : «gameState$IsValid» s = true <;> simp [valid]
+  unfold «Game$canMove» «Game$Placing»
+  by_cases valid : «Game$IsValid» s = true <;> simp [valid]
   by_cases pending : s.«field:pending» = false <;>
     by_cases rw : s.«field:whiteReserve» = 0 <;>
     by_cases rb : s.«field:blackReserve» = 0 <;>
@@ -97,39 +97,39 @@ theorem movementLegality : Laws.movementLegality := by
 
 theorem captureLegality : Laws.captureLegality := by
   intro s p
-  unfold «gameState$canCapture» opponent
-  by_cases valid : «gameState$IsValid» s = true <;> simp [valid, and_assoc]
+  unfold «Game$canCapture» opponent
+  by_cases valid : «Game$IsValid» s = true <;> simp [valid, and_assoc]
 
 theorem finishingTurn : Laws.finishingTurn := by
   intro s p
-  unfold «gameState$finishAction» opponent
+  unfold «Game$finishAction» opponent
   split <;> simp_all
   all_goals split <;> simp_all
 
 theorem placeTransition : Laws.placeTransition := by
   intro s p
-  unfold «gameState$place»
+  unfold «Game$place»
   split <;> simp_all
   split <;> simp_all
 
 theorem moveTransition : Laws.moveTransition := by
   intro s f t
-  cases h : «gameState$canMove» s f t <;> simp [«gameState$move», h]
+  cases h : «Game$canMove» s f t <;> simp [«Game$move», h]
 
 theorem captureTransition : Laws.captureTransition := by
   intro s p
-  cases h : «gameState$canCapture» s p <;> simp [«gameState$capture», opponent, h]
+  cases h : «Game$canCapture» s p <;> simp [«Game$capture», opponent, h]
 
-private theorem finishPreservesValidity (s : gameState) (p : UInt64)
-    (valid : «gameState$IsValid» s = true) :
-    «gameState$IsValid» («gameState$finishAction» s p) = true := by
-  rw [show «gameState$finishAction» s p = _ from finishingTurn s p]
+private theorem finishPreservesValidity (s : Game) (p : UInt64)
+    (valid : «Game$IsValid» s = true) :
+    «Game$IsValid» («Game$finishAction» s p) = true := by
+  rw [show «Game$finishAction» s p = _ from finishingTurn s p]
   rw [validTurn] at valid
   split <;> dsimp only <;> split <;> rw [validTurn] <;> simp_all
 
 theorem placePreservesValidity : Laws.placePreservesValidity := by
   intro s p valid
-  rw [show «gameState$place» s p = _ from placeTransition s p]
+  rw [show «Game$place» s p = _ from placeTransition s p]
   split
   · dsimp only
     split <;> apply finishPreservesValidity <;> exact valid
@@ -137,14 +137,14 @@ theorem placePreservesValidity : Laws.placePreservesValidity := by
 
 theorem movePreservesValidity : Laws.movePreservesValidity := by
   intro s f t valid
-  rw [show «gameState$move» s f t = _ from moveTransition s f t]
+  rw [show «Game$move» s f t = _ from moveTransition s f t]
   split
   · exact finishPreservesValidity _ _ valid
   · exact valid
 
 theorem capturePreservesValidity : Laws.capturePreservesValidity := by
   intro s p valid
-  rw [show «gameState$capture» s p = _ from captureTransition s p]
+  rw [show «Game$capture» s p = _ from captureTransition s p]
   split
   · rw [validTurn]
     split <;> simp
@@ -160,26 +160,26 @@ theorem boardUpdate : Laws.boardUpdate := by
   by_cases same : q = p
   · subst p
     have h := size rfl
-    simp [«boardState$stoneAt», «boardState$setPoint», UInt64.not_le.mpr validQ, validQ, h]
+    simp [«Board$stoneAt», «Board$setPoint», UInt64.not_le.mpr validQ, validQ, h]
   · have different : p.toNat ≠ q.toNat := fun eq => same (UInt64.toNat_inj.mp eq).symm
-    simp [«boardState$stoneAt», «boardState$setPoint», UInt64.not_le.mpr validQ, validP, same, different]
+    simp [«Board$stoneAt», «Board$setPoint», UInt64.not_le.mpr validQ, validP, same, different]
 
-private theorem acceptedMove (s : gameState) (f t : UInt64)
-    (accepted : («gameState$move» s f t).«field:accepted» = true) :
-    «gameState$canMove» s f t = true ∧
-      («gameState$move» s f t).«field:next» =
-        «gameState$finishAction»
+private theorem acceptedMove (s : Game) (f t : UInt64)
+    (accepted : («Game$move» s f t).«field:accepted» = true) :
+    «Game$canMove» s f t = true ∧
+      («Game$move» s f t).«field:next» =
+        «Game$finishAction»
           {s with
-            «field:board» := «boardState$setPoint» («boardState$setPoint» s.«field:board» f 0) t s.«field:turn»
+            «field:board» := «Board$setPoint» («Board$setPoint» s.«field:board» f 0) t s.«field:turn»
             «field:quiet» := s.«field:quiet» + 1} t := by
-  by_cases legal : «gameState$canMove» s f t = true
-  · exact ⟨legal, by rw [show «gameState$move» s f t = _ from moveTransition s f t]; simp [legal]⟩
-  · rw [show «gameState$move» s f t = _ from moveTransition s f t] at accepted
+  by_cases legal : «Game$canMove» s f t = true
+  · exact ⟨legal, by rw [show «Game$move» s f t = _ from moveTransition s f t]; simp [legal]⟩
+  · rw [show «Game$move» s f t = _ from moveTransition s f t] at accepted
     simp [legal] at accepted
 
-private theorem finishedBoard (s : gameState) (t : UInt64) :
-    («gameState$finishAction» s t).«field:board» = s.«field:board» := by
-  rw [show «gameState$finishAction» s t = _ from finishingTurn s t]
+private theorem finishedBoard (s : Game) (t : UInt64) :
+    («Game$finishAction» s t).«field:board» = s.«field:board» := by
+  rw [show «Game$finishAction» s t = _ from finishingTurn s t]
   split <;> simp_all
   all_goals split <;> rfl
 
@@ -187,7 +187,7 @@ theorem movePreservesOpposingStones : Laws.movePreservesOpposingStones := by
   intro s f t p player accepted hp stone
   obtain ⟨legal, result⟩ := acceptedMove s f t accepted
   obtain ⟨_, _, _, _, _, _, hf, ht, source, target, _⟩ := (movementLegality s f t).mp legal
-  change «boardState$stoneAt» s.«field:board» p = opponent s.«field:turn» at stone
+  change «Board$stoneAt» s.«field:board» p = opponent s.«field:turn» at stone
   have opponentsDiffer : s.«field:turn» ≠ opponent s.«field:turn» := by
     rcases player with color | color <;> simp [opponent, color]
   have opponentNotEmpty : (0 : UInt8) ≠ opponent s.«field:turn» := by
@@ -198,7 +198,7 @@ theorem movePreservesOpposingStones : Laws.movePreservesOpposingStones := by
   have targetDifferent : p ≠ t := by
     intro eq
     exact opponentNotEmpty (target.symm.trans (eq ▸ stone))
-  change «boardState$stoneAt» («gameState$move» s f t).«field:next».«field:board» p = opponent s.«field:turn»
+  change «Board$stoneAt» («Game$move» s f t).«field:next».«field:board» p = opponent s.«field:turn»
   rw [result, finishedBoard]
   rw [boardUpdate _ t p _ ht hp (fun h => (targetDifferent h.symm).elim), ite_eq_right targetDifferent,
     boardUpdate _ f p _ hf hp (fun h => (sourceDifferent h.symm).elim), ite_eq_right sourceDifferent]
@@ -210,8 +210,8 @@ theorem moveGrantsCaptureExactlyOnMill : Laws.moveGrantsCaptureExactlyOnMill := 
   have notPending := ((movementLegality s f t).mp legal).2.1
   dsimp only
   rw [result]
-  simp only [«gameState$Pending», «gameState$Board», finishedBoard]
-  rw [show «gameState$finishAction» _ t = _ from finishingTurn _ t]
+  simp only [«Game$Pending», «Game$Board», finishedBoard]
+  rw [show «Game$finishAction» _ t = _ from finishingTurn _ t]
   split <;> simp_all [opponent]
   all_goals split <;> simp_all
 
@@ -225,7 +225,7 @@ set_option maxHeartbeats 3000000 in
 theorem millGeometry : Laws.millGeometry := by
   intro board p player valid nonempty
   rcases pointCases p valid with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;>
-    simp [«boardState$inMill», «boardState$stoneAt», nonempty] <;> apply Bool.eq_iff_iff.mpr <;> grind
+    simp [«Board$inMill», «Board$stoneAt», nonempty] <;> apply Bool.eq_iff_iff.mpr <;> grind
 
 private def points : List UInt64 := [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
 
@@ -243,9 +243,9 @@ private theorem scanMatchesAny (predicate : UInt64 → boardScan → Bool) (stat
   | succ n ih =>
     cases hit : predicate i state <;> simp [«fold».countUntil, indices, hit, ih]
 
-private theorem countMatchesFold (b : boardState) (player : UInt8) (total : UInt8) (n : Nat) (i : UInt64) :
-    («fold».count countStone n i (stoneCount.mk b player total)).«field:total» =
-      ((indices n i).map (fun p => «matches» («boardState$stoneAt» b p) player)).foldl (· + ·) total := by
+private theorem countMatchesFold (b : Board) (player : UInt8) (total : UInt8) (n : Nat) (i : UInt64) :
+    («fold».count countStone n i (stoneCount.mk b player total)).«field:Total» =
+      ((indices n i).map (fun p => «matches» («Board$stoneAt» b p) player)).foldl (· + ·) total := by
   induction n generalizing i total with
   | zero => rfl
   | succ n ih =>
@@ -254,35 +254,35 @@ private theorem countMatchesFold (b : boardState) (player : UInt8) (total : UInt
 
 theorem countedStones : Laws.countedStones := by
   intro b player
-  change «boardState$count» b player = (points.map (fun p => if «boardState$stoneAt» b p = player then 1 else 0)).foldl (· + ·) 0
-  rw [«boardState$count», countMatchesFold]
-  change (points.map (fun p => «matches» («boardState$stoneAt» b p) player)).foldl (· + ·) 0 = _
+  change «Board$count» b player = (points.map (fun p => if «Board$stoneAt» b p = player then 1 else 0)).foldl (· + ·) 0
+  rw [«Board$count», countMatchesFold]
+  change (points.map (fun p => «matches» («Board$stoneAt» b p) player)).foldl (· + ·) 0 = _
   simp [«matches»]
 
 theorem unprotectedStones : Laws.unprotectedStones := by
   intro b player
-  change «boardState$hasUnprotected» b player = points.any (fun p => decide («boardState$stoneAt» b p = player) && !«boardState$inMill» b p player)
+  change «Board$hasUnprotected» b player = points.any (fun p => decide («Board$stoneAt» b p = player) && !«Board$inMill» b p player)
   change («fold».countUntil (fun point state => (state,
-    «boardState$unprotected» state.«field:board» point state.«field:player»)) 24 0 (boardScan.mk b player)).2 = _
+    «Board$unprotected» state.«field:Board» point state.«field:Player»)) 24 0 (boardScan.mk b player)).2 = _
   rw [scanMatchesAny]
   change points.any _ = _
-  simp [«boardState$unprotected»]
+  simp [«Board$unprotected»]
 
-private def adjacentVacancy (b : boardState) (f : UInt64) : Bool :=
-  points.any (fun t => decide («boardState$stoneAt» b t = 0) && adjacent f t)
+private def adjacentVacancy (b : Board) (f : UInt64) : Bool :=
+  points.any (fun t => decide («Board$stoneAt» b t = 0) && adjacent f t)
 
 set_option maxHeartbeats 5000000 in
-private theorem exitAvailability (b : boardState) (f : UInt64) (valid : f < 24) :
-    «boardState$hasExit» b f = adjacentVacancy b f := by
+private theorem exitAvailability (b : Board) (f : UInt64) (valid : f < 24) :
+    «Board$hasExit» b f = adjacentVacancy b f := by
   rcases pointCases f valid with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl <;>
-    simp [«boardState$hasExit», adjacentVacancy, points, «boardState$stoneAt», adjacent] <;> apply Bool.eq_iff_iff.mpr <;> grind
+    simp [«Board$hasExit», adjacentVacancy, points, «Board$stoneAt», adjacent] <;> apply Bool.eq_iff_iff.mpr <;> grind
 
 set_option maxHeartbeats 3000000 in
 theorem slideAvailability : Laws.slideAvailability := by
   intro b player
-  change «boardState$hasSlide» b player = points.any (fun f => decide («boardState$stoneAt» b f = player) && adjacentVacancy b f)
+  change «Board$hasSlide» b player = points.any (fun f => decide («Board$stoneAt» b f = player) && adjacentVacancy b f)
   change («fold».countUntil (fun point state => (state,
-    «boardState$hasSlideFrom» state.«field:board» point state.«field:player»)) 24 0 (boardScan.mk b player)).2 = _
+    «Board$hasSlideFrom» state.«field:Board» point state.«field:Player»)) 24 0 (boardScan.mk b player)).2 = _
   rw [scanMatchesAny]
   change points.any _ = _
   apply Bool.eq_iff_iff.mpr
@@ -292,18 +292,18 @@ theorem slideAvailability : Laws.slideAvailability := by
   constructor <;> rintro ⟨member, yes⟩ <;> refine ⟨member, ?_⟩ <;>
     have valid : p < 24 := of_decide_eq_true
       (List.all_eq_true.mp (by decide : points.all (fun p => decide (p < 24)) = true) p member) <;>
-    by_cases owns : «boardState$stoneAt» b p = player <;>
-      simp [«boardState$hasSlideFrom», exitAvailability b p valid, owns] at yes ⊢ <;> exact yes
+    by_cases owns : «Board$stoneAt» b p = player <;>
+      simp [«Board$hasSlideFrom», exitAvailability b p valid, owns] at yes ⊢ <;> exact yes
 
-private theorem cellAgrees (b : boardState) (p : UInt64) : «boardState$stoneAt» b p = Rules.cell b p := by
+private theorem cellAgrees (b : Board) (p : UInt64) : «Board$stoneAt» b p = Rules.cell b p := by
   by_cases h : p < 24
-  · simp [«boardState$stoneAt», Rules.cell, h, UInt64.not_le.mpr h]
-  · simp [«boardState$stoneAt», Rules.cell, h, UInt64.not_lt.mp h]
+  · simp [«Board$stoneAt», Rules.cell, h, UInt64.not_le.mpr h]
+  · simp [«Board$stoneAt», Rules.cell, h, UInt64.not_lt.mp h]
 
-private theorem writeAgrees (b : boardState) (p : UInt64) (color : UInt8) (h : p < 24) :
-    «boardState$setPoint» b p color = Rules.write b p color := by
+private theorem writeAgrees (b : Board) (p : UInt64) (color : UInt8) (h : p < 24) :
+    «Board$setPoint» b p color = Rules.write b p color := by
   cases b
-  simp [«boardState$setPoint», Rules.write, h]
+  simp [«Board$setPoint», Rules.write, h]
 
 private theorem pointBound {p : UInt64} (h : p ∈ Rules.points) : p < 24 := by
   obtain ⟨n, hn, rfl⟩ := List.mem_map.mp h
@@ -324,26 +324,26 @@ private theorem edgeAgrees (f t : UInt64) (hf : f < 24) (ht : t < 24) :
     Nat.mod_eq_of_lt (show t.toNat < 2^64 from t.toNat_lt)] using
     boardEdges ⟨f.toNat, UInt64.lt_iff_toNat_lt.mp hf⟩ ⟨t.toNat, UInt64.lt_iff_toNat_lt.mp ht⟩
 
-private theorem millAgrees (b : boardState) (p : UInt64) (color : UInt8) (hp : p < 24) (hc : color ≠ 0) :
-    «boardState$inMill» b p color = Rules.mill b p color := by
+private theorem millAgrees (b : Board) (p : UInt64) (color : UInt8) (hp : p < 24) (hc : color ≠ 0) :
+    «Board$inMill» b p color = Rules.mill b p color := by
   simpa only [Rules.mill, Rules.lines, ← cellAgrees] using millGeometry b p color hp hc
 
-private theorem tallyAgrees (b : boardState) (color : UInt8) : «boardState$count» b color = Rules.tally b color := by
+private theorem tallyAgrees (b : Board) (color : UInt8) : «Board$count» b color = Rules.tally b color := by
   simpa only [Rules.tally, Rules.points, ← cellAgrees] using countedStones b color
 
-private theorem exposedAgrees (b : boardState) (color : UInt8) (hc : color ≠ 0) :
-    «boardState$hasUnprotected» b color = Rules.exposed b color := by
-  rw [show «boardState$hasUnprotected» b color = _ from unprotectedStones b color]
+private theorem exposedAgrees (b : Board) (color : UInt8) (hc : color ≠ 0) :
+    «Board$hasUnprotected» b color = Rules.exposed b color := by
+  rw [show «Board$hasUnprotected» b color = _ from unprotectedStones b color]
   unfold Rules.exposed
   apply anyAgrees Rules.points
   intro p hp
   rw [cellAgrees, millAgrees b p color (pointBound hp) hc]
 
-private theorem travelAgrees (b : boardState) (color : UInt8) :
-    «boardState$hasMove» b color = true ↔ Rules.canTravel b color := by
-  have slides : «boardState$hasSlide» b color = (Rules.points.any fun f => decide (Rules.cell b f = color) &&
+private theorem travelAgrees (b : Board) (color : UInt8) :
+    «Board$hasMove» b color = true ↔ Rules.canTravel b color := by
+  have slides : «Board$hasSlide» b color = (Rules.points.any fun f => decide (Rules.cell b f = color) &&
       Rules.points.any (fun t => decide (Rules.cell b t = 0) && Rules.edge f t)) := by
-    rw [show «boardState$hasSlide» b color = _ from slideAvailability b color]
+    rw [show «Board$hasSlide» b color = _ from slideAvailability b color]
     apply anyAgrees Rules.points
     intro f hf
     rw [cellAgrees]
@@ -351,38 +351,38 @@ private theorem travelAgrees (b : boardState) (color : UInt8) :
     apply anyAgrees Rules.points
     intro t ht
     rw [cellAgrees, edgeAgrees f t (pointBound hf) (pointBound ht)]
-  rw [show «boardState$hasMove» b color = true ↔ _ from movementAvailability b color]
+  rw [show «Board$hasMove» b color = true ↔ _ from movementAvailability b color]
   simp only [Rules.canTravel, tallyAgrees, slides]
 
 private theorem otherNotEmpty (color : UInt8) : Rules.other color ≠ 0 := by
   unfold Rules.other
   split <;> decide
 
-theorem outcomeMatchesRules (s : gameState) : «gameState$Outcome» s = Rules.outcome s := by
-  rw [show «gameState$Outcome» s = _ from outcomeRules s]
-  have blocked : «boardState$hasMove» s.«field:board» s.«field:turn» = false ↔
+theorem outcomeMatchesRules (s : Game) : «Game$Outcome» s = Rules.outcome s := by
+  rw [show «Game$Outcome» s = _ from outcomeRules s]
+  have blocked : «Board$hasMove» s.«field:board» s.«field:turn» = false ↔
       ¬ Rules.canTravel s.«field:board» s.«field:turn» := by
     rw [← travelAgrees]
-    cases «boardState$hasMove» s.«field:board» s.«field:turn» <;> simp
+    cases «Board$hasMove» s.«field:board» s.«field:turn» <;> simp
   simp only [Rules.outcome, Rules.opening, Rules.other, blocked]
   split <;> simp_all
 
-def canAct (s : gameState) : Rules.Action → Bool
-  | .place p => «gameState$canPlace» s p
-  | .move f t => «gameState$canMove» s f t
-  | .capture p => «gameState$canCapture» s p
+def canAct (s : Game) : Rules.Action → Bool
+  | .place p => «Game$canPlace» s p
+  | .move f t => «Game$canMove» s f t
+  | .capture p => «Game$canCapture» s p
 
-theorem legalityMatchesRules (s : gameState) (a : Rules.Action) :
+theorem legalityMatchesRules (s : Game) (a : Rules.Action) :
     canAct s a = true ↔ Rules.legal s a := by
   cases a with
   | place p =>
     unfold canAct
-    rw [show «gameState$canPlace» s p = true ↔ _ from placementLegality s p]
+    rw [show «Game$canPlace» s p = true ↔ _ from placementLegality s p]
     rw [validTurn, cellAgrees]
     rfl
   | move f t =>
     unfold canAct
-    rw [show «gameState$canMove» s f t = true ↔ _ from movementLegality s f t]
+    rw [show «Game$canMove» s f t = true ↔ _ from movementLegality s f t]
     unfold Rules.legal Rules.valid
     by_cases hf : f < 24
     · by_cases ht : t < 24
@@ -392,7 +392,7 @@ theorem legalityMatchesRules (s : gameState) (a : Rules.Action) :
     · simp [hf]
   | capture p =>
     unfold canAct
-    rw [show «gameState$canCapture» s p = true ↔ _ from captureLegality s p]
+    rw [show «Game$canCapture» s p = true ↔ _ from captureLegality s p]
     unfold Rules.legal Rules.valid
     by_cases hp : p < 24
     · change (_ ∧ _ ∧ _ ∧ _ ∧ _) ↔ (_ ∧ _ ∧ _ ∧ _ ∧ _)
@@ -402,44 +402,44 @@ theorem legalityMatchesRules (s : gameState) (a : Rules.Action) :
       rfl
     · simp [hp]
 
-private theorem completeAgrees (s : gameState) (p : UInt64) (hp : p < 24) (valid : Rules.valid s) :
-    «gameState$finishAction» s p = Rules.complete s p := by
+private theorem completeAgrees (s : Game) (p : UInt64) (hp : p < 24) (valid : Rules.valid s) :
+    «Game$finishAction» s p = Rules.complete s p := by
   have nonempty : s.«field:turn» ≠ 0 := by
     rcases valid with h | h <;> simp [h]
-  rw [show «gameState$finishAction» s p = _ from finishingTurn s p]
+  rw [show «Game$finishAction» s p = _ from finishingTurn s p]
   simp only [Rules.complete, tallyAgrees, millAgrees _ p _ hp nonempty, Rules.other]
   split <;> simp_all
 
-theorem stepMatchesRules (s : gameState) (a : Rules.Action) : act s a = Rules.step s a := by
+theorem stepMatchesRules (s : Game) (a : Rules.Action) : act s a = Rules.step s a := by
   have legality := legalityMatchesRules s a
   unfold Rules.step
   cases a with
   | place p =>
-    change «gameState$place» s p = _
-    rw [show «gameState$place» s p = _ from placeTransition s p]
-    change («gameState$canPlace» s p = true ↔ _) at legality
+    change «Game$place» s p = _
+    rw [show «Game$place» s p = _ from placeTransition s p]
+    change («Game$canPlace» s p = true ↔ _) at legality
     by_cases h : Rules.legal s (.place p)
     · simp only [ite_eq_left h, ite_eq_left (legality.mpr h)]
       obtain ⟨valid, _, _, hp, _⟩ := h
       simp only [Rules.advance, writeAgrees _ p _ hp]
-      split <;> apply congrArg (fun next => actionOutcome.mk next true) <;>
+      split <;> apply congrArg (fun next => ActionResult.mk next true) <;>
         apply completeAgrees <;> assumption
     · simp only [ite_eq_right h, ite_eq_right (fun accepted => h (legality.mp accepted))]
   | move f t =>
-    change «gameState$move» s f t = _
-    rw [show «gameState$move» s f t = _ from moveTransition s f t]
-    change («gameState$canMove» s f t = true ↔ _) at legality
+    change «Game$move» s f t = _
+    rw [show «Game$move» s f t = _ from moveTransition s f t]
+    change («Game$canMove» s f t = true ↔ _) at legality
     by_cases h : Rules.legal s (.move f t)
     · simp only [ite_eq_left h, ite_eq_left (legality.mpr h)]
       obtain ⟨valid, _, _, _, _, _, hf, ht, _, _, _⟩ := h
       simp only [Rules.advance, writeAgrees _ f _ hf, writeAgrees _ t _ ht]
-      apply congrArg (fun next => actionOutcome.mk next true)
+      apply congrArg (fun next => ActionResult.mk next true)
       apply completeAgrees <;> assumption
     · simp only [ite_eq_right h, ite_eq_right (fun accepted => h (legality.mp accepted))]
   | capture p =>
-    change «gameState$capture» s p = _
-    rw [show «gameState$capture» s p = _ from captureTransition s p]
-    change («gameState$canCapture» s p = true ↔ _) at legality
+    change «Game$capture» s p = _
+    rw [show «Game$capture» s p = _ from captureTransition s p]
+    change («Game$canCapture» s p = true ↔ _) at legality
     by_cases h : Rules.legal s (.capture p)
     · simp only [ite_eq_left h, ite_eq_left (legality.mpr h)]
       obtain ⟨_, _, hp, _, _⟩ := h
@@ -449,30 +449,30 @@ theorem stepMatchesRules (s : gameState) (a : Rules.Action) : act s a = Rules.st
 theorem startMatchesRules : Start = Rules.initial := by
   rfl
 
-theorem actionPreservesValidity (s : gameState) (a : Rules.Action)
-    (valid : «gameState$IsValid» s = true) : «gameState$IsValid» (act s a).«field:next» = true := by
+theorem actionPreservesValidity (s : Game) (a : Rules.Action)
+    (valid : «Game$IsValid» s = true) : «Game$IsValid» (act s a).«field:next» = true := by
   cases a with
   | place p => exact placePreservesValidity s p valid
   | move f t => exact movePreservesValidity s f t valid
   | capture p => exact capturePreservesValidity s p valid
 
-theorem reachableIsValid (s : gameState) (reachable : Rules.Reachable s) :
-    «gameState$IsValid» s = true := by
+theorem reachableIsValid (s : Game) (reachable : Rules.Reachable s) :
+    «Game$IsValid» s = true := by
   induction reachable with
   | initial => exact startIsValid
   | @next prev a _ legal ih =>
     have preserves := actionPreservesValidity prev a ih
     simpa [stepMatchesRules, Rules.step, legal] using preserves
 
-theorem morrisCorrect (s : gameState) (valid : «gameState$IsValid» s = true) :
-    «gameState$Outcome» s = Rules.outcome s ∧
+theorem morrisCorrect (s : Game) (valid : «Game$IsValid» s = true) :
+    «Game$Outcome» s = Rules.outcome s ∧
       ∀ a, (canAct s a = true ↔ Rules.legal s a) ∧
-        act s a = Rules.step s a ∧ «gameState$IsValid» (act s a).«field:next» = true :=
+        act s a = Rules.step s a ∧ «Game$IsValid» (act s a).«field:next» = true :=
   ⟨outcomeMatchesRules s, fun a =>
     ⟨legalityMatchesRules s a, stepMatchesRules s a, actionPreservesValidity s a valid⟩⟩
 
-theorem historyMatchesRules (s : gameState) (actions : List Rules.Action) :
-    Rules.history act «gameState$Outcome» s actions =
+theorem historyMatchesRules (s : Game) (actions : List Rules.Action) :
+    Rules.history act «Game$Outcome» s actions =
       Rules.history Rules.step Rules.outcome s actions := by
   induction actions generalizing s with
   | nil => rfl
@@ -481,7 +481,7 @@ theorem historyMatchesRules (s : gameState) (actions : List Rules.Action) :
     rw [ih]
 
 theorem fromStartMatchesRules (actions : List Rules.Action) :
-    (Start, «gameState$Outcome» Start, Rules.history act «gameState$Outcome» Start actions) =
+    (Start, «Game$Outcome» Start, Rules.history act «Game$Outcome» Start actions) =
       (Rules.initial, Rules.outcome Rules.initial,
         Rules.history Rules.step Rules.outcome Rules.initial actions) := by
   rw [historyMatchesRules, outcomeMatchesRules, startMatchesRules]

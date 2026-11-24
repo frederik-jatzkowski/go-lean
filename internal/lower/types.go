@@ -64,13 +64,6 @@ func (c *compiler) goType(p *packages.Package, pos token.Pos, typ types.Type) (i
 		return basic(p, pos, t)
 	case *types.Named:
 		obj := t.Obj()
-		if obj.Pkg() != nil {
-			for _, e := range c.source.Enums[obj.Pkg().Path()] {
-				if e.Name == obj.Name() {
-					return c.enumType(p, pos, obj, e)
-				}
-			}
-		}
 		if issue := c.source.TypeIssues[obj]; issue != nil {
 			return ir.Type{}, issue
 		}

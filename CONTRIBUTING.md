@@ -16,7 +16,7 @@ go tool task generate
 go tool task check
 ```
 
-`build` builds the CLI. `generate` regenerates Lean modules and enum Go artifacts. `check` runs Go tests, vet, and repository-wide Lean verification. See [Taskfile.yml](Taskfile.yml) for individual tasks.
+`build` builds the CLI. `generate` regenerates Lean modules from marked Go sources. `check` runs Go tests, vet, and the default Lake build. See [Taskfile.yml](Taskfile.yml) for individual tasks.
 
 To generate and check directly:
 
@@ -53,7 +53,7 @@ go tool task build
 go tool task generate
 go test ./...
 go vet ./...
-git diff --exit-code -- '*.lean' ':(glob)**/lean.gen.go' lakefile.toml
+git diff --exit-code -- '*.lean' lakefile.toml
 ```
 
 Run the proof build and integration tests in a separate clean checkout for each Lean version. Set `ELAN_TOOLCHAIN` for the entire shell session because the integration tests invoke Lake themselves. Repeat the commands with `leanprover/lean4:v4.35.0` after checking 4.36.0.
@@ -62,7 +62,7 @@ Run the proof build and integration tests in a separate clean checkout for each 
 export ELAN_TOOLCHAIN=leanprover/lean4:v4.36.0
 lake --version
 lake build
-go test -count=1 -v ./cmd/go-lean ./internal/...
+go test -count=1 -v ./cmd/go-lean ./internal/transpile
 ```
 
 In PowerShell, replace the two `export` commands with `$env:GOTOOLCHAIN = 'local'` and `$env:ELAN_TOOLCHAIN = 'leanprover/lean4:v4.36.0'`.

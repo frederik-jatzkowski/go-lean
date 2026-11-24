@@ -2,71 +2,45 @@
 
 -- Laws for review (formal definitions below the model)
 --
--- playInputMatchesSpec :
---   ∀ input : ByteArray,
---   input.size < UInt64.size →
---   let actual := playInput input
---   (actual = none ↔ ¬ ∃ attempts, Bowling.Grammar.Parses input.data.toList attempts) ∧
---   ∀ attempts, Bowling.Grammar.Parses input.data.toList attempts →
---   ∃ played, actual = some played ∧
---   let reference := Bowling.Rules.play Bowling.Rules.initial (attempts.map Int64.toInt)
---   let result := «gameState$score» played.«field:game»
---   played.«field:decisions» = reference.1 ∧
---   (result.«field:total», result.«field:complete») =
---   Bowling.Rules.answer (Bowling.Rules.score reference.2.2)
---
 -- fromStartMatchesRules :
 --   ∀ attempts,
 --   let reference := Bowling.Rules.play Bowling.Rules.initial (attempts.map Int64.toInt)
 --   let actual := Replay attempts
---   let result := «gameState$score» actual.«field:game»
---   actual.«field:decisions» = reference.1 ∧
+--   let result := «Game$score» actual.«field:Game»
+--   actual.«field:Decisions» = reference.1 ∧
 --   (result.«field:total», result.«field:complete») =
 --   Bowling.Rules.answer (Bowling.Rules.score reference.2.2)
 --
 -- rejectionUnchanged :
 --   ∀ s pins,
---   («gameState$roll» s pins).«field:accepted» = false → («gameState$roll» s pins).«field:game» = s
+--   («Game$roll» s pins).«field:accepted» = false → («Game$roll» s pins).«field:game» = s
 --
 -- finalScore :
 --   ∀ s,
---   «gameState$score» s = if s.«field:frame» = 10 then ⟨s.«field:total», true⟩ else ⟨0, false⟩
+--   «Game$score» s = if s.«field:frame» = 10 then ⟨s.«field:total», true⟩ else ⟨0, false⟩
 --
 -- completedGameIsStable :
 --   ∀ game total pins,
---   «gameState$score» game = ⟨total, true⟩ →
---   «gameState$roll» game pins = ⟨game, false⟩ ∧
---   «gameState$score» («gameState$roll» game pins).«field:game» = ⟨total, true⟩
+--   «Game$score» game = ⟨total, true⟩ →
+--   «Game$roll» game pins = ⟨game, false⟩ ∧
+--   «Game$score» («Game$roll» game pins).«field:game» = ⟨total, true⟩
 --
 -- startEmpty :
 --   Start = ⟨0, 0, 0, 0, 0, 0⟩
 
 import Std
-import «bowling».«bowling_grammar»
 import «bowling».«bowling_rules»
 
 namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling»
 
 namespace «fold»
 
-def countUntil {S : Type} (step : _root_.UInt64 → S → S × Bool) : Nat → _root_.UInt64 → S → S × Bool
-  | 0, _, state => (state, false)
-  | n + 1, index, state =>
-    let next := step index state
-    if next.2 then next else countUntil step n (index + 1) next.1
-
 def list {T S : Type} (step : T → S → S) (items : List T) (state : S) : S :=
   items.foldl (fun state item => step item state) state
 
-def listUntil {T S : Type} (step : T → S → S × Bool) : List T → S → S × Bool
-  | [], state => (state, false)
-  | item :: items, state =>
-    let next := step item state
-    if next.2 then next else listUntil step items next.1
-
 end «fold»
 
-structure «gameState» where
+structure «Game» where
   «field:frame» : _root_.Int64
   «field:stage» : _root_.Int64
   «field:standing» : _root_.Int64
@@ -75,31 +49,10 @@ structure «gameState» where
   «field:bonusSecond» : _root_.Int64
 
 structure «rollResult» where
-  «field:game» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«gameState»
+  «field:game» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«Game»
   «field:accepted» : _root_.Bool
 
-structure «scoreResult» where
-  «field:total» : _root_.Int64
-  «field:complete» : _root_.Bool
-
-structure «replayResult» where
-  «field:game» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«gameState»
-  «field:decisions» : (_root_.List _root_.Bool)
-
-structure «token» where
-  «field:pins» : _root_.Int64
-  «field:comma» : _root_.Bool
-
-structure «lexer» where
-  «field:input» : _root_.ByteArray
-  «field:tokens» : (_root_.List _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«token»)
-  «field:pending» : _root_.Bool
-
-structure «parser» where
-  «field:attempts» : (_root_.List _root_.Int64)
-  «field:afterCount» : _root_.Bool
-
-def «gameState$rack» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«gameState») : _root_.Int64 :=
+def «Game$rack» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«Game») : _root_.Int64 :=
   (if (if (_root_.Decidable.decide ((«local:0»).«field:stage» = (0 : _root_.Int64))) then _root_.Bool.true else (_root_.Decidable.decide ((«local:0»).«field:stage» = (2 : _root_.Int64)))) then (10 : _root_.Int64) else («local:0»).«field:standing»)
 
 def «creditedPins» («local:0» : _root_.Int64) («local:1» : _root_.Int64) : _root_.Int64 :=
@@ -111,80 +64,34 @@ def «nextBonus» («local:0» : _root_.Int64) («local:1» : _root_.Int64) : _r
 def «secondBonus» («local:0» : _root_.Int64) : _root_.Int64 :=
   (if (_root_.Decidable.decide («local:0» = (2 : _root_.Int64))) then (1 : _root_.Int64) else (0 : _root_.Int64))
 
-def «gameState$record» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«gameState») («local:1» : _root_.Int64) («local:2» : _root_.Int64) («local:3» : _root_.Int64) («local:4» : _root_.Int64) («local:5» : _root_.Int64) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«rollResult» :=
-  (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«rollResult».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«gameState».mk «local:2» «local:3» «local:4» ((«local:0»).«field:total» + (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«creditedPins» «local:1» («local:0»).«field:bonusNext»)) (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«nextBonus» («local:0»).«field:bonusSecond» «local:5») (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«secondBonus» «local:5»)) _root_.Bool.true)
+def «Game$record» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«Game») («local:1» : _root_.Int64) («local:2» : _root_.Int64) («local:3» : _root_.Int64) («local:4» : _root_.Int64) («local:5» : _root_.Int64) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«rollResult» :=
+  (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«rollResult».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«Game».mk «local:2» «local:3» «local:4» ((«local:0»).«field:total» + (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«creditedPins» «local:1» («local:0»).«field:bonusNext»)) (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«nextBonus» («local:0»).«field:bonusSecond» «local:5») (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«secondBonus» «local:5»)) _root_.Bool.true)
 
-def «gameState$roll» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«gameState») («local:1» : _root_.Int64) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«rollResult» :=
-  (if (if (if (_root_.Decidable.decide ((«local:0»).«field:frame» = (10 : _root_.Int64))) then _root_.Bool.true else (_root_.Decidable.decide («local:1» < (0 : _root_.Int64)))) then _root_.Bool.true else (_root_.Decidable.decide («local:1» > (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«gameState$rack» «local:0»)))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«rollResult».mk «local:0» _root_.Bool.false) else (if (_root_.Decidable.decide ((«local:0»).«field:stage» = (0 : _root_.Int64))) then (if (_root_.Decidable.decide («local:1» < (10 : _root_.Int64))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«gameState$record» «local:0» «local:1» («local:0»).«field:frame» (1 : _root_.Int64) ((10 : _root_.Int64) - «local:1») (0 : _root_.Int64)) else (if (_root_.Decidable.decide ((«local:0»).«field:frame» = (9 : _root_.Int64))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«gameState$record» «local:0» «local:1» («local:0»).«field:frame» (2 : _root_.Int64) (0 : _root_.Int64) (0 : _root_.Int64)) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«gameState$record» «local:0» «local:1» ((«local:0»).«field:frame» + (1 : _root_.Int64)) (0 : _root_.Int64) (0 : _root_.Int64) (2 : _root_.Int64)))) else (if (if (_root_.Decidable.decide ((«local:0»).«field:stage» = (1 : _root_.Int64))) then (_root_.Decidable.decide («local:1» = («local:0»).«field:standing»)) else _root_.Bool.false) then (if (_root_.Decidable.decide ((«local:0»).«field:frame» = (9 : _root_.Int64))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«gameState$record» «local:0» «local:1» («local:0»).«field:frame» (3 : _root_.Int64) (10 : _root_.Int64) (0 : _root_.Int64)) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«gameState$record» «local:0» «local:1» ((«local:0»).«field:frame» + (1 : _root_.Int64)) (0 : _root_.Int64) (0 : _root_.Int64) (1 : _root_.Int64))) else (if (_root_.Decidable.decide ((«local:0»).«field:stage» = (2 : _root_.Int64))) then (if (_root_.Decidable.decide («local:1» = (10 : _root_.Int64))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«gameState$record» «local:0» «local:1» («local:0»).«field:frame» (3 : _root_.Int64) (10 : _root_.Int64) (0 : _root_.Int64)) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«gameState$record» «local:0» «local:1» («local:0»).«field:frame» (3 : _root_.Int64) ((10 : _root_.Int64) - «local:1») (0 : _root_.Int64))) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«gameState$record» «local:0» «local:1» ((«local:0»).«field:frame» + (1 : _root_.Int64)) (0 : _root_.Int64) (0 : _root_.Int64) (0 : _root_.Int64))))))
+def «Game$roll» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«Game») («local:1» : _root_.Int64) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«rollResult» :=
+  (if (if (if (_root_.Decidable.decide ((«local:0»).«field:frame» = (10 : _root_.Int64))) then _root_.Bool.true else (_root_.Decidable.decide («local:1» < (0 : _root_.Int64)))) then _root_.Bool.true else (_root_.Decidable.decide («local:1» > (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«Game$rack» «local:0»)))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«rollResult».mk «local:0» _root_.Bool.false) else (if (_root_.Decidable.decide ((«local:0»).«field:stage» = (0 : _root_.Int64))) then (if (_root_.Decidable.decide («local:1» < (10 : _root_.Int64))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«Game$record» «local:0» «local:1» («local:0»).«field:frame» (1 : _root_.Int64) ((10 : _root_.Int64) - «local:1») (0 : _root_.Int64)) else (if (_root_.Decidable.decide ((«local:0»).«field:frame» = (9 : _root_.Int64))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«Game$record» «local:0» «local:1» («local:0»).«field:frame» (2 : _root_.Int64) (0 : _root_.Int64) (0 : _root_.Int64)) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«Game$record» «local:0» «local:1» ((«local:0»).«field:frame» + (1 : _root_.Int64)) (0 : _root_.Int64) (0 : _root_.Int64) (2 : _root_.Int64)))) else (if (if (_root_.Decidable.decide ((«local:0»).«field:stage» = (1 : _root_.Int64))) then (_root_.Decidable.decide («local:1» = («local:0»).«field:standing»)) else _root_.Bool.false) then (if (_root_.Decidable.decide ((«local:0»).«field:frame» = (9 : _root_.Int64))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«Game$record» «local:0» «local:1» («local:0»).«field:frame» (3 : _root_.Int64) (10 : _root_.Int64) (0 : _root_.Int64)) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«Game$record» «local:0» «local:1» ((«local:0»).«field:frame» + (1 : _root_.Int64)) (0 : _root_.Int64) (0 : _root_.Int64) (1 : _root_.Int64))) else (if (_root_.Decidable.decide ((«local:0»).«field:stage» = (2 : _root_.Int64))) then (if (_root_.Decidable.decide («local:1» = (10 : _root_.Int64))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«Game$record» «local:0» «local:1» («local:0»).«field:frame» (3 : _root_.Int64) (10 : _root_.Int64) (0 : _root_.Int64)) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«Game$record» «local:0» «local:1» («local:0»).«field:frame» (3 : _root_.Int64) ((10 : _root_.Int64) - «local:1») (0 : _root_.Int64))) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«Game$record» «local:0» «local:1» ((«local:0»).«field:frame» + (1 : _root_.Int64)) (0 : _root_.Int64) (0 : _root_.Int64) (0 : _root_.Int64))))))
 
-def «gameState$score» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«gameState») : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«scoreResult» :=
+structure «scoreResult» where
+  «field:total» : _root_.Int64
+  «field:complete» : _root_.Bool
+
+def «Game$score» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«Game») : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«scoreResult» :=
   (if (_root_.Decidable.decide ((«local:0»).«field:frame» = (10 : _root_.Int64))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«scoreResult».mk («local:0»).«field:total» _root_.Bool.true) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«scoreResult».mk (0 : _root_.Int64) _root_.Bool.false))
 
-def «Start» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«gameState» :=
-  (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«gameState».mk (0 : _root_.Int64) (0 : _root_.Int64) (0 : _root_.Int64) (0 : _root_.Int64) (0 : _root_.Int64) (0 : _root_.Int64))
+structure «ReplayResult» where
+  «field:Game» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«Game»
+  «field:Decisions» : (_root_.List _root_.Bool)
 
-def «replayAttempt» («local:0» : _root_.Int64) («local:1» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«replayResult») : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«replayResult» :=
-  (let «local:2» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«gameState$roll» («local:1»).«field:game» «local:0»); (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«replayResult».mk («local:2»).«field:game» (_root_.List.cons («local:2»).«field:accepted» («local:1»).«field:decisions»)))
+def «Start» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«Game» :=
+  (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«Game».mk (0 : _root_.Int64) (0 : _root_.Int64) (0 : _root_.Int64) (0 : _root_.Int64) (0 : _root_.Int64) (0 : _root_.Int64))
+
+def «replayAttempt» («local:0» : _root_.Int64) («local:1» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«ReplayResult») : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«ReplayResult» :=
+  (let «local:2» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«Game$roll» («local:1»).«field:Game» «local:0»); (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«ReplayResult».mk («local:2»).«field:game» (_root_.List.cons («local:2»).«field:accepted» («local:1»).«field:Decisions»)))
 
 def «prependDecision» («local:0» : _root_.Bool) («local:1» : (_root_.List _root_.Bool)) : (_root_.List _root_.Bool) :=
   (_root_.List.cons «local:0» «local:1»)
 
-def «Replay» («local:0» : (_root_.List _root_.Int64)) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«replayResult» :=
-  (let «local:1» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«replayResult».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«Start») ([] : (_root_.List _root_.Bool))); (let «local:2» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«fold».list _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«replayAttempt» «local:0» «local:1»); (let «local:3» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«fold».list _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«prependDecision» («local:2»).«field:decisions» ([] : (_root_.List _root_.Bool))); (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«replayResult».mk («local:2»).«field:game» «local:3»))))
-
-def «flushOne» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«lexer») : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«lexer» :=
-  (if (!(«local:0»).«field:pending») then «local:0» else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«lexer».mk («local:0»).«field:input» (_root_.List.cons (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«token».mk (1 : _root_.Int64) _root_.Bool.false) («local:0»).«field:tokens») _root_.Bool.false))
-
-def «digit» («local:0» : _root_.UInt8) : _root_.Int64 :=
-  (if (_root_.Decidable.decide («local:0» = (48 : _root_.UInt8))) then (0 : _root_.Int64) else (if (_root_.Decidable.decide («local:0» = (49 : _root_.UInt8))) then (1 : _root_.Int64) else (if (_root_.Decidable.decide («local:0» = (50 : _root_.UInt8))) then (2 : _root_.Int64) else (if (_root_.Decidable.decide («local:0» = (51 : _root_.UInt8))) then (3 : _root_.Int64) else (if (_root_.Decidable.decide («local:0» = (52 : _root_.UInt8))) then (4 : _root_.Int64) else (if (_root_.Decidable.decide («local:0» = (53 : _root_.UInt8))) then (5 : _root_.Int64) else (if (_root_.Decidable.decide («local:0» = (54 : _root_.UInt8))) then (6 : _root_.Int64) else (if (_root_.Decidable.decide («local:0» = (55 : _root_.UInt8))) then (7 : _root_.Int64) else (if (_root_.Decidable.decide («local:0» = (56 : _root_.UInt8))) then (8 : _root_.Int64) else (9 : _root_.Int64))))))))))
-
-def «scanSingle» («local:0» : _root_.UInt8) («local:1» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«lexer») : (_root_.Prod _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«lexer» _root_.Bool) :=
-  (if (_root_.Decidable.decide («local:0» = (49 : _root_.UInt8))) then (let «local:2» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«lexer».mk («local:1»).«field:input» («local:1»).«field:tokens» _root_.Bool.true); (_root_.Prod.mk «local:2» _root_.Bool.false)) else (if (if (_root_.Decidable.decide («local:0» ≥ (48 : _root_.UInt8))) then (_root_.Decidable.decide («local:0» ≤ (57 : _root_.UInt8))) else _root_.Bool.false) then (let «local:3» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«lexer».mk («local:1»).«field:input» (_root_.List.cons (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«token».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«digit» «local:0») _root_.Bool.false) («local:1»).«field:tokens») _root_.Bool.false); (_root_.Prod.mk «local:3» _root_.Bool.false)) else (if (_root_.Decidable.decide («local:0» = (44 : _root_.UInt8))) then (let «local:4» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«lexer».mk («local:1»).«field:input» (_root_.List.cons (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«token».mk (0 : _root_.Int64) _root_.Bool.true) («local:1»).«field:tokens») _root_.Bool.false); (_root_.Prod.mk «local:4» _root_.Bool.false)) else (if (if (if (if (_root_.Decidable.decide («local:0» = (32 : _root_.UInt8))) then _root_.Bool.true else (_root_.Decidable.decide («local:0» = (9 : _root_.UInt8)))) then _root_.Bool.true else (_root_.Decidable.decide («local:0» = (13 : _root_.UInt8)))) then _root_.Bool.true else (_root_.Decidable.decide («local:0» = (10 : _root_.UInt8)))) then (_root_.Prod.mk «local:1» _root_.Bool.false) else (_root_.Prod.mk «local:1» _root_.Bool.true)))))
-
-def «lexByte» («local:0» : _root_.UInt64) («local:1» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«lexer») : (_root_.Prod _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«lexer» _root_.Bool) :=
-  (let «local:2» := (_root_.Option.getD ((«local:1»).«field:input»)[(«local:0»).toNat]? (0 : _root_.UInt8)); (if (if («local:1»).«field:pending» then (_root_.Decidable.decide («local:2» = (48 : _root_.UInt8))) else _root_.Bool.false) then (let «local:3» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«lexer».mk («local:1»).«field:input» (_root_.List.cons (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«token».mk (10 : _root_.Int64) _root_.Bool.false) («local:1»).«field:tokens») _root_.Bool.false); (_root_.Prod.mk «local:3» _root_.Bool.false)) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«scanSingle» «local:2» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«flushOne» «local:1»))))
-
-def «lex» («local:0» : _root_.ByteArray) : (_root_.Option (_root_.List _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«token»)) :=
-  (let «local:1» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«lexer».mk «local:0» ([] : (_root_.List _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«token»)) _root_.Bool.false); (let «local:2» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«fold».countUntil _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«lexByte» ((_root_.UInt64.ofNat («local:0»).size)).toNat 0 «local:1»); (if («local:2»).2 then (_root_.Option.none : (_root_.Option (_root_.List _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«token»))) else (_root_.Option.some ((_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«flushOne» («local:2»).1)).«field:tokens»))))
-
-def «parseToken» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«token») («local:1» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«parser») : (_root_.Prod _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«parser» _root_.Bool) :=
-  (if (_root_.Decidable.decide ((«local:0»).«field:comma» ≠ («local:1»).«field:afterCount»)) then (_root_.Prod.mk «local:1» _root_.Bool.true) else (if («local:0»).«field:comma» then (let «local:2» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«parser».mk («local:1»).«field:attempts» _root_.Bool.false); (_root_.Prod.mk «local:2» _root_.Bool.false)) else (let «local:3» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«parser».mk (_root_.List.cons («local:0»).«field:pins» («local:1»).«field:attempts») _root_.Bool.true); (_root_.Prod.mk «local:3» _root_.Bool.false))))
-
-def «finishParse» («local:0» : (_root_.Prod _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«parser» _root_.Bool)) : (_root_.Option (_root_.List _root_.Int64)) :=
-  (if (if («local:0»).2 then _root_.Bool.true else (if (!((«local:0»).1).«field:afterCount») then (!(_root_.List.isEmpty ((«local:0»).1).«field:attempts»)) else _root_.Bool.false)) then (_root_.Option.none : (_root_.Option (_root_.List _root_.Int64))) else (_root_.Option.some ((«local:0»).1).«field:attempts»))
-
-def «parse» («local:0» : (_root_.List _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«token»)) : (_root_.Option (_root_.List _root_.Int64)) :=
-  (let «local:1» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«parser».mk ([] : (_root_.List _root_.Int64)) _root_.Bool.false); (let «local:2» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«fold».listUntil _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«parseToken» «local:0» «local:1»); (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«finishParse» «local:2»)))
-
-def «playInput» («local:0» : _root_.ByteArray) : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«replayResult») :=
-  (let «local:1» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«lex» «local:0»); (if (!(_root_.Option.isSome «local:1»)) then (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«replayResult»)) else (let «local:2» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«parse» (_root_.Option.getD «local:1» ([] : (_root_.List _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«token»)))); (if (!(_root_.Option.isSome «local:2»)) then (_root_.Option.none : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«replayResult»)) else (_root_.Option.some (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«Replay» (_root_.Option.getD «local:2» ([] : (_root_.List _root_.Int64)))))))))
-
-def «gameState$Roll» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«gameState») («local:1» : _root_.Int64) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«rollResult» :=
-  (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«gameState$roll» «local:0» «local:1»)
-
-def «rollResult$Game» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«rollResult») : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«gameState» :=
-  («local:0»).«field:game»
-
-def «rollResult$Accepted» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«rollResult») : _root_.Bool :=
-  («local:0»).«field:accepted»
-
-def «gameState$Score» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«gameState») : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«scoreResult» :=
-  (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«gameState$score» «local:0»)
-
-def «scoreResult$Total» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«scoreResult») : _root_.Int64 :=
-  («local:0»).«field:total»
-
-def «scoreResult$Complete» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«scoreResult») : _root_.Bool :=
-  («local:0»).«field:complete»
-
-def «replayResult$Game» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«replayResult») : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«gameState» :=
-  («local:0»).«field:game»
-
-def «replayResult$Decisions» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«replayResult») : (_root_.List _root_.Bool) :=
-  («local:0»).«field:decisions»
-
-def «Play» («local:0» : _root_.ByteArray) : (_root_.Option _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«replayResult») :=
-  (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«playInput» «local:0»)
+def «Replay» («local:0» : (_root_.List _root_.Int64)) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«ReplayResult» :=
+  (let «local:1» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«ReplayResult».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«Start») ([] : (_root_.List _root_.Bool))); (let «local:2» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«fold».list _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«replayAttempt» «local:0» «local:1»); (let «local:3» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«fold».list _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«prependDecision» («local:2»).«field:Decisions» ([] : (_root_.List _root_.Bool))); (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».«ReplayResult».mk («local:2»).«field:Game» «local:3»))))
 
 end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling»
 
@@ -192,41 +99,28 @@ namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowlin
 
 set_option autoImplicit false
 
-def «playInputMatchesSpec» : Prop :=
-  ∀ input : ByteArray,
-  input.size < UInt64.size →
-  let actual := playInput input
-  (actual = none ↔ ¬ ∃ attempts, Bowling.Grammar.Parses input.data.toList attempts) ∧
-  ∀ attempts, Bowling.Grammar.Parses input.data.toList attempts →
-  ∃ played, actual = some played ∧
-  let reference := Bowling.Rules.play Bowling.Rules.initial (attempts.map Int64.toInt)
-  let result := «gameState$score» played.«field:game»
-  played.«field:decisions» = reference.1 ∧
-  (result.«field:total», result.«field:complete») =
-  Bowling.Rules.answer (Bowling.Rules.score reference.2.2)
-
 def «fromStartMatchesRules» : Prop :=
   ∀ attempts,
   let reference := Bowling.Rules.play Bowling.Rules.initial (attempts.map Int64.toInt)
   let actual := Replay attempts
-  let result := «gameState$score» actual.«field:game»
-  actual.«field:decisions» = reference.1 ∧
+  let result := «Game$score» actual.«field:Game»
+  actual.«field:Decisions» = reference.1 ∧
   (result.«field:total», result.«field:complete») =
   Bowling.Rules.answer (Bowling.Rules.score reference.2.2)
 
 def «rejectionUnchanged» : Prop :=
   ∀ s pins,
-  («gameState$roll» s pins).«field:accepted» = false → («gameState$roll» s pins).«field:game» = s
+  («Game$roll» s pins).«field:accepted» = false → («Game$roll» s pins).«field:game» = s
 
 def «finalScore» : Prop :=
   ∀ s,
-  «gameState$score» s = if s.«field:frame» = 10 then ⟨s.«field:total», true⟩ else ⟨0, false⟩
+  «Game$score» s = if s.«field:frame» = 10 then ⟨s.«field:total», true⟩ else ⟨0, false⟩
 
 def «completedGameIsStable» : Prop :=
   ∀ game total pins,
-  «gameState$score» game = ⟨total, true⟩ →
-  «gameState$roll» game pins = ⟨game, false⟩ ∧
-  «gameState$score» («gameState$roll» game pins).«field:game» = ⟨total, true⟩
+  «Game$score» game = ⟨total, true⟩ →
+  «Game$roll» game pins = ⟨game, false⟩ ∧
+  «Game$score» («Game$roll» game pins).«field:game» = ⟨total, true⟩
 
 def «startEmpty» : Prop :=
   Start = ⟨0, 0, 0, 0, 0, 0⟩

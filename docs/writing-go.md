@@ -4,16 +4,16 @@ Choose a small operation whose inputs and outputs express a property you want to
 
 ## Keep the model at a value boundary
 
-The bowling API returns a private `rollResult` record with methods for the next game and acceptance flag. The compiler runtime package copies source bytes into a `lean.ByteArray` and passes it to the modeled package. [Bowling](../examples/proven/bowling/README.md) and [compiler](../examples/proven/stack_machine_compiler/README.md)
+The bowling API returns a game and an acceptance flag. Its modeled value method returns a `rollResult` record, and the public wrapper unpacks it. The compiler copies source bytes into a `lean.ByteArray` at its public entry point, then works with that value inside the modeled call graph. [Bowling](../examples/proven/bowling/README.md) and [compiler](../examples/proven/stack_machine_compiler/README.md)
 
-Use concrete value receivers, explicit immutable local initializers, keyed record literals, `if`, and early returns. Return a new value when a field changes. A translated value method takes its receiver first in Lean, so `game.roll(pins)` becomes an application of `«gameState$roll»` to `game` and `pins`.
+Use concrete value receivers, explicit immutable local initializers, keyed record literals, `if`, and early returns. Return a new value when a field changes. A translated value method takes its receiver first in Lean, so `game.roll(pins)` becomes an application of `«Game$roll»` to `game` and `pins`.
 
 ## Move traversal state into a record
 
 The grid game replays moves with a named step that receives a direction and the current replay state. The state carries the position and wrapping mode. It returns the next position with the same mode:
 
 ```go
-return lean.FoldList(moves, replayState{point: Start(), wrap: wrap}, replayMove).point
+return lean.FoldList(moves, replayState{Position: Start(), Wrap: wrap}, replayMove).Position
 ```
 
 Use `FoldN` to visit a known number of indices, `FoldList` to visit list items, and the `Until` variants to stop early. Put extra inputs in the state record. For arrays and byte arrays, iterate over `Size()` and use `Get(index)`. A named step is part of the modeled call graph and must satisfy the same subset rules. [Grid game walkthrough](../examples/proven/grid_game/README.md)

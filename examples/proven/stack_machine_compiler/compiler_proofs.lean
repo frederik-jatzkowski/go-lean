@@ -62,7 +62,7 @@ termination_by code.size - s.pc
 decreasing_by omega
 
 private def observed (r : machineResult) : UInt8 × State :=
-  (r.«field:status», ⟨r.«field:state».«field:pc».toNat, r.«field:state».«field:stack»⟩)
+  (r.«field:Status», ⟨r.«field:State».«field:PC».toNat, r.«field:State».«field:Stack»⟩)
 
 private theorem stepCorrect : Requirements.stepConforms
     (fun code pc stack aligned => observed (step code ⟨pc, stack⟩ aligned)) := by
@@ -137,7 +137,7 @@ private theorem runFrom {code : ByteArray} {s final : State} {steps : Nat} {stat
     (exec : Execution code s steps final status) (fuel : Nat) (idx : UInt64) (r : machineResult)
     (enough : steps ≤ fuel) (rep : (observed r).2 = s) (even : s.pc % 2 = 0)
     (hc : code.size ≤ maxInt) (hs : s.stack.size ≤ maxInt) :
-    observed ((«fold».countUntil runInstruction fuel idx ⟨code,r⟩).1.«field:result») =
+    observed ((«fold».countUntil runInstruction fuel idx ⟨code,r⟩).1.«field:Result») =
       (Requirements.Status.tag status, final) := by
   induction exec generalizing fuel idx r with
   | @stop s status h =>
@@ -150,7 +150,7 @@ private theorem runFrom {code : ByteArray} {s final : State} {steps : Nat} {stat
       simp only [observed] at even h
       simp only [even, decide_true, h] at law
       have tag := law.1
-      change (step code ⟨pc, stack⟩ true).«field:status» = _ at tag
+      change (step code ⟨pc, stack⟩ true).«field:Status» = _ at tag
       have nonzero : Requirements.Status.tag status ≠ 0 := by cases status <;> decide
       simpa [«fold».countUntil, runInstruction, tag, nonzero] using Prod.ext law.1 law.2
   | @next s t n final status h _ ih =>
@@ -163,7 +163,7 @@ private theorem runFrom {code : ByteArray} {s final : State} {steps : Nat} {stat
       simp only [observed] at even h
       simp only [even, decide_true, h] at law
       have tag := law.1
-      change (step code ⟨pc, stack⟩ true).«field:status» = 0 at tag
+      change (step code ⟨pc, stack⟩ true).«field:Status» = 0 at tag
       have pe := (nextBounds h hs).1
       simp only at pe
       have remaining := ih fuel (idx + 1) (step code ⟨pc, stack⟩ true) (by omega)
@@ -312,10 +312,10 @@ private theorem classifyRecognized (word : ByteArray) (tok : Token)
       rw [bytes h]
       have decimalTable : ∀ i : Fin 256,
           let result := classify (toString i.val).toUTF8
-          result.«field:kind» = 1 ∧ result.«field:value» = UInt8.ofNat i.val := by decide
+          result.«field:Kind» = 1 ∧ result.«field:Value» = UInt8.ofNat i.val := by decide
       obtain ⟨kind, value⟩ := decimalTable n.toBitVec.toFin
-      change (classify (toString n.toNat).toUTF8).«field:kind» = 1 at kind
-      change (classify (toString n.toNat).toUTF8).«field:value» = UInt8.ofNat n.toNat at value
+      change (classify (toString n.toNat).toUTF8).«field:Kind» = 1 at kind
+      change (classify (toString n.toNat).toUTF8).«field:Value» = UInt8.ofNat n.toNat at value
       simp only [UInt8.ofNat_toNat] at value
       generalize classify (toString n.toNat).toUTF8 = result at *
       cases result
@@ -323,7 +323,7 @@ private theorem classifyRecognized (word : ByteArray) (tok : Token)
 
 private def compileResult (source : ByteArray) : Requirements.Compilation :=
   let r := compile source
-  ⟨r.«field:code», r.«field:typeCode», r.«field:diagnostic».«field:kind», r.«field:diagnostic».«field:offset».toNat⟩
+  ⟨r.«field:Code», r.«field:Type», r.«field:Error».«field:Kind», r.«field:Error».«field:Offset».toNat⟩
 
 private inductive Steps (code : ByteArray) : State → State → Prop where
   | refl : Steps code s s
@@ -465,9 +465,9 @@ private theorem sizeNat {n : Nat} (fits : n ≤ maxInt) : (UInt64.ofNat n).toNat
 
 private def locatedLexeme (t : LocatedToken) : lexeme :=
   let c := tokenClass t.1
-  ⟨c.«field:kind», c.«field:value», UInt64.ofNat t.2⟩
+  ⟨c.«field:Kind», c.«field:Value», UInt64.ofNat t.2⟩
 
-private theorem tokenKindNonzero (t : Token) : (tokenClass t).«field:kind» ≠ 0 := by
+private theorem tokenKindNonzero (t : Token) : (tokenClass t).«field:Kind» ≠ 0 := by
   cases t with
   | literal v => cases v <;> simp [tokenClass]
   | binary op => cases op <;> decide
@@ -491,47 +491,47 @@ private theorem digitByteExists (b : UInt8) (digit : isDigit b = true) :
   have eq : 48 + (b.toNat - 48) = b.toNat := by omega
   simp [digitByte, eq]
 
-private theorem decimalOne (a : UInt8) (accepted : (decimal a 0 0 1).«field:kind» ≠ 0) :
-    Recognizes [a] (.literal (.number (decimal a 0 0 1).«field:value»)) := by
+private theorem decimalOne (a : UInt8) (accepted : (decimal a 0 0 1).«field:Kind» ≠ 0) :
+    Recognizes [a] (.literal (.number (decimal a 0 0 1).«field:Value»)) := by
   have digit : isDigit a = true := by
     cases h : isDigit a <;> simp_all [decimal]
   obtain ⟨i, rfl⟩ := digitByteExists a digit
   exact (show ∀ i : Fin 10, Recognizes [digitByte i]
-    (.literal (.number (decimal (digitByte i) 0 0 1).«field:value»)) by
+    (.literal (.number (decimal (digitByte i) 0 0 1).«field:Value»)) by
     simp only [Recognizes]
     decide) i
 
-private theorem decimalTwo (a b : UInt8) (accepted : (decimal a b 0 2).«field:kind» ≠ 0) :
-    Recognizes [a, b] (.literal (.number (decimal a b 0 2).«field:value»)) := by
+private theorem decimalTwo (a b : UInt8) (accepted : (decimal a b 0 2).«field:Kind» ≠ 0) :
+    Recognizes [a, b] (.literal (.number (decimal a b 0 2).«field:Value»)) := by
   have digits : isDigit a = true ∧ isDigit b = true := by
     cases ha : isDigit a <;> cases hb : isDigit b <;> simp_all [decimal]
   obtain ⟨i, rfl⟩ := digitByteExists a digits.1
   obtain ⟨j, rfl⟩ := digitByteExists b digits.2
-  exact (show ∀ i j : Fin 10, (decimal (digitByte i) (digitByte j) 0 2).«field:kind» ≠ 0 →
+  exact (show ∀ i j : Fin 10, (decimal (digitByte i) (digitByte j) 0 2).«field:Kind» ≠ 0 →
     Recognizes [digitByte i, digitByte j]
-      (.literal (.number (decimal (digitByte i) (digitByte j) 0 2).«field:value»)) by
+      (.literal (.number (decimal (digitByte i) (digitByte j) 0 2).«field:Value»)) by
     simp only [Recognizes]
     decide) i j accepted
 
 set_option maxRecDepth 8192 in
 set_option maxHeartbeats 6000000 in
-private theorem decimalThree (a b c : UInt8) (accepted : (decimal a b c 3).«field:kind» ≠ 0) :
-    Recognizes [a, b, c] (.literal (.number (decimal a b c 3).«field:value»)) := by
+private theorem decimalThree (a b c : UInt8) (accepted : (decimal a b c 3).«field:Kind» ≠ 0) :
+    Recognizes [a, b, c] (.literal (.number (decimal a b c 3).«field:Value»)) := by
   have digits : isDigit a = true ∧ isDigit b = true ∧ isDigit c = true := by
     cases ha : isDigit a <;> cases hb : isDigit b <;> cases hc : isDigit c <;>
       simp_all [decimal] <;> split at accepted <;> simp_all
   obtain ⟨i, rfl⟩ := digitByteExists a digits.1
   obtain ⟨j, rfl⟩ := digitByteExists b digits.2.1
   obtain ⟨k, rfl⟩ := digitByteExists c digits.2.2
-  exact (show ∀ i j k : Fin 10, (decimal (digitByte i) (digitByte j) (digitByte k) 3).«field:kind» ≠ 0 →
+  exact (show ∀ i j k : Fin 10, (decimal (digitByte i) (digitByte j) (digitByte k) 3).«field:Kind» ≠ 0 →
     Recognizes [digitByte i, digitByte j, digitByte k]
-      (.literal (.number (decimal (digitByte i) (digitByte j) (digitByte k) 3).«field:value»)) by
+      (.literal (.number (decimal (digitByte i) (digitByte j) (digitByte k) 3).«field:Value»)) by
     simp only [Recognizes]
     decide) i j k accepted
 
 set_option linter.unusedSimpArgs false in
 private theorem classifyValid (data : ByteArray) (fits : data.size ≤ maxInt)
-    (accepted : (classify data).«field:kind» ≠ 0) :
+    (accepted : (classify data).«field:Kind» ≠ 0) :
     ∃ tok, Recognizes data.data.toList tok := by
   have width : (UInt64.ofNat data.size).toNat = data.size := sizeNat fits
   simp only [classify, byteAtList] at accepted
@@ -615,7 +615,7 @@ private theorem closeRecognizedWord (source : ByteArray) (start stop : UInt64)
     (words : Array lexeme) (error : diagnostic) (oldScan : scanState)
     (token : Token) (recognized : Recognizes (source.extract start.toNat stop.toNat).data.toList token) :
     closeWord stop ⟨source, words, oldScan, error⟩ ⟨start, false⟩ =
-      (⟨source, words.push ⟨(tokenClass token).«field:kind», (tokenClass token).«field:value», start⟩,
+      (⟨source, words.push ⟨(tokenClass token).«field:Kind», (tokenClass token).«field:Value», start⟩,
         ⟨start, false⟩, error⟩, false) := by
   simp [closeWord, classifyRecognized _ token recognized, tokenKindNonzero token]
 
@@ -705,8 +705,8 @@ private theorem scanWordStart (source : ByteArray) (i start : UInt64)
     (nonspace b (by simp))]
   exact scanWordBytes source (i + 1) i words error bytes tail rest fits (fun c mem => nonspace c (by simp [mem]))
 private def finishScan (sourceSize : UInt64) (scanned : lexer × Bool) : lexer :=
-  if scanned.2 || !scanned.1.«field:scan».«field:inWord» then scanned.1
-  else (closeWord sourceSize scanned.1 ⟨scanned.1.«field:scan».«field:start», false⟩).1
+  if scanned.2 || !scanned.1.«field:Scan».«field:InWord» then scanned.1
+  else (closeWord sourceSize scanned.1 ⟨scanned.1.«field:Scan».«field:Start», false⟩).1
 
 private theorem scanRecognized (source : ByteArray) (fits : source.size ≤ maxInt)
     {offset : Nat} {bytes : List UInt8} {words : List Word} (splitWords : Words offset bytes words)
@@ -716,8 +716,8 @@ private theorem scanRecognized (source : ByteArray) (fits : source.size ≤ maxI
     let result := finishScan (UInt64.ofNat source.size)
       («fold».countUntil scanSourceByte bytes.length (UInt64.ofNat offset)
         ⟨source, prior, ⟨start, false⟩, err⟩)
-    result.«field:words».toList = prior.toList ++ tokens.map locatedLexeme ∧
-      result.«field:diagnostic» = err := by
+    result.«field:Words».toList = prior.toList ++ tokens.map locatedLexeme ∧
+      result.«field:Error» = err := by
   induction splitWords generalizing tokens prior start with
   | done =>
     cases lexed
@@ -793,8 +793,8 @@ private theorem scanRecognized (source : ByteArray) (fits : source.size ≤ maxI
 private theorem tokenizeRecognized (source : ByteArray) (fits : source.size ≤ maxInt)
     (words : List Word) (tokens : List LocatedToken)
     (splitWords : Words 0 source.data.toList words) (lexed : Lexed words tokens) :
-    (tokenize source).«field:words».toList = tokens.map locatedLexeme ∧
-      (tokenize source).«field:diagnostic» = noDiagnostic := by
+    (tokenize source).«field:Words».toList = tokens.map locatedLexeme ∧
+      (tokenize source).«field:Error» = noDiagnostic := by
   have eq := scanRecognized source fits splitWords (by simp) (by simp [ByteArray.size_data]) tokens lexed
     #[] 0 noDiagnostic
   unfold tokenize
@@ -814,7 +814,7 @@ private def modelRoots : List Expr → Array expression
   induction roots <;> simp_all [modelRoots]
 
 private def viewParse (result : parser × Bool) : Option (Array expression) :=
-  if result.2 then none else some result.1.«field:roots»
+  if result.2 then none else some result.1.«field:Roots»
 
 set_option linter.unusedSimpArgs false in
 private theorem parseStep (words : Array lexeme) (index : UInt64) (t : LocatedToken)
@@ -848,7 +848,7 @@ private theorem parseStep (words : Array lexeme) (index : UInt64) (t : LocatedTo
     | cons e rest =>
       simp only [List.length_cons] at fits
       simp only [parseWord, atWord, Option.getD_some, locatedLexeme, tokenClass,
-        arity, lexeme.«field:kind», modelRoots, Array.size_push, modelRootsSize]
+        arity, lexeme.«field:Kind», modelRoots, Array.size_push, modelRootsSize]
       simp only [last e rest fits, UInt64.lt_iff_toNat_lt, sizeNat fits]
       simp [viewParse, readToken, modelRoots, modelExpr, tokenClass, locatedLexeme]
   | binary op =>
@@ -865,7 +865,7 @@ private theorem parseStep (words : Array lexeme) (index : UInt64) (t : LocatedTo
         simp only [List.length_cons, modelRoots] at top
         cases op <;>
           simp only [parseWord, atWord, Option.getD_some, locatedLexeme, tokenClass,
-            arity, lexeme.«field:kind», modelRoots, Array.size_push, modelRootsSize]
+            arity, lexeme.«field:Kind», modelRoots, Array.size_push, modelRootsSize]
         all_goals simp only [top, previous l r rest fits, UInt64.lt_iff_toNat_lt, sizeNat fits]
         all_goals simp [viewParse, readToken, modelRoots, modelExpr, locatedLexeme, tokenClass, show ¬ rest.length + 1 + 1 < 2 by omega]
 
@@ -900,7 +900,7 @@ private theorem parseCorresponds (words : Array lexeme) (tokens : List LocatedTo
     rw [take, List.foldr_append]
     change _ = ((tokens.take n).foldr readToken (readToken t (some roots))).map modelRoots
     let result := parseWord index ⟨words, modelRoots roots⟩
-    have sameWords : result.1.«field:words» = words := by
+    have sameWords : result.1.«field:Words» = words := by
       simp only [result, parseWord]
       split
       · rfl
@@ -922,7 +922,7 @@ private theorem parseCorresponds (words : Array lexeme) (tokens : List LocatedTo
         induction xs <;> simp_all [readToken]
       simp [stopped, viewParse, propagate]
     | some nextStack =>
-      have ok : result.2 = false ∧ result.1.«field:roots» = modelRoots nextStack := by
+      have ok : result.2 = false ∧ result.1.«field:Roots» = modelRoots nextStack := by
         cases r : result.2 <;> simp [viewParse, r, h] at step ⊢
         exact step
       have growth : nextStack.length ≤ roots.length + 1 := by
@@ -974,17 +974,17 @@ private theorem checkCorrect (e : Expr) :
     rw [checkExpression.eq_def]
     cases h : operand.check with
     | error err =>
-      simp [modelExpr, locatedLexeme, tokenClass, expression.«field:word», expression.«field:left»,
-        expression.«field:right», ih, h, Expr.check, Bind.bind, Except.bind, mismatch]
+      simp [modelExpr, locatedLexeme, tokenClass, expression.«field:Word», expression.«field:Left»,
+        expression.«field:Right», ih, h, Expr.check, Bind.bind, Except.bind, mismatch]
     | ok ty =>
-      cases ty <;> simp [modelExpr, locatedLexeme, tokenClass, expression.«field:word»,
-        expression.«field:left», expression.«field:right», ih, h, Expr.check, Bind.bind, Except.bind,
+      cases ty <;> simp [modelExpr, locatedLexeme, tokenClass, expression.«field:Word»,
+        expression.«field:Left», expression.«field:Right», ih, h, Expr.check, Bind.bind, Except.bind,
         typed, noDiagnostic, mismatch, Requirements.Ty.tag, Pure.pure, Except.pure, throw, throwThe, MonadExceptOf.throw]
   | binary op offset l r il ir =>
     rw [checkExpression.eq_def]
     cases hr : r.check <;> cases hl : l.check <;>
-      simp [modelExpr, locatedLexeme, expression.«field:word», expression.«field:left»,
-        expression.«field:right», il, ir, hr, hl, Expr.check, Bind.bind, Except.bind, typed,
+      simp [modelExpr, locatedLexeme, expression.«field:Word», expression.«field:Left»,
+        expression.«field:Right», il, ir, hr, hl, Expr.check, Bind.bind, Except.bind, typed,
         noDiagnostic, mismatch, Requirements.Ty.tag, Pure.pure, Except.pure, throw, throwThe, MonadExceptOf.throw]
     all_goals rename_i lt rt
     all_goals cases op <;> cases lt <;> cases rt <;> rfl
@@ -994,15 +994,15 @@ private theorem emitCorrect (e : Expr) (code : ByteArray) :
   induction e generalizing code with
   | literal v offset =>
     cases v <;> rw [emitExpression.eq_def] <;> simp [modelExpr, leaf, locatedLexeme, tokenClass,
-      expression.«field:left», expression.«field:word», emitWord, encode, Expr.instructions, Value.byte]
+      expression.«field:Left», expression.«field:Word», emitWord, encode, Expr.instructions, Value.byte]
   | not offset operand ih =>
     rw [emitExpression.eq_def]
-    simp [modelExpr, locatedLexeme, tokenClass, expression.«field:left», expression.«field:right»,
-      expression.«field:word», emitWord, encode, Expr.instructions, ih, List.append_assoc]
+    simp [modelExpr, locatedLexeme, tokenClass, expression.«field:Left», expression.«field:Right»,
+      expression.«field:Word», emitWord, encode, Expr.instructions, ih, List.append_assoc]
   | binary op offset l r il ir =>
     rw [emitExpression.eq_def]
-    cases op <;> simp [modelExpr, locatedLexeme, tokenClass, expression.«field:left», expression.«field:right»,
-      expression.«field:word», emitWord, encode, Expr.instructions, BinOp.opcode, il, ir, List.append_assoc]
+    cases op <;> simp [modelExpr, locatedLexeme, tokenClass, expression.«field:Left», expression.«field:Right»,
+      expression.«field:Word», emitWord, encode, Expr.instructions, BinOp.opcode, il, ir, List.append_assoc]
 
 private theorem codeFitsIff (n : Nat) (repr : n ≤ maxInt) :
     codeFits (UInt64.ofNat n) = true ↔ 2 * n + 2 ≤ maxInt := by
@@ -1028,8 +1028,8 @@ private theorem tokenizeLayout (source : ByteArray) (fits : source.size ≤ maxI
     {words : List Word} {tokens : List LocatedToken}
     (splitWords : Words 0 source.data.toList words) (lexed : Lexed words tokens) :
     let scanned := tokenize source
-    scanned.«field:words».toList = tokens.map locatedLexeme ∧
-      scanned.«field:diagnostic».«field:kind» = 0 ∧ scanned.«field:words».size ≤ maxInt := by
+    scanned.«field:Words».toList = tokens.map locatedLexeme ∧
+      scanned.«field:Error».«field:Kind» = 0 ∧ scanned.«field:Words».size ≤ maxInt := by
   have ⟨layout, clean⟩ := tokenizeRecognized source fits _ _ splitWords lexed
   have size := congrArg List.length layout
   simp at size
@@ -1106,7 +1106,7 @@ private theorem checkErrorOffset (e : Expr) (bound : Nat)
 
 private theorem parseSuccess (words : Array lexeme) (e : Expr)
     (layout : words.toList = e.tokens.map locatedLexeme) (fits : words.size ≤ maxInt) :
-    (parse words).2 = false ∧ (parse words).1.«field:roots» = #[modelExpr e] := by
+    (parse words).2 = false ∧ (parse words).1.«field:Roots» = #[modelExpr e] := by
   have p := parseLayout words e.tokens layout fits
   rw [(parseTokensIff e.tokens e).mpr rfl] at p
   cases h : (parse words).2 <;> simp [viewParse, h, modelRoots] at p ⊢
@@ -1115,7 +1115,7 @@ private theorem parseSuccess (words : Array lexeme) (e : Expr)
 private theorem parseReject (words : Array lexeme) (tokens : List LocatedToken)
     (layout : words.toList = tokens.map locatedLexeme) (fits : words.size ≤ maxInt)
     (invalid : ¬ ∃ e : Expr, e.tokens = tokens) :
-    (parse words).2 = true ∨ UInt64.ofNat (parse words).1.«field:roots».size ≠ 1 := by
+    (parse words).2 = true ∨ UInt64.ofNat (parse words).1.«field:Roots».size ≠ 1 := by
   cases stop : (parse words).2
   · apply Or.inr
     intro one
@@ -1182,7 +1182,7 @@ private theorem scanFirstFailure (source : ByteArray) (fits : source.size ≤ ma
     let result := finishScan (UInt64.ofNat source.size)
       («fold».countUntil scanSourceByte bytes.length (UInt64.ofNat offset)
         ⟨source, prior, ⟨start, false⟩, noDiagnostic⟩)
-    result.«field:diagnostic» = ⟨2, UInt64.ofNat failure⟩ := by
+    result.«field:Error» = ⟨2, UInt64.ofNat failure⟩ := by
   induction splitWords generalizing prior start with
   | done => cases bad
   | @space b off tail ws space _ ih =>
@@ -1226,11 +1226,11 @@ private theorem scanFirstFailure (source : ByteArray) (fits : source.size ≤ ma
       rw [List.length_append, scanFoldAppend, scan]
       simp only [Bool.false_eq_true, ite_false]
       rw [← UInt64.ofNat_add]
-      change (finishScan (UInt64.ofNat source.size) («fold».countUntil scanSourceByte tail.length j old)).«field:diagnostic» = _
+      change (finishScan (UInt64.ofNat source.size) («fold».countUntil scanSourceByte tail.length j old)).«field:Error» = _
       cases bad with
       | first invalid =>
-        have rejected : (classify slice).«field:kind» = 0 := by
-          by_cases h : (classify slice).«field:kind» = 0
+        have rejected : (classify slice).«field:Kind» = 0 := by
+          by_cases h : (classify slice).«field:Kind» = 0
           · exact h
           · obtain ⟨tok, valid⟩ := classifyValid slice sliceFits h
             rw [sliceBytes] at valid
@@ -1244,7 +1244,7 @@ private theorem scanFirstFailure (source : ByteArray) (fits : source.size ≤ ma
             simp [next, w] at length ⊢
             omega
           rw [endAt]
-          change (closeWord j old ⟨i, false⟩).1.«field:diagnostic» = _
+          change (closeWord j old ⟨i, false⟩).1.«field:Error» = _
           rw [closing]
           rfl
         | cons d ds =>
@@ -1291,7 +1291,7 @@ private theorem scanFirstFailure (source : ByteArray) (fits : source.size ≤ ma
 private theorem tokenizeFirstFailure (source : ByteArray) (fits : source.size ≤ maxInt)
     {words : List Word} {offset : Nat} (splitWords : Words 0 source.data.toList words)
     (first : FirstLexError words offset) :
-    (tokenize source).«field:diagnostic» = ⟨2, UInt64.ofNat offset⟩ := by
+    (tokenize source).«field:Error» = ⟨2, UInt64.ofNat offset⟩ := by
   have result := scanFirstFailure source fits splitWords (firstFailure first) (by simp)
     (by simp [ByteArray.size_data]) #[] 0
   unfold tokenize
@@ -1334,10 +1334,10 @@ private theorem compilationCorrect : Requirements.compilationConforms compileRes
     have ⟨stop, roots⟩ := parseSuccess _ e layout bound
     have chk := checkCorrect e
     rw [good] at chk
-    have count : (tokenize source).«field:words».size = e.tokens.length := by
+    have count : (tokenize source).«field:Words».size = e.tokens.length := by
       simpa using congrArg List.length layout
-    have tooLarge : codeFits (UInt64.ofNat (tokenize source).«field:words».size) = false := by
-      cases h : codeFits (UInt64.ofNat (tokenize source).«field:words».size)
+    have tooLarge : codeFits (UInt64.ofNat (tokenize source).«field:Words».size) = false := by
+      cases h : codeFits (UInt64.ofNat (tokenize source).«field:Words».size)
       · rfl
       · have := (codeFitsIff _ bound).mp h
         omega
@@ -1348,7 +1348,7 @@ private theorem compilationCorrect : Requirements.compilationConforms compileRes
     have ⟨stop, roots⟩ := parseSuccess _ e layout bound
     have chk := checkCorrect e
     rw [good] at chk
-    have count : (tokenize source).«field:words».size = e.tokens.length := by
+    have count : (tokenize source).«field:Words».size = e.tokens.length := by
       simpa using congrArg List.length layout
     have enough := (codeFitsIff _ bound).mpr (by omega)
     simp [compileResult, compile, clean, stop, roots, chk, typed, noDiagnostic, enough,

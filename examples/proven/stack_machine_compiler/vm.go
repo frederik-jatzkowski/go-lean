@@ -6,8 +6,16 @@ import (
 	"github.com/frederik-jatzkowski/go-lean/pkg/lean"
 )
 
+// State holds the program counter and the live operands, with the top at the end.
+type State struct {
+	PC    uint
+	Stack []byte
+}
+
+type Status uint8
+
 const (
-	Continue uint8 = iota
+	Continue Status = iota
 	Halted
 	InvalidPC
 	InvalidStack
@@ -26,52 +34,73 @@ const (
 )
 
 type machineState struct {
-	pc    uint
-	stack lean.Array[byte]
+	PC    uint
+	Stack lean.Array[byte]
 }
 
 type machineResult struct {
-	state  machineState
-	status uint8
+	State  machineState
+	Status Status
+}
+
+// Step executes one complete instruction pair.
+func Step(code []byte, state State) (State, Status) {
+	var stack lean.Array[byte]
+	for _, b := range state.Stack {
+		stack = stack.Push(b)
+	}
+	result := step(lean.ByteArrayFromBytes(code), machineState{PC: state.PC, Stack: stack}, state.PC%2 == 0)
+	if result.Status != Continue {
+		return state, result.Status
+	}
+	return wireState(result.State), Continue
+}
+
+func wireState(state machineState) State {
+	next := State{PC: state.PC, Stack: make([]byte, state.Stack.Size())}
+	for i := range next.Stack {
+		next.Stack[i] = state.Stack.Get(uint(i)).UnwrapOr(0)
+	}
+	return next
 }
 
 //golean:export
 func step(code lean.ByteArray, state machineState, aligned bool) machineResult {
-	pc := state.pc
+	pc := state.PC
 	if !aligned || pc >= code.Size() || code.Size()-pc < 2 {
-		return machineResult{state: state, status: InvalidPC}
+		return machineResult{State: state, Status: InvalidPC}
 	}
 	op := code.Get(pc).UnwrapOr(Halt)
 	if op > Not {
-		return machineResult{state: state, status: InvalidOpcode}
+		return machineResult{State: state, Status: InvalidOpcode}
 	}
 	if op == Halt {
-		return machineResult{state: state, status: Halted}
+		return machineResult{State: state, Status: Halted}
 	}
-	depth := state.stack.Size()
+	depth := state.Stack.Size()
 	if op == Push {
 		if depth == math.MaxInt {
-			return machineResult{state: state, status: InvalidStack}
+			return machineResult{State: state, Status: InvalidStack}
 		}
-		return advance(state, state.stack.Push(code.Get(pc+1).UnwrapOr(0)))
+		return advance(state, state.Stack.Push(code.Get(pc+1).UnwrapOr(0)))
 	}
 	if op == Not {
 		if depth == 0 {
-			return machineResult{state: state, status: InvalidStack}
+			return machineResult{State: state, Status: InvalidStack}
 		}
-		top := state.stack.Get(depth - 1).UnwrapOr(0)
-		return advance(state, state.stack.Set(depth-1, truthByte(top == 0)))
+		top := state.Stack.Get(depth - 1).UnwrapOr(0)
+		return advance(state, state.Stack.Set(depth-1, truthByte(top == 0)))
 	}
 	if depth < 2 {
-		return machineResult{state: state, status: InvalidStack}
+		return machineResult{State: state, Status: InvalidStack}
 	}
-	left := state.stack.Get(depth - 1).UnwrapOr(0)
-	right := state.stack.Get(depth - 2).UnwrapOr(0)
-	return advance(state, state.stack.Pop().Set(depth-2, binaryResult(op, left, right)))
+	left := state.Stack.Get(depth - 1).UnwrapOr(0)
+	right := state.Stack.Get(depth - 2).UnwrapOr(0)
+	return advance(state, state.Stack.Pop().Set(depth-2, binaryResult(op, left, right)))
 }
 
 func advance(state machineState, stack lean.Array[byte]) machineResult {
-	return machineResult{state: machineState{pc: state.pc + 2, stack: stack}, status: Continue}
+	return machineResult{State: machineState{PC: state.PC + 2, Stack: stack}, Status: Continue}
 }
 
 func binaryResult(op, left, right byte) byte {
@@ -96,9 +125,3 @@ func truthByte(value bool) byte {
 	}
 	return 0
 }
-func StepBytes(code lean.ByteArray, pc uint, stack lean.Array[byte], aligned bool) machineResult {
-	return step(code, machineState{pc: pc, stack: stack}, aligned)
-}
-func (r machineResult) PC() uint                { return r.state.pc }
-func (r machineResult) Stack() lean.Array[byte] { return r.state.stack }
-func (r machineResult) Status() uint8           { return r.status }

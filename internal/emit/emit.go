@@ -24,7 +24,6 @@ type renderer struct {
 	foldNamespace string
 	measured      bool
 	self          ir.Symbol
-	mutual        map[ir.Symbol]bool
 }
 
 func identifier(name string) string { return "«" + name + "»" }
@@ -77,26 +76,24 @@ var scalar = map[ir.Kind]string{
 	ir.UInt8: "_root_.UInt8", ir.UInt16: "_root_.UInt16", ir.UInt32: "_root_.UInt32", ir.UInt64: "_root_.UInt64",
 }
 
-func leanType(t ir.Type) string { return renderType(t, qualified) }
-
-func renderType(t ir.Type, name func(ir.Symbol) string) string {
+func leanType(t ir.Type) string {
 	switch t.Kind {
-	case ir.Record, ir.EnumType:
-		return name(t.Record)
+	case ir.Record:
+		return qualified(t.Record)
 	case ir.Array:
-		return "(_root_.Array " + renderType(*t.Element, name) + ")"
+		return "(_root_.Array " + leanType(*t.Element) + ")"
 	case ir.ByteArray:
 		return "_root_.ByteArray"
 	case ir.OrderedMap:
-		return "(_root_.Std.TreeMap " + renderType(*t.Key, name) + " " + renderType(*t.Element, name) + " _root_.Ord.compare)"
+		return "(_root_.Std.TreeMap " + leanType(*t.Key) + " " + leanType(*t.Element) + " _root_.Ord.compare)"
 	case ir.OrderedSet:
-		return "(_root_.Std.TreeSet " + renderType(*t.Key, name) + " _root_.Ord.compare)"
+		return "(_root_.Std.TreeSet " + leanType(*t.Key) + " _root_.Ord.compare)"
 	case ir.Option, ir.Box:
-		return "(_root_.Option " + renderType(*t.Element, name) + ")"
+		return "(_root_.Option " + leanType(*t.Element) + ")"
 	case ir.List:
-		return "(_root_.List " + renderType(*t.Element, name) + ")"
+		return "(_root_.List " + leanType(*t.Element) + ")"
 	case ir.FoldControl:
-		return "(_root_.Prod " + renderType(*t.Element, name) + " _root_.Bool)"
+		return "(_root_.Prod " + leanType(*t.Element) + " _root_.Bool)"
 	case ir.BitVec:
 		return "(_root_.Sigma (fun w : {n : _root_.Nat // n ≤ 64} => _root_.BitVec w.val))"
 	default:
@@ -134,89 +131,47 @@ func (r renderer) model(p *ir.Package, modules map[string]string) string {
 	fmt.Fprintf(&b, "\nnamespace %s\n", namespace(p.Path))
 	r.writeFolds(&b, p.Folds)
 	for _, decl := range p.Decls {
-		r.writeDeclaration(&b, decl)
+		switch d := decl.(type) {
+		case ir.Struct:
+			writeStruct(&b, d)
+		case ir.Contract:
+			fmt.Fprintf(&b, "\nstructure %s where\n  operation : ", contractName(d.Caller, d.Callee))
+			for _, t := range d.Params {
+				fmt.Fprintf(&b, "%s → ", leanType(t))
+			}
+			fmt.Fprintln(&b, leanType(d.Result))
+			for _, law := range d.Assumptions {
+				fmt.Fprintf(&b, "  %s : (let %s := operation;\n    %s)\n", identifier(law.Name), identifier(d.Callee.Name), indent(law.Lean, 4))
+			}
+		case ir.Function:
+			if d.Termination != "" {
+				b.WriteString("\nset_option linter.unusedVariables false in\nset_option linter.unusedSimpArgs false in\n")
+			}
+			fmt.Fprintf(&b, "\ndef %s", identifier(d.Symbol.Name))
+			for _, callee := range d.Contracts {
+				fmt.Fprintf(&b, " (%s : %s)", contractVar(callee), contractName(d.Symbol, callee))
+			}
+			for _, param := range d.Params {
+				name := local(param.ID)
+				if param.Unused {
+					name = "_"
+				}
+				fmt.Fprintf(&b, " (%s : %s)", name, leanType(param.Type))
+			}
+			body := r
+			body.measured = d.Termination != ""
+			body.self = d.Symbol
+			fmt.Fprintf(&b, " : %s :=\n  %s\n", leanType(d.Result), body.expr(d.Body))
+			if body.measured {
+				writeTermination(&b, d)
+			}
+		}
 	}
 	fmt.Fprintf(&b, "\nend %s\n", namespace(p.Path))
 	if len(p.Laws) != 0 {
 		writeLaws(&b, p)
 	}
 	return b.String()
-}
-
-func (r renderer) writeDeclaration(b *strings.Builder, decl ir.Declaration) {
-	switch d := decl.(type) {
-	case ir.Mutual:
-		group := r
-		group.mutual = make(map[ir.Symbol]bool)
-		measured := false
-		for _, member := range d.Members {
-			switch member := member.(type) {
-			case ir.Enum:
-				group.mutual[member.Symbol] = true
-			case ir.Function:
-				group.mutual[member.Symbol] = true
-				measured = measured || member.Termination != ""
-			}
-		}
-		if measured {
-			b.WriteString(terminationOptions)
-		}
-		b.WriteString("\nmutual\n")
-		for _, member := range d.Members {
-			var declaration strings.Builder
-			group.writeDeclaration(&declaration, member)
-			fmt.Fprintln(b, "  "+indent(strings.TrimSpace(declaration.String()), 2))
-		}
-		b.WriteString("end\n")
-	case ir.Enum:
-		fmt.Fprintf(b, "\ninductive %s where\n", identifier(d.Symbol.Name))
-		for _, variant := range d.Variants {
-			fmt.Fprintf(b, "  | %s", identifier(variant.Name))
-			for _, f := range variant.Fields {
-				fmt.Fprintf(b, " (%s : %s)", identifier(f.Name), renderType(f.Type, func(sym ir.Symbol) string {
-					if sym == d.Symbol || r.mutual[sym] {
-						return identifier(sym.Name)
-					}
-					return qualified(sym)
-				}))
-			}
-			b.WriteByte(10)
-		}
-		b.WriteString("deriving Repr, BEq\n")
-	case ir.Struct:
-		writeStruct(b, d)
-	case ir.Contract:
-		fmt.Fprintf(b, "\nstructure %s where\n  operation : ", contractName(d.Caller, d.Callee))
-		for _, t := range d.Params {
-			fmt.Fprintf(b, "%s → ", leanType(t))
-		}
-		fmt.Fprintln(b, leanType(d.Result))
-		for _, law := range d.Assumptions {
-			fmt.Fprintf(b, "  %s : (let %s := operation;\n    %s)\n", identifier(law.Name), identifier(d.Callee.Name), indent(law.Lean, 4))
-		}
-	case ir.Function:
-		if d.Termination != "" && r.mutual == nil {
-			b.WriteString(terminationOptions)
-		}
-		fmt.Fprintf(b, "\ndef %s", identifier(d.Symbol.Name))
-		for _, callee := range d.Contracts {
-			fmt.Fprintf(b, " (%s : %s)", contractVar(callee), contractName(d.Symbol, callee))
-		}
-		for _, param := range d.Params {
-			name := local(param.ID)
-			if param.Unused {
-				name = "_"
-			}
-			fmt.Fprintf(b, " (%s : %s)", name, leanType(param.Type))
-		}
-		body := r
-		body.measured = d.Termination != ""
-		body.self = d.Symbol
-		fmt.Fprintf(b, " : %s :=\n  %s\n", leanType(d.Result), indent(body.expr(d.Body), 2))
-		if body.measured {
-			writeTermination(b, d)
-		}
-	}
 }
 
 func indent(value string, n int) string {
@@ -278,23 +233,6 @@ const audit = `private def auditGoProof (companion proof law : Lean.Name) : Lean
 
 func (r renderer) expr(e ir.Expr) string {
 	switch v := e.(type) {
-	case ir.EnumLiteral:
-		return r.apply(qualified(v.Type)+"."+identifier(v.Variant), v.Fields)
-	case ir.Match:
-		var b strings.Builder
-		fmt.Fprintf(&b, "(match %s with", r.expr(v.Target))
-		for _, branch := range v.Branches {
-			fmt.Fprintf(&b, "\n| .%s", identifier(branch.Variant))
-			for _, id := range branch.Bindings {
-				if id < 0 {
-					b.WriteString(" _")
-				} else {
-					fmt.Fprintf(&b, " %s", local(id))
-				}
-			}
-			fmt.Fprintf(&b, " => %s", r.expr(branch.Body))
-		}
-		return b.String() + ")"
 	case ir.Constant:
 		switch v.Type.Kind {
 		case ir.Bool:
@@ -340,7 +278,7 @@ func (r renderer) expr(e ir.Expr) string {
 	case ir.StructLiteral:
 		return r.apply(qualified(v.Type)+".mk", v.Fields)
 	case ir.Call:
-		if v.Target == r.self || r.mutual[v.Target] {
+		if r.measured && v.Target == r.self {
 			return r.apply(identifier(v.Target.Name), v.Args)
 		}
 		return r.apply(qualified(v.Target), v.Args)
@@ -396,8 +334,6 @@ func (r renderer) binary(v ir.Binary) string {
 		return "(_root_.Decidable.decide (" + a + " " + op + " " + b + "))"
 	}
 }
-
-const terminationOptions = "\nset_option linter.unusedVariables false in\nset_option linter.unusedSimpArgs false in\n"
 
 func writeTermination(b *strings.Builder, d ir.Function) {
 	fmt.Fprint(b, "termination_by (")

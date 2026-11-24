@@ -1,6 +1,6 @@
 # Supported Go
 
-An export, verification law, or enum directive selects the whole package. Concrete modeled dependencies follow the same rules. Every build-selected production declaration must follow the subset, including unused helpers. Use private data types and fields, immutable local initializers, fully keyed value literals, conditionals, early returns, and one unnamed result per function or method. Go tests and separate runtime packages can use ordinary Go.
+go-lean checks the call graph reached from exported and verified operations. Ordinary Go at the boundary can use the full language. Within the modeled graph, use immutable local initializers, fully keyed value literals, conditionals, early returns, and one unnamed result per function or method.
 
 ## Types and operations
 
@@ -32,20 +32,10 @@ Direct calls resolve statically. Concrete value-receiver calls and method expres
 
 Pass a directly named non-generic function. Empty traversals make no step calls. The early-stop result carries the stopping step's state and flag, including a stop on the last visit. Exhaustion returns the final state with a false flag. Lean models the state and flag as `S × Bool`. The generated count equations recurse on the remaining count, and the list equations unfold on empty and cons cases.
 
-For recursion that needs an explicit measure, supply a Lean `Nat` expression in scope of the entry parameters. Examples include a guarded unsigned countdown and the size of a boxed self-recursive record. See [writing modeled Go](writing-go.md).
-
-## Generated enums
-
-Declare an enum in a package doc comment with `//golean:generate:enum expr { constant, add }`. Each variant is a private struct in the same package. Variant fields can use supported types and refer to the enum itself or another enum. Use `lean.Array` or `lean.List` for variable-length child lists.
-
-`transpile` and `verify` generate `lean.gen.go`. Commit the generated Go file so ordinary Go commands can build the package. Ordinary callers construct values with `Expr_Constant` and `Expr_Add`. Mark a private function such as `eval` with `//golean:export` to generate the checked Go entry point `Eval`. An enum's Go zero value is invalid and checked entry points reject it.
-
-A modeled function can use `MatchExpr` with inline callbacks or an exhaustive native type switch over `e.variant`. Each case uses a value variant. Recursive enum matches can use Lean structural termination or a declared termination measure.
-
-See the [recursive expression example](../examples/proven/recursive_expr/README.md).
+For direct recursion, supply a Lean `Nat` measure in scope of the entry parameters. Use a guarded unsigned countdown or a boxed self-recursive record with a decreasing size measure. See [writing modeled Go](writing-go.md).
 
 ## Patterns outside the subset
 
-Raw slices and maps, pointers, interfaces, function values, reassignments, raw Go loops, ordinary switches and user-defined generics are outside the modeled subset. Generated enum matches and structurally recursive enum functions are exceptions to the general restrictions on matching and recursion. Receiver support covers concrete value methods. Pointer receivers, implicit dereferences, promoted methods, and stored method values are outside that support.
+Raw slices and maps, pointers, interfaces, function values, reassignments, raw Go loops, switches, user-defined generics, and unannotated or mutual recursion are outside the modeled subset. Receiver support covers concrete value methods. Pointer receivers, implicit dereferences, promoted methods, and stored method values are outside that support.
 
-Use the reported Go location to identify code that needs a modeled representation or belongs in a runtime package. The [grid game](../examples/proven/grid_game/README.md) shows a runtime driver calling a modeled step, and the [compiler](../examples/proven/stack_machine_compiler/README.md) shows raw bytes converted at the boundary.
+When translation reports a Go location, trace the call from the marked operation and decide which values should cross the model boundary. The [grid game](../examples/proven/grid_game/README.md) shows a runtime driver calling a modeled step, and the [compiler](../examples/proven/stack_machine_compiler/README.md) shows raw bytes converted at the boundary.

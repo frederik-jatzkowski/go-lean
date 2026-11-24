@@ -67,9 +67,9 @@ func TestPackageSelection(t *testing.T) {
 import numbers "example.test/model/math"
 //golean:verify law : Client 0 = 1
 func Client(x int64) int64 { return numbers.Increment(x) }
+func Ignored() { go func(){}() }
 `
 	put(t, "client/client.go", source)
-	put(t, "runtime/runtime.go", "package runtime\nfunc Ignored() { go func(){}() }\n")
 	put(t, "math/math.go", `package math
 //golean:export
 func Increment(x int64) int64 { return helper(x) }
@@ -273,19 +273,19 @@ func F(n uint) uint { `+tc.body+" }\n")
 func TestDirectValueMethods(t *testing.T) {
 	workspace(t, false)
 	put(t, "example.go", `package example
-type firstValue struct { value int64 }
-type secondValue int64
+type First struct { Value int64 }
+type Second int64
 
 //golean:export
-func (v firstValue) Add(n int64) int64 { return v.value + n }
-func (v secondValue) Add(n int64) int64 {
+func (v First) Add(n int64) int64 { return v.Value + n }
+func (v Second) Add(n int64) int64 {
 	if v == 0 { return n }
 	return n - 1
 }
 
 //golean:export
-func Run(first firstValue, second secondValue, n int64) int64 {
-	return first.Add(secondValue.Add(second, n))
+func Run(first First, second Second, n int64) int64 {
+	return first.Add(Second.Add(second, n))
 }
 `)
 	if err := command("transpile", "."); err != nil {
@@ -293,10 +293,10 @@ func Run(first firstValue, second secondValue, n int64) int64 {
 	}
 	model := get(t, "example.lean")
 	for _, want := range []string{
-		"def «firstValue$Add» («local:0» : ",
-		".«firstValue$Add» «local:0» (",
-		"def «secondValue$Add» («local:0» : _root_.Int64)",
-		".«secondValue$Add» «local:1» «local:2»",
+		"def «First$Add» («local:0» : ",
+		".«First$Add» «local:0» (",
+		"def «Second$Add» («local:0» : _root_.Int64)",
+		".«Second$Add» «local:1» «local:2»",
 	} {
 		if !strings.Contains(model, want) {
 			t.Errorf("expected %q in the generated model:\n%s", want, model)
@@ -473,21 +473,21 @@ func TestBoxedRecursion(t *testing.T) {
 	put(t, "model.go", `package model
 import "github.com/frederik-jatzkowski/go-lean/pkg/lean"
 
-type treeNode struct {
-	value byte
-	left, right lean.Box[treeNode]
+type Tree struct {
+	Value byte
+	Left, Right lean.Box[Tree]
 }
 
 //golean:termination:by sizeOf tree
-func Sum(tree treeNode) byte {
-	if tree.left.IsSome() {
-		left := Sum(tree.left.Get())
-		if tree.right.IsSome() {
-			return tree.value + left + Sum(tree.right.Get())
+func Sum(tree Tree) byte {
+	if tree.Left.IsSome() {
+		left := Sum(tree.Left.Get())
+		if tree.Right.IsSome() {
+			return tree.Value + left + Sum(tree.Right.Get())
 		}
-		return tree.value + left
+		return tree.Value + left
 	}
-	return tree.value
+	return tree.Value
 }
 
 //golean:termination:by n.toNat
@@ -500,12 +500,12 @@ func Countdown(n byte) byte {
 
 //golean:verify result : Demo = 10
 func Demo() byte {
-	empty := lean.Box[treeNode]{}
+	empty := lean.Box[Tree]{}
 	zero := empty.Get()
 	boxedZero := lean.NewBox(zero)
-	leaf := treeNode{value: 2, left: empty, right: empty}
-	tree := treeNode{value: 3, left: lean.NewBox(leaf), right: lean.NewBox(leaf)}
-	if !empty.IsSome() && boxedZero.IsSome() && !zero.left.IsSome() && !zero.right.IsSome() {
+	leaf := Tree{Value: 2, Left: empty, Right: empty}
+	tree := Tree{Value: 3, Left: lean.NewBox(leaf), Right: lean.NewBox(leaf)}
+	if !empty.IsSome() && boxedZero.IsSome() && !zero.Left.IsSome() && !zero.Right.IsSome() {
 		return Sum(tree) + Countdown(3)
 	}
 	return 0
@@ -515,7 +515,7 @@ func Demo() byte {
 		t.Fatal(err)
 	}
 	proofs := "model_proofs.lean"
-	put(t, proofs, strings.Replace(get(t, proofs), "  sorry", "  simp [Laws.«result», Demo, Sum.eq_def, Countdown.eq_def, treeNode.«field:left», treeNode.«field:right», treeNode.«field:value»]", 1))
+	put(t, proofs, strings.Replace(get(t, proofs), "  sorry", "  simp [Laws.«result», Demo, Sum.eq_def, Countdown.eq_def, Tree.«field:Left», Tree.«field:Right», Tree.«field:Value»]", 1))
 	if err := command("verify", "."); err != nil {
 		t.Fatal(err)
 	}
@@ -562,152 +562,5 @@ func Bad(n byte) byte { return Bad(n + 1) }
 	out, err := exec.Command("lake", "build", "+model").CombinedOutput()
 	if err == nil || !strings.Contains(string(out), "could not prove that the recursive call decreases") {
 		t.Fatalf("expected Lean to reject the decrease, got %v\n%s", err, out)
-	}
-}
-
-func TestGeneratedEnums(t *testing.T) {
-	workspace(t, true)
-	const model = `//golean:generate:enum first {
-//golean:generate:enum+  leaf,
-//golean:generate:enum+  link,
-//golean:generate:enum+  forest,
-//golean:generate:enum+  chain,
-//golean:generate:enum+  unit,
-//golean:generate:enum+ }
-package expr
-import "github.com/frederik-jatzkowski/go-lean/pkg/lean"
-type leaf struct { value int64 }
-type link struct { child second }
-type tail struct { child first }
-type forest struct { children lean.Array[first] }
-type chain struct { children lean.List[first] }
-type unit struct{}
-//golean:export
-func eval(e first) int64 {
-	switch v := e.variant.(type) {
-	case leaf:
-		return v.value
-	case link:
-		return evalTail(v.child)
-	case forest:
-		return 0
-	case chain:
-		return 0
-	case unit:
-		return 0
-	default:
-		panic("invalid first")
-	}
-}
-func evalTail(e second) int64 {
-	return MatchSecond(e, func(t tail) int64 { return eval(t.child) })
-}
-//golean:termination:by n.toNat
-func even(n byte) bool {
-	if n > 0 { return odd(n - 1) }
-	return true
-}
-//golean:termination:by n.toNat
-func odd(n byte) bool {
-	if n > 0 { return even(n - 1) }
-	return false
-}
-`
-	put(t, "expr/expr.go", model)
-	put(t, "expr/second.go", "//golean:generate:enum second { tail }\npackage expr\n")
-	put(t, "expr/excluded.go", "//go:build golean_excluded_fixture\n\n//golean:generate:enum first { bad }\npackage expr\n")
-	if err := command("transpile", "./expr"); err != nil {
-		t.Fatal(err)
-	}
-	goFile := get(t, "expr/lean.gen.go")
-	leanFile := get(t, "expr/expr.lean")
-	if !strings.Contains(goFile, "func First_Link(") ||
-		!strings.Contains(goFile, "func Eval(") ||
-		strings.Count(leanFile, "mutual\n") != 3 {
-		t.Fatal("missing generated API or mutual definitions")
-	}
-	if err := command("transpile", "./expr"); err != nil {
-		t.Fatal(err)
-	}
-	if goFile != get(t, "expr/lean.gen.go") || leanFile != get(t, "expr/expr.lean") {
-		t.Fatal("enum regeneration changed the output")
-	}
-	put(t, "caller/caller.go", `package caller
-import "example.test/model/expr"
-//golean:export
-func Demo() int64 { return expr.Eval(expr.First_Leaf(6)) }
-`)
-	put(t, "caller/caller_test.go", `package caller
-import (
-	"testing"
-	"example.test/model/expr"
-	"github.com/frederik-jatzkowski/go-lean/pkg/lean"
-)
-func zeroArray[T any](T) lean.Array[T] {
-	var zero T
-	return (lean.Array[T]{}).Push(zero)
-}
-func TestInvalidChild(t *testing.T) {
-	defer func() {
-		if recover() == nil { t.Error("constructor accepted an invalid array element") }
-	}()
-	expr.First_Forest(zeroArray(expr.First_Leaf(6)))
-}
-`)
-	if err := command("transpile", "./caller"); err != nil {
-		t.Fatal(err)
-	}
-	if out, err := exec.Command("go", "test", "./caller").CombinedOutput(); err != nil {
-		t.Fatalf("go test: %v\n%s", err, out)
-	}
-	if _, err := exec.LookPath("lake"); err == nil {
-		if err := command("verify", "./caller"); err != nil {
-			t.Fatal(err)
-		}
-	}
-	put(t, "expr/expr.go", model+"\nfunc ignored() { go func() {}() }\n")
-	if err := command("transpile", "./expr"); err == nil || !strings.Contains(err.Error(), "one result") {
-		t.Fatalf("expected an unreachable helper to fail whole-package checks, got %v", err)
-	}
-	put(t, "expr/expr.go", strings.Replace(model, "case leaf:\n\t\treturn v.value\n", "", 1))
-	if err := command("transpile", "./expr"); err == nil || !strings.Contains(err.Error(), "cover every variant") {
-		t.Fatalf("expected incomplete match diagnostic, got %v", err)
-	}
-	put(t, "expr/expr.go", strings.Replace(model, "case leaf:", "case *leaf:", 1))
-	if err := command("transpile", "./expr"); err == nil || !strings.Contains(err.Error(), "uncovered value variant") {
-		t.Fatalf("expected pointer case diagnostic, got %v", err)
-	}
-	put(t, "expr/expr.go", model+"\nfunc invalid() first { return first{} }\n")
-	if err := command("transpile", "./expr"); err == nil || !strings.Contains(err.Error(), "generated constructor") {
-		t.Fatalf("expected direct enum construction diagnostic, got %v", err)
-	}
-	put(t, "expr/expr.go", "package expr\n")
-	put(t, "expr/second.go", "package expr\n")
-	if err := command("transpile", "./expr"); err != nil {
-		t.Fatal(err)
-	}
-	missing(t, "expr/lean.gen.go")
-}
-
-func TestWholePackageSubset(t *testing.T) {
-	workspace(t, false)
-	put(t, "client.go", `package client
-import "example.test/model/dep"
-//golean:export
-func Entry() bool { return dep.Entry() }
-`)
-	for _, tc := range []struct {
-		source string
-		error  string
-	}{
-		{"func unused() bool { for {}; return false }", "raw loops"},
-		{"type Data struct{}", "must be private"},
-		{"type data struct { Value int64 }", "fields must be private"},
-		{"var mutable int64", "package variables"},
-	} {
-		put(t, "dep/dep.go", "package dep\n//golean:export\nfunc Entry() bool { return true }\n"+tc.source)
-		if err := command("transpile", "."); err == nil || !strings.Contains(err.Error(), tc.error) {
-			t.Fatalf("expected %q for %s, got %v", tc.error, tc.source, err)
-		}
 	}
 }

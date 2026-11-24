@@ -10,12 +10,12 @@ Each player starts with nine reserve stones. After placement, players slide to a
 
 ## go-lean features
 
-The private `gameState` and `boardState` use concrete value methods. Lean calls the generated move as `«gameState$move» s f t`, with the game first. The board stores stones in a `lean.Array[playerColor]`. Updating the source and destination creates a new board value. Public transition methods return a private result with `Next()` and `Accepted()` accessors. The terminal handles input and display in ordinary Go.
+The modeled `Game` and `Board` use concrete value methods. Lean calls the generated move as `«Game$move» s f t`, with the game first. The board stores stones in a `lean.Array[Player]`. Updating the source and destination creates a new board value. The public methods unpack modeled result records, and the terminal handles input and display in ordinary Go.
 
 The move-availability scan carries the board and player as immutable state:
 
 ```go
-return lean.FoldNUntil(24, boardScan{board: board, player: player}, findSlide).Stop
+return lean.FoldNUntil(24, boardScan{Board: board, Player: player}, findSlide).Stop
 ```
 
 `FoldN` counts stones, while `FoldNUntil` can stop on the first available slide or unprotected stone. [Modeled Go](morris.go)

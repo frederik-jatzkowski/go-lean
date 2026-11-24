@@ -2,14 +2,14 @@
 //
 //golean:verify:import spec
 //golean:verify all : let observe := fun result : machineResult =>
-//golean:verify+     let state := result.«field:state»
-//golean:verify+     (result.«field:status», StackMachineCompiler.Spec.State.mk
-//golean:verify+       state.«field:pc».toNat state.«field:stack»)
+//golean:verify+     let state := result.«field:State»
+//golean:verify+     (result.«field:Status», StackMachineCompiler.Spec.State.mk
+//golean:verify+       state.«field:PC».toNat state.«field:Stack»)
 //golean:verify+   StackMachineCompiler.Spec.Requirements.all
 //golean:verify+     (fun source =>
 //golean:verify+       let result := compile source
-//golean:verify+       let err := result.«field:diagnostic»
-//golean:verify+       ⟨result.«field:code», result.«field:typeCode», err.«field:kind», err.«field:offset».toNat⟩)
+//golean:verify+       let err := result.«field:Error»
+//golean:verify+       ⟨result.«field:Code», result.«field:Type», err.«field:Kind», err.«field:Offset».toNat⟩)
 //golean:verify+     (fun code pc stack aligned => observe (step code ⟨pc, stack⟩ aligned))
 //golean:verify+     (fun code => observe (runCode code))
 package compiler
@@ -20,18 +20,32 @@ import (
 	"github.com/frederik-jatzkowski/go-lean/pkg/lean"
 )
 
+type Type uint8
+
 const (
-	U8 uint8 = iota + 1
+	U8 Type = iota + 1
 	Bool
 )
 
+type DiagnosticKind uint8
+
 const (
-	NoDiagnostic uint8 = iota
+	NoDiagnostic DiagnosticKind = iota
 	CodeTooLarge
 	InvalidLexeme
 	SyntaxError
 	TypeMismatch
 )
+
+type Diagnostic struct {
+	Kind   DiagnosticKind
+	Offset uint
+}
+
+type Compiled struct {
+	Code []byte
+	Type Type
+}
 
 const (
 	integerToken byte = iota + 1
@@ -45,18 +59,18 @@ const (
 )
 
 type lexeme struct {
-	kind   byte
-	value  byte
-	offset uint
+	Kind   byte
+	Value  byte
+	Offset uint
 }
 
 type diagnostic struct {
-	kind   uint8
-	offset uint
+	Kind   DiagnosticKind
+	Offset uint
 }
 
 func noDiagnostic() diagnostic {
-	return diagnostic{kind: NoDiagnostic, offset: 0}
+	return diagnostic{Kind: NoDiagnostic, Offset: 0}
 }
 
 func isSpace(b byte) bool {
@@ -68,8 +82,8 @@ func isDigit(b byte) bool {
 }
 
 type classification struct {
-	kind  byte
-	value byte
+	Kind  byte
+	Value byte
 }
 
 func timesTen(n byte) byte {
@@ -79,19 +93,19 @@ func timesTen(n byte) byte {
 }
 
 func decimal(a, b, c byte, width uint) classification {
-	invalid := classification{kind: 0, value: 0}
+	invalid := classification{Kind: 0, Value: 0}
 	if !isDigit(a) {
 		return invalid
 	}
 	if width == 1 {
-		return classification{kind: integerToken, value: a - '0'}
+		return classification{Kind: integerToken, Value: a - '0'}
 	}
 	if a == '0' || !isDigit(b) {
 		return invalid
 	}
 	prefix := timesTen(a-'0') + (b - '0')
 	if width == 2 {
-		return classification{kind: integerToken, value: prefix}
+		return classification{Kind: integerToken, Value: prefix}
 	}
 	if width != 3 || !isDigit(c) {
 		return invalid
@@ -99,7 +113,7 @@ func decimal(a, b, c byte, width uint) classification {
 	if a > '2' || (a == '2' && (b > '5' || (b == '5' && c > '5'))) {
 		return invalid
 	}
-	return classification{kind: integerToken, value: timesTen(prefix) + (c - '0')}
+	return classification{Kind: integerToken, Value: timesTen(prefix) + (c - '0')}
 }
 
 func classify(source lean.ByteArray) classification {
@@ -109,114 +123,114 @@ func classify(source lean.ByteArray) classification {
 	c := source.Get(2).UnwrapOr(0)
 	if width == 2 {
 		if a == 'e' && b == 'q' {
-			return classification{kind: eqToken, value: 0}
+			return classification{Kind: eqToken, Value: 0}
 		}
 		if a == 'l' && b == 't' {
-			return classification{kind: ltToken, value: 0}
+			return classification{Kind: ltToken, Value: 0}
 		}
 	}
 	if width == 3 {
 		if a == 'a' && b == 'd' && c == 'd' {
-			return classification{kind: addToken, value: 0}
+			return classification{Kind: addToken, Value: 0}
 		}
 		if a == 's' && b == 'u' && c == 'b' {
-			return classification{kind: subToken, value: 0}
+			return classification{Kind: subToken, Value: 0}
 		}
 		if a == 'a' && b == 'n' && c == 'd' {
-			return classification{kind: andToken, value: 0}
+			return classification{Kind: andToken, Value: 0}
 		}
 		if a == 'n' && b == 'o' && c == 't' {
-			return classification{kind: notToken, value: 0}
+			return classification{Kind: notToken, Value: 0}
 		}
 	}
 	if width == 4 && a == 't' && b == 'r' && c == 'u' && source.Get(3).UnwrapOr(0) == 'e' {
-		return classification{kind: booleanToken, value: 1}
+		return classification{Kind: booleanToken, Value: 1}
 	}
 	if width == 5 && a == 'f' && b == 'a' && c == 'l' &&
 		source.Get(3).UnwrapOr(0) == 's' && source.Get(4).UnwrapOr(0) == 'e' {
-		return classification{kind: booleanToken, value: 0}
+		return classification{Kind: booleanToken, Value: 0}
 	}
 	return decimal(a, b, c, width)
 }
 
 type scanState struct {
-	start  uint
-	inWord bool
+	Start  uint
+	InWord bool
 }
 
 type scanResult struct {
-	state  scanState
-	closed bool
+	State  scanState
+	Closed bool
 }
 
 func scanByte(state scanState, index uint, b byte) scanResult {
 	if isSpace(b) {
-		return scanResult{state: scanState{start: state.start, inWord: false}, closed: state.inWord}
+		return scanResult{State: scanState{Start: state.Start, InWord: false}, Closed: state.InWord}
 	}
-	if state.inWord {
-		return scanResult{state: state, closed: false}
+	if state.InWord {
+		return scanResult{State: state, Closed: false}
 	}
-	return scanResult{state: scanState{start: index, inWord: true}, closed: false}
+	return scanResult{State: scanState{Start: index, InWord: true}, Closed: false}
 }
 
 type lexer struct {
-	source     lean.ByteArray
-	words      lean.Array[lexeme]
-	scan       scanState
-	diagnostic diagnostic
+	Source lean.ByteArray
+	Words  lean.Array[lexeme]
+	Scan   scanState
+	Error  diagnostic
 }
 
 func scanSourceByte(index uint, state lexer) lean.FoldControl[lexer] {
-	scanned := scanByte(state.scan, index, state.source.Get(index).UnwrapOr(' '))
-	if !scanned.closed {
-		return lean.FoldControl[lexer]{State: lexer{source: state.source, words: state.words, scan: scanned.state, diagnostic: state.diagnostic}, Stop: false}
+	scanned := scanByte(state.Scan, index, state.Source.Get(index).UnwrapOr(' '))
+	if !scanned.Closed {
+		return lean.FoldControl[lexer]{State: lexer{Source: state.Source, Words: state.Words, Scan: scanned.State, Error: state.Error}, Stop: false}
 	}
-	return closeWord(index, state, scanned.state)
+	return closeWord(index, state, scanned.State)
 }
 
 func closeWord(index uint, state lexer, scan scanState) lean.FoldControl[lexer] {
-	start := scan.start
-	word := classify(state.source.Extract(start, index))
-	if word.kind == 0 {
+	start := scan.Start
+	word := classify(state.Source.Extract(start, index))
+	if word.Kind == 0 {
 		return lexError(state, InvalidLexeme, start)
 	}
-	words := state.words.Push(lexeme{kind: word.kind, value: word.value, offset: start})
-	return lean.FoldControl[lexer]{State: lexer{source: state.source, words: words, scan: scan, diagnostic: state.diagnostic}, Stop: false}
+	words := state.Words.Push(lexeme{Kind: word.Kind, Value: word.Value, Offset: start})
+	return lean.FoldControl[lexer]{State: lexer{Source: state.Source, Words: words, Scan: scan, Error: state.Error}, Stop: false}
 }
 
-func lexError(state lexer, kind uint8, offset uint) lean.FoldControl[lexer] {
+func lexError(state lexer, kind DiagnosticKind, offset uint) lean.FoldControl[lexer] {
 	return lean.FoldControl[lexer]{
-		State: lexer{source: state.source, words: state.words, scan: state.scan, diagnostic: diagnostic{kind: kind, offset: offset}},
+		State: lexer{Source: state.Source, Words: state.Words, Scan: state.Scan, Error: diagnostic{Kind: kind, Offset: offset}},
 		Stop:  true,
 	}
 }
 
 func tokenize(source lean.ByteArray) lexer {
-	initial := lexer{source: source, words: lean.Array[lexeme]{}, scan: scanState{start: 0, inWord: false}, diagnostic: noDiagnostic()}
+	initial := lexer{Source: source, Words: lean.Array[lexeme]{}, Scan: scanState{Start: 0, InWord: false}, Error: noDiagnostic()}
 	scanned := lean.FoldNUntil(source.Size(), initial, scanSourceByte)
-	if scanned.Stop || !scanned.State.scan.inWord {
+	if scanned.Stop || !scanned.State.Scan.InWord {
 		return scanned.State
 	}
-	return closeWord(source.Size(), scanned.State, scanState{start: scanned.State.scan.start, inWord: false}).State
+	return closeWord(source.Size(), scanned.State, scanState{Start: scanned.State.Scan.Start, InWord: false}).State
 }
 
 type expression struct {
-	word  lexeme
-	left  lean.Box[expression]
-	right lean.Box[expression]
+	Word  lexeme
+	Left  lean.Box[expression]
+	Right lean.Box[expression]
 }
 
 func leaf(word lexeme) expression {
-	return expression{word: word, left: lean.Box[expression]{}, right: lean.Box[expression]{}}
+	return expression{Word: word, Left: lean.Box[expression]{}, Right: lean.Box[expression]{}}
 }
 
 func emptyExpression() expression {
-	return leaf(lexeme{kind: 0, value: 0, offset: 0})
+	return leaf(lexeme{Kind: 0, Value: 0, Offset: 0})
 }
 
 type parser struct {
-	words lean.Array[lexeme]
-	roots lean.Array[expression]
+	Words lean.Array[lexeme]
+	Roots lean.Array[expression]
 }
 
 func arity(kind byte) uint {
@@ -230,125 +244,125 @@ func arity(kind byte) uint {
 }
 
 func parseWord(index uint, state parser) lean.FoldControl[parser] {
-	word := state.words.Get(state.words.Size() - 1 - index).UnwrapOr(lexeme{kind: 0, value: 0, offset: 0})
-	operands := arity(word.kind)
-	roots := state.roots
+	word := state.Words.Get(state.Words.Size() - 1 - index).UnwrapOr(lexeme{Kind: 0, Value: 0, Offset: 0})
+	operands := arity(word.Kind)
+	roots := state.Roots
 	depth := roots.Size()
 	if depth < operands {
 		return lean.FoldControl[parser]{State: state, Stop: true}
 	}
 	if operands == 0 {
-		return lean.FoldControl[parser]{State: parser{words: state.words, roots: roots.Push(leaf(word))}, Stop: false}
+		return lean.FoldControl[parser]{State: parser{Words: state.Words, Roots: roots.Push(leaf(word))}, Stop: false}
 	}
 	left := roots.Get(depth - 1).UnwrapOr(emptyExpression())
 	if operands == 1 {
-		node := expression{word: word, left: lean.NewBox(left), right: lean.Box[expression]{}}
-		return lean.FoldControl[parser]{State: parser{words: state.words, roots: roots.Pop().Push(node)}, Stop: false}
+		node := expression{Word: word, Left: lean.NewBox(left), Right: lean.Box[expression]{}}
+		return lean.FoldControl[parser]{State: parser{Words: state.Words, Roots: roots.Pop().Push(node)}, Stop: false}
 	}
 	right := roots.Get(depth - 2).UnwrapOr(emptyExpression())
-	node := expression{word: word, left: lean.NewBox(left), right: lean.NewBox(right)}
-	return lean.FoldControl[parser]{State: parser{words: state.words, roots: roots.Pop().Pop().Push(node)}, Stop: false}
+	node := expression{Word: word, Left: lean.NewBox(left), Right: lean.NewBox(right)}
+	return lean.FoldControl[parser]{State: parser{Words: state.Words, Roots: roots.Pop().Pop().Push(node)}, Stop: false}
 }
 
 func parse(words lean.Array[lexeme]) lean.FoldControl[parser] {
-	initial := parser{words: words, roots: lean.Array[expression]{}}
+	initial := parser{Words: words, Roots: lean.Array[expression]{}}
 	return lean.FoldNUntil(words.Size(), initial, parseWord)
 }
 
 type signature struct {
-	operand uint8
-	result  uint8
+	Operand Type
+	Result  Type
 }
 
 func operatorTypes(kind byte) signature {
 	if kind == addToken || kind == subToken {
-		return signature{operand: U8, result: U8}
+		return signature{Operand: U8, Result: U8}
 	}
 	if kind == eqToken || kind == ltToken {
-		return signature{operand: U8, result: Bool}
+		return signature{Operand: U8, Result: Bool}
 	}
-	return signature{operand: Bool, result: Bool}
+	return signature{Operand: Bool, Result: Bool}
 }
 
 type typing struct {
-	typeCode   uint8
-	diagnostic diagnostic
+	Type  Type
+	Error diagnostic
 }
 
-func typed(kind uint8) typing {
-	return typing{typeCode: kind, diagnostic: noDiagnostic()}
+func typed(kind Type) typing {
+	return typing{Type: kind, Error: noDiagnostic()}
 }
 
 func mismatch(offset uint) typing {
-	return typing{typeCode: 0, diagnostic: diagnostic{kind: TypeMismatch, offset: offset}}
+	return typing{Type: 0, Error: diagnostic{Kind: TypeMismatch, Offset: offset}}
 }
 
 //golean:termination:by sizeOf expr
 func checkExpression(expr expression) typing {
-	word := expr.word
-	if word.kind == integerToken {
+	word := expr.Word
+	if word.Kind == integerToken {
 		return typed(U8)
 	}
-	if word.kind == booleanToken {
+	if word.Kind == booleanToken {
 		return typed(Bool)
 	}
-	if !expr.left.IsSome() {
-		return mismatch(word.offset)
+	if !expr.Left.IsSome() {
+		return mismatch(word.Offset)
 	}
-	if expr.right.IsSome() {
-		right := checkExpression(expr.right.Get())
-		if right.diagnostic.kind != NoDiagnostic {
+	if expr.Right.IsSome() {
+		right := checkExpression(expr.Right.Get())
+		if right.Error.Kind != NoDiagnostic {
 			return right
 		}
-		left := checkExpression(expr.left.Get())
-		if left.diagnostic.kind != NoDiagnostic {
+		left := checkExpression(expr.Left.Get())
+		if left.Error.Kind != NoDiagnostic {
 			return left
 		}
-		sig := operatorTypes(word.kind)
-		if left.typeCode != sig.operand || right.typeCode != sig.operand {
-			return mismatch(word.offset)
+		sig := operatorTypes(word.Kind)
+		if left.Type != sig.Operand || right.Type != sig.Operand {
+			return mismatch(word.Offset)
 		}
-		return typed(sig.result)
+		return typed(sig.Result)
 	}
-	operand := checkExpression(expr.left.Get())
-	if operand.diagnostic.kind != NoDiagnostic {
+	operand := checkExpression(expr.Left.Get())
+	if operand.Error.Kind != NoDiagnostic {
 		return operand
 	}
-	if operand.typeCode != Bool {
-		return mismatch(word.offset)
+	if operand.Type != Bool {
+		return mismatch(word.Offset)
 	}
 	return typed(Bool)
 }
 
 type instruction struct {
-	opcode  byte
-	operand byte
+	Opcode  byte
+	Operand byte
 }
 
 func encode(kind, value byte) instruction {
 	if kind == integerToken || kind == booleanToken {
-		return instruction{opcode: Push, operand: value}
+		return instruction{Opcode: Push, Operand: value}
 	}
-	return instruction{opcode: kind - addToken + Add, operand: 0}
+	return instruction{Opcode: kind - addToken + Add, Operand: 0}
 }
 
 func emitWord(word lexeme, code lean.ByteArray) lean.ByteArray {
-	inst := encode(word.kind, word.value)
-	return code.Push(inst.opcode).Push(inst.operand)
+	inst := encode(word.Kind, word.Value)
+	return code.Push(inst.Opcode).Push(inst.Operand)
 }
 
 //golean:termination:by sizeOf expr
 func emitExpression(expr expression, code lean.ByteArray) lean.ByteArray {
-	if !expr.left.IsSome() {
-		return emitWord(expr.word, code)
+	if !expr.Left.IsSome() {
+		return emitWord(expr.Word, code)
 	}
-	if expr.right.IsSome() {
-		right := emitExpression(expr.right.Get(), code)
-		left := emitExpression(expr.left.Get(), right)
-		return emitWord(expr.word, left)
+	if expr.Right.IsSome() {
+		right := emitExpression(expr.Right.Get(), code)
+		left := emitExpression(expr.Left.Get(), right)
+		return emitWord(expr.Word, left)
 	}
-	operand := emitExpression(expr.left.Get(), code)
-	return emitWord(expr.word, operand)
+	operand := emitExpression(expr.Left.Get(), code)
+	return emitWord(expr.Word, operand)
 }
 
 func emit(expr expression) lean.ByteArray {
@@ -356,13 +370,13 @@ func emit(expr expression) lean.ByteArray {
 }
 
 type compilation struct {
-	code       lean.ByteArray
-	typeCode   uint8
-	diagnostic diagnostic
+	Code  lean.ByteArray
+	Type  Type
+	Error diagnostic
 }
 
 func failed(d diagnostic) compilation {
-	return compilation{code: lean.ByteArray{}, typeCode: 0, diagnostic: d}
+	return compilation{Code: lean.ByteArray{}, Type: 0, Error: d}
 }
 
 const maxEncodedNodes = (math.MaxInt - 2) / 2
@@ -372,26 +386,33 @@ func codeFits(nodes uint) bool { return nodes <= maxEncodedNodes }
 //golean:export
 func compile(source lean.ByteArray) compilation {
 	lexed := tokenize(source)
-	if lexed.diagnostic.kind != NoDiagnostic {
-		return failed(lexed.diagnostic)
+	if lexed.Error.Kind != NoDiagnostic {
+		return failed(lexed.Error)
 	}
-	parsed := parse(lexed.words)
-	if parsed.Stop || parsed.State.roots.Size() != 1 {
-		return failed(diagnostic{kind: SyntaxError, offset: source.Size()})
+	parsed := parse(lexed.Words)
+	if parsed.Stop || parsed.State.Roots.Size() != 1 {
+		return failed(diagnostic{Kind: SyntaxError, Offset: source.Size()})
 	}
-	root := parsed.State.roots.Get(0).UnwrapOr(emptyExpression())
+	root := parsed.State.Roots.Get(0).UnwrapOr(emptyExpression())
 	checked := checkExpression(root)
-	if checked.diagnostic.kind != NoDiagnostic {
-		return failed(checked.diagnostic)
+	if checked.Error.Kind != NoDiagnostic {
+		return failed(checked.Error)
 	}
-	if !codeFits(lexed.words.Size()) {
-		return failed(diagnostic{kind: CodeTooLarge, offset: source.Size()})
+	if !codeFits(lexed.Words.Size()) {
+		return failed(diagnostic{Kind: CodeTooLarge, Offset: source.Size()})
 	}
-	return compilation{code: emit(root), typeCode: checked.typeCode, diagnostic: noDiagnostic()}
+	return compilation{Code: emit(root), Type: checked.Type, Error: noDiagnostic()}
 }
 
-func CompileBytes(source lean.ByteArray) compilation { return compile(source) }
-func (r compilation) Code() lean.ByteArray           { return r.code }
-func (r compilation) Type() uint8                    { return r.typeCode }
-func (r compilation) DiagnosticKind() uint8          { return r.diagnostic.kind }
-func (r compilation) DiagnosticOffset() uint         { return r.diagnostic.offset }
+// Compile translates source or reports the first compiler diagnostic.
+func Compile(source []byte) (Compiled, Diagnostic) {
+	result := compile(lean.ByteArrayFromBytes(source))
+	if result.Error.Kind != NoDiagnostic {
+		return Compiled{}, Diagnostic{Kind: result.Error.Kind, Offset: result.Error.Offset}
+	}
+	compiled := Compiled{Code: make([]byte, result.Code.Size()), Type: result.Type}
+	for i := range compiled.Code {
+		compiled.Code[i] = result.Code.Get(uint(i)).UnwrapOr(0)
+	}
+	return compiled, Diagnostic{}
+}

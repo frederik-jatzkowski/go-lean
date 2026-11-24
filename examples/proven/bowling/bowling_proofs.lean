@@ -10,38 +10,38 @@ theorem startEmpty : Laws.startEmpty := rfl
 
 theorem rejectionUnchanged : Laws.rejectionUnchanged := by
   intro s pins rejected
-  unfold «gameState$roll» at rejected ⊢
-  repeat (split <;> try simp_all [«gameState$record»])
+  unfold «Game$roll» at rejected ⊢
+  repeat (split <;> try simp_all [«Game$record»])
 
 theorem finalScore : Laws.finalScore := by
   intro s
-  simp [«gameState$score»]
+  simp [«Game$score»]
 
 theorem completedGameIsStable : Laws.completedGameIsStable := by
   intro game total pins complete
   have frame : game.«field:frame» = 10 := by
     by_cases frame : game.«field:frame» = 10
     · exact frame
-    · simp [«gameState$score», frame] at complete
-  simp [«gameState$roll», frame, complete]
+    · simp [«Game$score», frame] at complete
+  simp [«Game$roll», frame, complete]
 
 -- Project the named Go results into the pair representation of the public API.
-def rollPair (game : gameState) (pins : Int64) : gameState × Bool :=
-  let result := «gameState$roll» game pins
+def rollPair (game : Game) (pins : Int64) : Game × Bool :=
+  let result := «Game$roll» game pins
   (result.«field:game», result.«field:accepted»)
 
-def scorePair (game : gameState) : Int64 × Bool :=
-  let result := «gameState$score» game
+def scorePair (game : Game) : Int64 × Bool :=
+  let result := «Game$score» game
   (result.«field:total», result.«field:complete»)
 
 private abbrev run := replay rollPair
 
-private def pack (n stage rack total one two : Int) : gameState :=
+private def pack (n stage rack total one two : Int) : Game :=
   ⟨Int64.ofInt n, Int64.ofInt stage, Int64.ofInt rack,
     Int64.ofInt total, Int64.ofInt one, Int64.ofInt two⟩
 
 /-- Relate the reference phase and pending score credits to a Go game value. -/
-def encode (phase : Phase) (total one two : Int) : gameState :=
+def encode (phase : Phase) (total one two : Int) : Game :=
   match phase with
   | .first n => pack n 0 0 total one two
   | .second n a => pack n 1 (10 - a) total one two
@@ -53,7 +53,7 @@ private def owesNext (balls : Nat) : Int := if balls = 0 then 0 else 1
 private def owesSecond (balls : Nat) : Int := if balls = 2 then 1 else 0
 
 -- Move pending credits forward only after applying the current delivery.
-private def modelRoll (phase : Phase) (total one two pins : Int) : gameState × Bool :=
+private def modelRoll (phase : Phase) (total one two pins : Int) : Game × Bool :=
   match delivery phase pins with
   | none => (encode phase total one two, false)
   | some (next, balls) =>
@@ -90,7 +90,7 @@ theorem rollMatchesRules (phase : Phase) (valid : phase.valid)
     rollPair (encode phase total one two) pins =
       modelRoll phase total one two pins.toInt := by
   by_cases neg : pins.toInt < 0
-  · cases phase <;> simp [encode, pack, rollPair, «gameState$roll», modelRoll, delivery,
+  · cases phase <;> simp [encode, pack, rollPair, «Game$roll», modelRoll, delivery,
       Int64.lt_iff_toInt_lt, neg]
   have machineNeg : ¬ pins < (0 : Int64) := by simpa [Int64.lt_iff_toInt_lt] using neg
   by_cases high : 10 < pins.toInt
@@ -113,7 +113,7 @@ theorem rollMatchesRules (phase : Phase) (valid : phase.valid)
       all_goals try (exfalso; omega)
       all_goals try have hWord := strikeWord strike
       all_goals
-        simp [encode, pack, rollPair, «gameState$roll», «gameState$rack», «gameState$record», «nextBonus», «secondBonus», creditWord pins credits,
+        simp [encode, pack, rollPair, «Game$roll», «Game$rack», «Game$record», «nextBonus», «secondBonus», creditWord pins credits,
           modelRoll, delivery, nextFrame, owesNext, owesSecond, Int64.ofInt_add,
           Int64.ofInt_sub, machineNeg, neg, tenLt, ltTen, n9, n10, hn9, high, strike, below] <;> simp_all
     | second n a =>
@@ -135,7 +135,7 @@ theorem rollMatchesRules (phase : Phase) (valid : phase.valid)
       by_cases overRack : 10 < a + pins.toInt
       all_goals
         by_cases hn9 : n = 9 <;> by_cases eqRack : a + pins.toInt = 10 <;>
-          simp [encode, pack, rollPair, «gameState$roll», «gameState$rack», «gameState$record», «nextBonus», «secondBonus», creditWord pins credits,
+          simp [encode, pack, rollPair, «Game$roll», «Game$rack», «Game$record», «nextBonus», «secondBonus», creditWord pins credits,
           modelRoll, delivery, nextFrame, owesNext, owesSecond, Int64.ofInt_add,
           machineNeg, neg, n9, n10, hn9, high, over, spare, over', spare', overRack, eqRack]
       all_goals try have pinsEq := spare'.mpr eqRack
@@ -150,7 +150,7 @@ theorem rollMatchesRules (phase : Phase) (valid : phase.valid)
       all_goals try (exfalso; omega)
       all_goals try have hWord := strikeWord strike
       all_goals
-        simp [encode, pack, rollPair, «gameState$roll», «gameState$rack», «gameState$record», «nextBonus», «secondBonus», creditWord pins credits, modelRoll, delivery,
+        simp [encode, pack, rollPair, «Game$roll», «Game$rack», «Game$record», «nextBonus», «secondBonus», creditWord pins credits, modelRoll, delivery,
           owesNext, owesSecond, Int64.ofInt_add, Int64.ofInt_sub,
           machineNeg, neg, high, strikeEq, strike, tenLt, ltTen, below] <;> simp_all
     | fill rack =>
@@ -160,11 +160,11 @@ theorem rollMatchesRules (phase : Phase) (valid : phase.valid)
         rw [Int64.lt_iff_toInt_lt, hr]
       by_cases within : pins.toInt ≤ rack
       all_goals
-        simp [encode, pack, rollPair, «gameState$roll», «gameState$rack», «gameState$record», «nextBonus», «secondBonus», creditWord pins credits,
+        simp [encode, pack, rollPair, «Game$roll», «Game$rack», «Game$record», «nextBonus», «secondBonus», creditWord pins credits,
           modelRoll, delivery, owesNext, owesSecond, Int64.ofInt_add,
           machineNeg, neg, high, over, within, show (rack < pins.toInt) ↔ ¬ pins.toInt ≤ rack by omega]
       all_goals omega
-    | done => simp [encode, pack, rollPair, «gameState$roll», modelRoll, delivery, neg, high]
+    | done => simp [encode, pack, rollPair, «Game$roll», modelRoll, delivery, neg, high]
 
 
 private def budget : Phase → Int
@@ -320,11 +320,11 @@ private theorem scoreAgrees (phase : Phase) (valid : phase.valid) (total one two
   cases phase with
   | first n =>
     obtain ⟨lo, hi⟩ := valid
-    simp [encode, pack, scorePair, «gameState$score», scoreFrom, answer, notDone n lo hi]
+    simp [encode, pack, scorePair, «Game$score», scoreFrom, answer, notDone n lo hi]
   | second n a =>
     obtain ⟨⟨lo, hi⟩, _⟩ := valid
-    simp [encode, pack, scorePair, «gameState$score», scoreFrom, answer, notDone n lo hi]
-  | afterStrike | fill | done => simp [encode, pack, scorePair, «gameState$score», scoreFrom, answer]
+    simp [encode, pack, scorePair, «Game$score», scoreFrom, answer, notDone n lo hi]
+  | afterStrike | fill | done => simp [encode, pack, scorePair, «Game$score», scoreFrom, answer]
 
 -- Each pending obligation adds to the score of the accepted suffix. The
 -- reference scorer gets the same deliveries by looking ahead from their frame.
@@ -364,15 +364,15 @@ private theorem runAgrees (phase : Phase) (valid : phase.valid)
         simp [scoreFrom, hd, hs]
         exact congrArg (fun n => answer (some n)) hsum
 
-private theorem collectAttempts (game : gameState) (prior : List Bool) (attempts : List Int64) :
-    «fold».list replayAttempt attempts (replayResult.mk game prior) =
-      replayResult.mk (run game attempts).2 ((run game attempts).1.reverse ++ prior) := by
+private theorem collectAttempts (game : Game) (prior : List Bool) (attempts : List Int64) :
+    «fold».list replayAttempt attempts (ReplayResult.mk game prior) =
+      ReplayResult.mk (run game attempts).2 ((run game attempts).1.reverse ++ prior) := by
   induction attempts generalizing game prior with
   | nil => rfl
   | cons pins attempts ih =>
     change «fold».list replayAttempt attempts
-      (replayResult.mk («gameState$roll» game pins).«field:game»
-        ((«gameState$roll» game pins).«field:accepted» :: prior)) = _
+      (ReplayResult.mk («Game$roll» game pins).«field:game»
+        ((«Game$roll» game pins).«field:accepted» :: prior)) = _
     rw [ih]
     simp [replay, rollPair, List.append_assoc]
 
@@ -386,7 +386,7 @@ private theorem orderDecisions (pending ordered : List Bool) :
     simp [List.append_assoc]
 
 private theorem replayAgrees (attempts : List Int64) :
-    Replay attempts = replayResult.mk (run Start attempts).2 (run Start attempts).1 := by
+    Replay attempts = ReplayResult.mk (run Start attempts).2 (run Start attempts).1 := by
   simp [Replay, collectAttempts, orderDecisions]
 
 /-- The model agrees on the acceptance of every attempt, and on whether a
@@ -421,215 +421,6 @@ theorem goScoreBounds (attempts : List Int64) (total : Int64)
     simp [hr, answer] at scoreEq
     rw [scoreEq, Int64.toInt_ofInt_of_le (by omega) (by omega)]
     exact ⟨lo, hi⟩
-
-private def encodeToken : Bowling.Grammar.Token → token
-  | .count n => ⟨n, false⟩
-  | .comma => ⟨0, true⟩
-
-private def lexResult (r : lexer × Bool) : Option (List token) :=
-  if r.2 then none else some (flushOne r.1).«field:tokens»
-
-private theorem byteAtList (data : ByteArray) (i : Nat) :
-    data[i]? = data.data.toList[i]? := by
-  by_cases h : i < data.size
-  · simp [getElem?_pos, h, ByteArray.getElem_eq_getElem_data, ByteArray.size_data]
-  · simp [getElem?_neg, h, ByteArray.size_data]
-
-private theorem spellOne (bs : List UInt8) (h : bs.head? ≠ some 48) :
-    Bowling.Grammar.spell (49 :: bs) =
-      (Bowling.Grammar.spell bs).map (· ++ [.count 1]) := by
-  cases bs <;> simp_all [Bowling.Grammar.spell]
-
-private theorem spellTen (bs : List UInt8) :
-    Bowling.Grammar.spell (49 :: 48 :: bs) =
-      (Bowling.Grammar.spell bs).map (· ++ [.count 10]) := by
-  simp [Bowling.Grammar.spell]
-
-private def spelled (pending : Bool) (bs : List UInt8) (ts : List token) :
-    Option (List token) :=
-  (Bowling.Grammar.spell (if pending then 49 :: bs else bs)).map
-    fun more => more.map encodeToken ++ ts
-
-private theorem singleCount (b : UInt8) (bounds : 48 ≤ b ∧ b ≤ 57) :
-    digit b = Int64.ofNat (b.toNat - 48) := by
-  have limits : 48 ≤ b.toNat ∧ b.toNat ≤ 57 := by
-    simpa [UInt8.le_iff_toNat_le] using bounds
-  have choices : b.toNat = 48 ∨ b.toNat = 49 ∨ b.toNat = 50 ∨ b.toNat = 51 ∨
-      b.toNat = 52 ∨ b.toNat = 53 ∨ b.toNat = 54 ∨ b.toNat = 55 ∨
-      b.toNat = 56 ∨ b.toNat = 57 := by omega
-  rcases choices with h | h | h | h | h | h | h | h | h | h <;>
-    have eq := congrArg UInt8.ofNat h <;>
-    simp at eq <;> subst b <;> rfl
-
-private theorem spellSingle (b : UInt8) (bs : List UInt8) (h : b ≠ 49) :
-    Bowling.Grammar.spell (b :: bs) =
-      (Bowling.Grammar.single b).bind fun ts => (Bowling.Grammar.spell bs).map (· ++ ts) := by
-  rw [Bowling.Grammar.spell.eq_def]
-  simp [h]
-
-set_option linter.unusedSimpArgs false in
-private theorem scanSingleSpec (b : UInt8) (data : ByteArray) (ts : List token)
-    (bs : List UInt8) :
-    let r := scanSingle b ⟨data, ts, false⟩
-    (if r.2 then none else spelled r.1.«field:pending» bs r.1.«field:tokens») =
-      spelled false (b :: bs) ts := by
-  by_cases one : b = 49
-  · subst b
-    simp [scanSingle, spelled]
-  by_cases comma : b = 44
-  · subst b
-    cases h : Bowling.Grammar.spell bs <;>
-      simp [scanSingle, spelled, spellSingle, Bowling.Grammar.single, h, encodeToken]
-  by_cases ws : b = 32 ∨ b = 9 ∨ b = 13 ∨ b = 10
-  · rcases ws with h | h | h | h <;> subst b <;>
-      cases h : Bowling.Grammar.spell bs <;>
-      simp [scanSingle, spelled, spellSingle, Bowling.Grammar.single, h]
-  by_cases lo : 48 ≤ b
-  · by_cases hi : b ≤ 57
-    · have value := singleCount b ⟨lo, hi⟩
-      cases h : Bowling.Grammar.spell bs <;>
-        simp [scanSingle, spelled, spellSingle, Bowling.Grammar.single,
-          h, one, comma, ws, lo, hi, value, encodeToken]
-    · simp [scanSingle, spelled, spellSingle, Bowling.Grammar.single,
-        one, comma, ws, lo, hi, or_assoc]
-  · simp [scanSingle, spelled, spellSingle, Bowling.Grammar.single,
-      one, comma, ws, lo, or_assoc]
-
-private theorem scanByteSpec (i : UInt64) (data : ByteArray) (b : UInt8)
-    (atByte : data[i.toNat]? = some b) (ts : List token) (pending : Bool) (bs : List UInt8) :
-    let r := lexByte i ⟨data, ts, pending⟩
-    (if r.2 then none else spelled r.1.«field:pending» bs r.1.«field:tokens») =
-      spelled pending (b :: bs) ts := by
-  dsimp only
-  cases pending
-  · simpa [lexByte, atByte, flushOne] using scanSingleSpec b data ts bs
-  · by_cases zero : b = 48
-    · subst b
-      cases h : Bowling.Grammar.spell bs <;>
-        simp [lexByte, atByte, spelled, spellTen, h, encodeToken]
-    · rw [show spelled true (b :: bs) ts =
-          spelled false (b :: bs) (encodeToken (.count 1) :: ts) by
-          simp only [spelled, Bool.false_eq_true, ↓reduceIte, spellOne (b :: bs) (by simpa using zero)]
-          cases Bowling.Grammar.spell (b :: bs) <;> simp]
-      simp only [lexByte, atByte, Option.getD_some, zero, decide_false,
-        Bool.false_eq_true, ↓reduceIte, flushOne, Bool.not_true, encodeToken]
-      exact scanSingleSpec b data (⟨1, false⟩ :: ts) bs
-
-private theorem countLex (data : ByteArray) (bs : List UInt8) (i : UInt64)
-    (suffix : data.data.toList.drop i.toNat = bs)
-    (fits : data.size < UInt64.size) (ts : List token) (pending : Bool) :
-    lexResult («fold».countUntil lexByte bs.length i ⟨data, ts, pending⟩) =
-      spelled pending bs ts := by
-  induction bs generalizing i ts pending with
-  | nil => cases pending <;> simp [«fold».countUntil, lexResult, flushOne, spelled,
-      Bowling.Grammar.spell, encodeToken]
-  | cons b bs ih =>
-    have atByte : data[i.toNat]? = some b := by
-      rw [byteAtList]
-      simpa [List.getElem?_drop] using congrArg List.head? suffix
-    have bound : i.toNat < data.size := by
-      have := getElem?_eq_some_iff.mp atByte
-      exact this.1
-    have next : (i + 1).toNat = i.toNat + 1 := by
-      rw [UInt64.toNat_add, show (1 : UInt64).toNat = 1 by rfl, Nat.mod_eq_of_lt]
-      change i.toNat + 1 < UInt64.size
-      omega
-    have rest : data.data.toList.drop (i + 1).toNat = bs := by
-      rw [next, ← List.drop_drop]
-      simp [suffix]
-    have step := scanByteSpec i data b atByte ts pending bs
-    rw [List.length_cons, «fold».countUntil]
-    generalize hr : lexByte i ⟨data, ts, pending⟩ = r at step ⊢
-    obtain ⟨⟨input, tokens, pending'⟩, stop⟩ := r
-    have same : input = data := by
-      have hp := congrArg (fun v : lexer × Bool => v.1.«field:input») hr
-      have stays (b : UInt8) (state : lexer) :
-          (scanSingle b state).1.«field:input» = state.«field:input» := by
-        unfold scanSingle
-        split <;> try rfl
-        split <;> try rfl
-        split <;> try rfl
-        repeat' first | rfl | split
-      simp only [lexByte, atByte, Option.getD_some] at hp
-      cases pending <;> by_cases h : b = 48 <;> simpa [h, stays, flushOne] using hp.symm
-    subst input
-    cases stop
-    · simpa [ih _ rest] using step
-    · simpa [lexResult] using step
-
-private theorem lexSpec (data : ByteArray) (fits : data.size < UInt64.size) :
-    lex data = (Bowling.Grammar.spell data.data.toList).map (List.map encodeToken) := by
-  have length : (UInt64.ofNat data.size).toNat = data.data.toList.length := by
-    simp [Nat.mod_eq_of_lt fits, ByteArray.size_data]
-  change lexResult («fold».countUntil lexByte (UInt64.ofNat data.size).toNat 0 ⟨data, [], false⟩) = _
-  rw [length, countLex data _ _ (by simp) fits]
-  simp [spelled]
-
-set_option linter.unusedSimpArgs false in
-private theorem parseNonempty (t : Bowling.Grammar.Token) (ts : List Bowling.Grammar.Token)
-    (acc : List Int64) :
-    finishParse («fold».listUntil parseToken ((t :: ts).map encodeToken) ⟨acc, false⟩) =
-      (Bowling.Grammar.nonempty (t :: ts)).map (· ++ acc) := by
-  cases t with
-  | comma => cases ts <;> simp [«fold».listUntil, parseToken, encodeToken, finishParse,
-      Bowling.Grammar.nonempty]
-  | count n =>
-    cases ts with
-    | nil => simp [«fold».listUntil, parseToken, encodeToken, finishParse,
-        Bowling.Grammar.nonempty]
-    | cons next rest =>
-      cases next with
-      | count m => simp [«fold».listUntil, parseToken, encodeToken, finishParse,
-          Bowling.Grammar.nonempty]
-      | comma =>
-        cases rest with
-        | nil => simp [«fold».listUntil, parseToken, encodeToken, finishParse,
-            Bowling.Grammar.nonempty]
-        | cons t ts =>
-          have ih := parseNonempty t ts (n :: acc)
-          simp only [List.map_cons, «fold».listUntil, encodeToken, parseToken,
-            ne_self_iff_false, ↓reduceIte, Bool.false_eq_true, Bool.not_true,
-            Bowling.Grammar.nonempty] at ⊢
-          change finishParse («fold».listUntil parseToken ((t :: ts).map encodeToken)
-            ⟨n :: acc, false⟩) = _
-          rw [ih]
-          cases Bowling.Grammar.nonempty (t :: ts) <;> simp
-termination_by ts.length
-
-private theorem parseSpec (ts : List Bowling.Grammar.Token) :
-    parse (ts.map encodeToken) = Bowling.Grammar.counts ts := by
-  cases ts with
-  | nil => rfl
-  | cons t ts =>
-    simpa [parse, Bowling.Grammar.counts] using parseNonempty t ts []
-
-private theorem playGrammar (input : ByteArray) (fits : input.size < UInt64.size) :
-    playInput input =
-      ((Bowling.Grammar.spell input.data.toList).bind Bowling.Grammar.counts).map Replay := by
-  unfold playInput
-  rw [lexSpec input fits]
-  cases h : Bowling.Grammar.spell input.data.toList with
-  | none => rfl
-  | some tokens =>
-    simp only [Option.map_some, Option.isSome_some, Bool.not_true, Bool.false_eq_true,
-      ↓reduceIte, Option.getD_some, Option.bind, parseSpec]
-    cases Bowling.Grammar.counts tokens <;> rfl
-
-theorem playInputMatchesSpec : Laws.playInputMatchesSpec := by
-  intro input fits
-  dsimp only
-  rw [playGrammar input fits]
-  unfold Bowling.Grammar.Parses
-  generalize h : (Bowling.Grammar.spell input.data.toList).bind Bowling.Grammar.counts = result
-  cases result with
-  | none => simp
-  | some attempts =>
-    constructor
-    · simp
-    · intro claimed eq
-      have same : attempts = claimed := Option.some.inj eq
-      subst claimed
-      exact ⟨Replay attempts, rfl, fromStartMatchesRules attempts⟩
 
 run_cmd
   for theoremName in [``goScoreBounds, ``rollAcceptedIffCompletable] do

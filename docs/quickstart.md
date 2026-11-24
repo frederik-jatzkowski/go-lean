@@ -35,7 +35,7 @@ func Clamp(x, low, high int64) int64 {
 }
 ```
 
-The directive selects the whole package for translation and declares a proposition about `Clamp`. The premise `low ≤ high` limits the inputs covered by the theorem.
+The directive selects `Clamp` for translation and declares a proposition about its result. The premise `low ≤ high` limits the inputs covered by the theorem.
 
 ## Generate the model and prove the law
 

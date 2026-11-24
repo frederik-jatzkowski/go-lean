@@ -25,12 +25,12 @@ func TestScore(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			game := Start()
 			for i, pins := range test.rolls {
-				if score, complete := scoreGame(game); score != 0 || complete {
+				if score, complete := game.Score(); score != 0 || complete {
 					t.Fatalf("before delivery %d, Score() = (%d, %t)", i+1, score, complete)
 				}
 				game = roll(t, game, pins)
 			}
-			if score, complete := scoreGame(game); score != test.score || !complete {
+			if score, complete := game.Score(); score != test.score || !complete {
 				t.Fatalf("Score() = (%d, %t), want (%d, true)", score, complete, test.score)
 			}
 			checkRejected(t, game, 0)
@@ -39,7 +39,7 @@ func TestScore(t *testing.T) {
 }
 
 func TestRejectsIllegalRolls(t *testing.T) {
-	var game gameState
+	var game Game
 	checkRejected(t, game, -1)
 	checkRejected(t, game, 11)
 	game = roll(t, game, 7)
@@ -52,33 +52,23 @@ func TestRejectsIllegalRolls(t *testing.T) {
 	game = roll(t, game, 7)
 	checkRejected(t, game, 4)
 	game = roll(t, game, 3)
-	if score, complete := scoreGame(game); score != 29 || !complete {
+	if score, complete := game.Score(); score != 29 || !complete {
 		t.Fatalf("Score() after retry = (%d, %t), want (29, true)", score, complete)
 	}
 }
 
-func roll(t *testing.T, game gameState, pins int) gameState {
+func roll(t *testing.T, game Game, pins int) Game {
 	t.Helper()
-	next, accepted := rollGame(game, pins)
+	next, accepted := game.Roll(pins)
 	if !accepted {
 		t.Fatalf("Roll(%d) was rejected", pins)
 	}
 	return next
 }
 
-func checkRejected(t *testing.T, game gameState, pins int) {
+func checkRejected(t *testing.T, game Game, pins int) {
 	t.Helper()
-	if next, accepted := rollGame(game, pins); accepted || next != game {
+	if next, accepted := game.Roll(pins); accepted || next != game {
 		t.Fatalf("Roll(%d) should reject and preserve the game", pins)
 	}
-}
-
-func scoreGame(game gameState) (int, bool) {
-	result := game.Score()
-	return int(result.Total()), result.Complete()
-}
-
-func rollGame(game gameState, pins int) (gameState, bool) {
-	result := game.Roll(int64(pins))
-	return result.Game(), result.Accepted()
 }

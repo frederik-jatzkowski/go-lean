@@ -26,7 +26,6 @@ Follow the [quickstart](docs/quickstart.md) to declare a law, generate Lean, wri
 
 | Example | Techniques |
 | --- | --- |
-| [Recursive expressions](examples/proven/recursive_expr/README.md) | Private enums, generated constructors, exhaustive matching, and structural recursion |
 | [Stack-machine compiler](examples/proven/stack_machine_compiler/README.md) | Early-stopping folds, boxed recursion, and compiler correctness |
 | [Ten-pin bowling](examples/proven/bowling/README.md) | Value-state transitions, list folds, and refinement against scoring rules |
 | [Grid game](examples/proven/grid_game/README.md) | Finite step checks and induction over arbitrary move histories |

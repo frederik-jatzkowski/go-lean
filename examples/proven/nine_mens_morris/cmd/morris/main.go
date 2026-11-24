@@ -15,16 +15,7 @@ func main() {
 	input := bufio.NewScanner(os.Stdin)
 	fmt.Println("Nine Men's Morris. Enter point numbers, or q to quit.")
 	for {
-		show(func(point uint) byte {
-			switch state.Board().At(point) {
-			case morris.White:
-				return 'W'
-			case morris.Black:
-				return 'B'
-			default:
-				return '.'
-			}
-		})
+		show(state.Board())
 		switch state.Outcome() {
 		case morris.WhiteWins:
 			fmt.Println("White wins.")
@@ -74,11 +65,11 @@ func main() {
 		var accepted bool
 		switch {
 		case state.Pending():
-			state, accepted = unpack(state.Capture(points[0]))
+			state, accepted = state.Capture(points[0])
 		case state.Placing():
-			state, accepted = unpack(state.Place(points[0]))
+			state, accepted = state.Place(points[0])
 		default:
-			state, accepted = unpack(state.Move(points[0], points[1]))
+			state, accepted = state.Move(points[0], points[1])
 		}
 		if !accepted {
 			fmt.Println("Illegal action. Try again.")
@@ -86,21 +77,28 @@ func main() {
 	}
 }
 
-func parsePoints(fields []string) ([]uint, bool) {
-	points := make([]uint, len(fields))
+func parsePoints(fields []string) ([]morris.Point, bool) {
+	points := make([]morris.Point, len(fields))
 	for i, field := range fields {
 		number, err := strconv.ParseUint(field, 10, 8)
 		if err != nil || number >= morris.Points {
 			return nil, false
 		}
-		points[i] = uint(number)
+		points[i] = morris.Point(number)
 	}
 	return points, true
 }
 
-func show(mark func(uint) byte) {
-	cell := func(point uint) string {
-		return fmt.Sprintf("%02d%c", point, mark(point))
+func show(board morris.Board) {
+	cell := func(point morris.Point) string {
+		mark := '.'
+		switch board.At(point) {
+		case morris.White:
+			mark = 'W'
+		case morris.Black:
+			mark = 'B'
+		}
+		return fmt.Sprintf("%02d%c", point, mark)
 	}
 	fmt.Printf(`
 %s------------%s------------%s
@@ -123,11 +121,4 @@ func show(mark func(uint) byte) {
 		cell(22), cell(21), cell(20),
 		cell(14), cell(13), cell(12),
 		cell(6), cell(5), cell(4))
-}
-
-func unpack[T any](result interface {
-	Next() T
-	Accepted() bool
-}) (T, bool) {
-	return result.Next(), result.Accepted()
 }

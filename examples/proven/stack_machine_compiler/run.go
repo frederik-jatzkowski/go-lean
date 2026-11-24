@@ -3,20 +3,24 @@ package compiler
 import "github.com/frederik-jatzkowski/go-lean/pkg/lean"
 
 type runState struct {
-	code   lean.ByteArray
-	result machineResult
+	Code   lean.ByteArray
+	Result machineResult
 }
 
 func runInstruction(_ uint, state runState) lean.FoldControl[runState] {
-	result := step(state.code, state.result.state, true)
-	return lean.FoldControl[runState]{State: runState{code: state.code, result: result}, Stop: result.status != Continue}
+	result := step(state.Code, state.Result.State, true)
+	return lean.FoldControl[runState]{State: runState{Code: state.Code, Result: result}, Stop: result.Status != Continue}
 }
 
 //golean:export
 func runCode(code lean.ByteArray) machineResult {
-	initial := machineResult{state: machineState{pc: 0, stack: lean.Array[byte]{}}, status: Continue}
-	run := lean.FoldNUntil(code.Size()+1, runState{code: code, result: initial}, runInstruction)
-	return run.State.result
+	initial := machineResult{State: machineState{PC: 0, Stack: lean.Array[byte]{}}, Status: Continue}
+	run := lean.FoldNUntil(code.Size()+1, runState{Code: code, Result: initial}, runInstruction)
+	return run.State.Result
 }
 
-func RunBytes(code lean.ByteArray) machineResult { return runCode(code) }
+// Run executes code from the initial state until a step halts or fails.
+func Run(code []byte) (State, Status) {
+	result := runCode(lean.ByteArrayFromBytes(code))
+	return wireState(result.State), result.Status
+}

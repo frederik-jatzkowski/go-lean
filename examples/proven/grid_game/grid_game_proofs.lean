@@ -39,10 +39,10 @@ theorem stepUnknownDirection : Laws.stepUnknownDirection := by
   decide
 
 -- The exterior consists of the in-bounds cells outside the goal room and its walls.
-private def safe (wrap : Bool) (position : point) : Bool :=
-  decide (position.«field:x».toNat < 8) &&
-  decide (position.«field:y».toNat < 8) &&
-  !(decide (position.«field:x» >= 6) && decide (position.«field:y» <= 1)) &&
+private def safe (wrap : Bool) (position : Position) : Bool :=
+  decide (position.«field:X».toNat < 8) &&
+  decide (position.«field:Y».toNat < 8) &&
+  !(decide (position.«field:X» >= 6) && decide (position.«field:Y» <= 1)) &&
   !IsWall position wrap &&
   !Won position
 
@@ -55,11 +55,11 @@ private def directions : List UInt8 := [0, 1, 2, 3]
 -- Check the translated Go transition for every board cell, cardinal move, and mode.
 private theorem boardCases (wrap : Bool) :
     cells.all (fun x => cells.all (fun y => directions.all (fun direction =>
-      let position := point.mk (UInt8.ofNat x) (UInt8.ofNat y)
+      let position := Position.mk (UInt8.ofNat x) (UInt8.ofNat y)
       !safe wrap position || safe wrap (Step position direction wrap)))) = true := by
   cases wrap <;> decide
 
-private theorem stepSafe (wrap : Bool) (position : point) (direction : UInt8)
+private theorem stepSafe (wrap : Bool) (position : Position) (direction : UInt8)
     (h : safe wrap position = true) : safe wrap (Step position direction wrap) = true := by
   by_cases hd : direction ∈ directions
   · obtain ⟨x, y⟩ := position
@@ -75,18 +75,18 @@ private theorem stepSafe (wrap : Bool) (position : point) (direction : UInt8)
       simpa [directions, not_or] using hd
     simpa [Step, unknown.1, unknown.2.1, unknown.2.2.1, unknown.2.2.2] using h
 
-def replay (wrap : Bool) (position : point) (moves : List UInt8) : point :=
+def replay (wrap : Bool) (position : Position) (moves : List UInt8) : Position :=
   moves.foldl (fun position direction => Step position direction wrap) position
 
-private theorem replaySafe (wrap : Bool) (position : point) (moves : List UInt8)
+private theorem replaySafe (wrap : Bool) (position : Position) (moves : List UInt8)
     (h : safe wrap position = true) : safe wrap (replay wrap position moves) = true := by
   induction moves generalizing position with
   | nil => exact h
   | cons direction moves ih =>
     exact ih (Step position direction wrap) (stepSafe wrap position direction h)
 
-private theorem replayAgrees (wrap : Bool) (position : point) (moves : List UInt8) :
-    («fold».list replayMove moves (replayState.mk position wrap)).«field:point» =
+private theorem replayAgrees (wrap : Bool) (position : Position) (moves : List UInt8) :
+    («fold».list replayMove moves (replayState.mk position wrap)).«field:Position» =
       replay wrap position moves := by
   induction moves generalizing position with
   | nil => rfl

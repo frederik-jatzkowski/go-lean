@@ -12,21 +12,21 @@ roots = [
   'assumed_worker.assumed_worker',
   'assumed_worker.assumed_worker_proofs',
   'assumed_worker.assumed_worker_verify',
-  'bowling.bowling',
-  'bowling.bowling_proofs',
-  'bowling.bowling_verify',
+  'bowling.model.bowling',
+  'bowling.model.bowling_proofs',
+  'bowling.model.bowling_verify',
   'clamp_import.clamp_import',
   'clamp_import.clamp_import_proofs',
   'clamp_import.clamp_import_verify',
   'clamp_import.limits.limits',
   'clamp_import.limits.limits_proofs',
   'clamp_import.limits.limits_verify',
-  'grid_game.grid_game',
-  'grid_game.grid_game_proofs',
-  'grid_game.grid_game_verify',
-  'nine_mens_morris.morris',
-  'nine_mens_morris.morris_proofs',
-  'nine_mens_morris.morris_verify',
+  'grid_game.model.grid_game',
+  'grid_game.model.grid_game_proofs',
+  'grid_game.model.grid_game_verify',
+  'nine_mens_morris.model.morris',
+  'nine_mens_morris.model.morris_proofs',
+  'nine_mens_morris.model.morris_verify',
   # END go-lean managed roots
 ]
 
@@ -36,8 +36,8 @@ srcDir = "examples/proven/stack_machine_compiler"
 roots = [
   'spec',
   # BEGIN go-lean managed roots
-  'compiler',
-  'compiler_proofs',
-  'compiler_verify',
+  'model.compiler',
+  'model.compiler_proofs',
+  'model.compiler_verify',
   # END go-lean managed roots
 ]

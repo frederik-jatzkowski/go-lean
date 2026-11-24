@@ -21,16 +21,16 @@ The interactive driver calls the modeled `Step` with explicit position, directio
 //golean:verify+   Won (Replay moves wrap) = false
 ```
 
-The concrete step laws cover bounded edges, wrapping, ordinary and seam walls, and unknown direction codes. [Modeled Go](grid_game.go)
+The concrete step laws cover bounded edges, wrapping, ordinary and seam walls, and unknown direction codes. [Modeled Go](model/grid_game.go)
 
 ## Walkthrough challenges
 
 Proving that the current cell differs from the goal gives too little information about the next move. The proof defines `safe` to require an in-bounds cell outside the goal room and walls. `boardCases` checks all board coordinates, four cardinal directions, and both modes using Lean's `decide`. `stepSafe` uses those finite cases for cardinal moves and unfolds `Step` for unknown codes, which leave the position unchanged.
 
-`replayAgrees` relates the generated fold to a Lean replay. `replaySafe` inducts over the move list, applying `stepSafe` at each move. Since the start satisfies `safe`, the invariant gives the claimed result for histories of any finite length. [Lean proofs](grid_game_proofs.lean)
+`replayAgrees` relates the generated fold to a Lean replay. `replaySafe` inducts over the move list, applying `stepSafe` at each move. Since the start satisfies `safe`, the invariant gives the claimed result for histories of any finite length. [Lean proofs](model/grid_game_proofs.lean)
 
 ```sh
-go run ./cmd/go-lean verify ./examples/proven/grid_game
+go run ./cmd/go-lean verify ./examples/proven/grid_game/model
 ```
 
 Try each edit independently. Restore the original cell after each challenge

@@ -2,11 +2,11 @@
 
 Choose a small operation whose inputs and outputs express a property you want to prove. Let ordinary Go gather input, perform I/O, and display results. Put the decision in a function that takes values and returns one unnamed result. A record can carry the next state and observations together.
 
-## Keep the model at a value boundary
+## Put the model in its own package
 
-The bowling API returns a game and an acceptance flag. Its modeled value method returns a `rollResult` record, and the public wrapper unpacks it. The compiler copies source bytes into a `lean.ByteArray` at its public entry point, then works with that value inside the modeled call graph. [Bowling](../examples/proven/bowling/README.md) and [compiler](../examples/proven/stack_machine_compiler/README.md)
+Move pure functions and records into a model package. Keep runtime code in a separate Go package that calls the model with supported values. Call pure operations directly from the model. Bowling’s `Roll` returns a record containing the next game and an acceptance flag. The compiler facade copies source bytes into a `lean.ByteArray` before calling its model. [Bowling](../examples/proven/bowling/README.md) and [compiler](../examples/proven/stack_machine_compiler/README.md)
 
-Use concrete value receivers, explicit immutable local initializers, keyed record literals, `if`, and early returns. Return a new value when a field changes. A translated value method takes its receiver first in Lean, so `game.roll(pins)` becomes an application of `«Game$roll»` to `game` and `pins`.
+Use concrete value receivers, explicit immutable local initializers, keyed record literals, `if`, and early returns. Return a new value when a field changes. A translated value method takes its receiver first in Lean, so `game.Roll(pins)` becomes an application of `«Game$Roll»` to `game` and `pins`.
 
 ## Move traversal state into a record
 
@@ -16,7 +16,7 @@ The grid game replays moves with a named step that receives a direction and the 
 return lean.FoldList(moves, replayState{Position: Start(), Wrap: wrap}, replayMove).Position
 ```
 
-Use `FoldN` to visit a known number of indices, `FoldList` to visit list items, and the `Until` variants to stop early. Put extra inputs in the state record. For arrays and byte arrays, iterate over `Size()` and use `Get(index)`. A named step is part of the modeled call graph and must satisfy the same subset rules. [Grid game walkthrough](../examples/proven/grid_game/README.md)
+Use `FoldN` to visit a known number of indices, `FoldList` to visit list items, and the `Until` variants to stop early. Put extra inputs in the state record. For arrays and byte arrays, iterate over `Size()` and use `Get(index)`. Named steps follow the same subset rules as other modeled functions. [Grid game walkthrough](../examples/proven/grid_game/README.md)
 
 ## Give recursive records a decreasing measure
 

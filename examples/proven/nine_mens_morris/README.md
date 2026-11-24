@@ -10,7 +10,7 @@ Each player starts with nine reserve stones. After placement, players slide to a
 
 ## go-lean features
 
-The modeled `Game` and `Board` use concrete value methods. Lean calls the generated move as `«Game$move» s f t`, with the game first. The board stores stones in a `lean.Array[Player]`. Updating the source and destination creates a new board value. The public methods unpack modeled result records, and the terminal handles input and display in ordinary Go.
+The modeled `Game` and `Board` use concrete value methods. Lean calls the generated move as `«Game$Move» s f t`, with the game first. The board stores stones in a `lean.Array[Player]`. Updating the source and destination creates a new board value. The terminal calls the model directly and handles input and display in ordinary Go.
 
 The move-availability scan carries the board and player as immutable state:
 
@@ -18,15 +18,15 @@ The move-availability scan carries the board and player as immutable state:
 return lean.FoldNUntil(24, boardScan{Board: board, Player: player}, findSlide).Stop
 ```
 
-`FoldN` counts stones, while `FoldNUntil` can stop on the first available slide or unprotected stone. [Modeled Go](morris.go)
+`FoldN` counts stones, while `FoldNUntil` can stop on the first available slide or unprotected stone. [Modeled Go](model/morris.go)
 
 ## Proof challenge
 
 The implementation encodes adjacency and mills with point-specific conditions. The proof connects those conditions to the rule relations on board points. It also shows that the fixed scans implement counting and existence. In particular, `scanMatchesAny` connects the early-stop flag to a satisfied predicate in the visited range.
 
-For an accepted move, `movePreservesOpposingStones` proves the opposing stones stay put, and `moveGrantsCaptureExactlyOnMill` characterizes when the resulting game has a pending capture. The proof then combines legality and transitions in `stepMatchesRules`. Its history theorem extends that agreement to every finite sequence of actions from the opening position, including rejected actions. [Rules](morris_rules.lean) and [Lean proofs](morris_proofs.lean)
+For an accepted move, `movePreservesOpposingStones` proves the opposing stones stay put, and `moveGrantsCaptureExactlyOnMill` characterizes when the resulting game has a pending capture. The proof then combines legality and transitions in `stepMatchesRules`. Its history theorem extends that agreement to every finite sequence of actions from the opening position, including rejected actions. [Rules](morris_rules.lean) and [Lean proofs](model/morris_proofs.lean)
 
 ```sh
 go test ./examples/proven/nine_mens_morris/...
-go run ./cmd/go-lean verify ./examples/proven/nine_mens_morris
+go run ./cmd/go-lean verify ./examples/proven/nine_mens_morris/model
 ```

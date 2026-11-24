@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	morris "github.com/frederik-jatzkowski/go-lean/examples/proven/nine_mens_morris"
+	morris "github.com/frederik-jatzkowski/go-lean/examples/proven/nine_mens_morris/model"
 )
 
 func main() {
@@ -62,37 +62,38 @@ func main() {
 			continue
 		}
 
-		var accepted bool
+		var result morris.ActionResult
 		switch {
 		case state.Pending():
-			state, accepted = state.Capture(points[0])
+			result = state.Capture(points[0])
 		case state.Placing():
-			state, accepted = state.Place(points[0])
+			result = state.Place(points[0])
 		default:
-			state, accepted = state.Move(points[0], points[1])
+			result = state.Move(points[0], points[1])
 		}
-		if !accepted {
+		state = result.Next()
+		if !result.Accepted() {
 			fmt.Println("Illegal action. Try again.")
 		}
 	}
 }
 
-func parsePoints(fields []string) ([]morris.Point, bool) {
-	points := make([]morris.Point, len(fields))
+func parsePoints(fields []string) ([]uint, bool) {
+	points := make([]uint, len(fields))
 	for i, field := range fields {
 		number, err := strconv.ParseUint(field, 10, 8)
 		if err != nil || number >= morris.Points {
 			return nil, false
 		}
-		points[i] = morris.Point(number)
+		points[i] = uint(number)
 	}
 	return points, true
 }
 
 func show(board morris.Board) {
-	cell := func(point morris.Point) string {
+	cell := func(point uint) string {
 		mark := '.'
-		switch board.At(point) {
+		switch board.StoneAt(point) {
 		case morris.White:
 			mark = 'W'
 		case morris.Black:

@@ -7,7 +7,8 @@ import (
 	"os"
 	"strings"
 
-	game "github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game"
+	driver "github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game"
+	game "github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model"
 )
 
 func main() {
@@ -36,7 +37,7 @@ func main() {
 	}
 
 	fmt.Println("Move with W/A/S/D then Enter. Press Q then Enter to quit.")
-	game.Play(*wrap, next, func(player game.Position) {
+	driver.Play(*wrap, next, func(player game.Position) {
 		for y := range uint8(game.Size) {
 			for x := range uint8(game.Size) {
 				cell := game.Position{X: x, Y: y}

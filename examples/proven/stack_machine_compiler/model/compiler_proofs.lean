@@ -1,6 +1,6 @@
-import «compiler»
+import model.compiler
 
-namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».Proofs
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler/model».Proofs
 
 open StackMachineCompiler.Spec
 
@@ -65,7 +65,7 @@ private def observed (r : machineResult) : UInt8 × State :=
   (r.«field:Status», ⟨r.«field:State».«field:PC».toNat, r.«field:State».«field:Stack»⟩)
 
 private theorem stepCorrect : Requirements.stepConforms
-    (fun code pc stack aligned => observed (step code ⟨pc, stack⟩ aligned)) := by
+    (fun code pc stack aligned => observed (Step code ⟨pc, stack⟩ aligned)) := by
   intro code pc stack hc hs
   unfold maxInt at hc hs
   have cn : (UInt64.ofNat code.size).toNat = code.size := by
@@ -75,7 +75,7 @@ private theorem stepCorrect : Requirements.stepConforms
     change _ % 18446744073709551616 = _
     apply Nat.mod_eq_of_lt; omega
   dsimp only
-  unfold step StackMachineCompiler.Spec.instruction
+  unfold Step StackMachineCompiler.Spec.instruction
   dsimp only
   by_cases even : pc.toNat % 2 = 0
   case neg => simp [even, observed, Requirements.Status.tag]
@@ -133,7 +133,7 @@ private theorem stepCorrect : Requirements.stepConforms
         simp [empty, idx2, one, Array.back!, getElem!_pos, getElem?_pos,
           show stack.size - 1 < stack.size by omega]
 
-private theorem runFrom {code : ByteArray} {s final : State} {steps : Nat} {status : Status}
+private theorem runFrom {code : ByteArray} {s final : State} {steps : Nat} {status : StackMachineCompiler.Spec.Status}
     (exec : Execution code s steps final status) (fuel : Nat) (idx : UInt64) (r : machineResult)
     (enough : steps ≤ fuel) (rep : (observed r).2 = s) (even : s.pc % 2 = 0)
     (hc : code.size ≤ maxInt) (hs : s.stack.size ≤ maxInt) :
@@ -150,7 +150,7 @@ private theorem runFrom {code : ByteArray} {s final : State} {steps : Nat} {stat
       simp only [observed] at even h
       simp only [even, decide_true, h] at law
       have tag := law.1
-      change (step code ⟨pc, stack⟩ true).«field:Status» = _ at tag
+      change (Step code ⟨pc, stack⟩ true).«field:Status» = _ at tag
       have nonzero : Requirements.Status.tag status ≠ 0 := by cases status <;> decide
       simpa [«fold».countUntil, runInstruction, tag, nonzero] using Prod.ext law.1 law.2
   | @next s t n final status h _ ih =>
@@ -163,14 +163,14 @@ private theorem runFrom {code : ByteArray} {s final : State} {steps : Nat} {stat
       simp only [observed] at even h
       simp only [even, decide_true, h] at law
       have tag := law.1
-      change (step code ⟨pc, stack⟩ true).«field:Status» = 0 at tag
+      change (Step code ⟨pc, stack⟩ true).«field:Status» = 0 at tag
       have pe := (nextBounds h hs).1
       simp only at pe
-      have remaining := ih fuel (idx + 1) (step code ⟨pc, stack⟩ true) (by omega)
+      have remaining := ih fuel (idx + 1) (Step code ⟨pc, stack⟩ true) (by omega)
         law.2 (by omega) (nextBounds h hs).2.2
       simpa [«fold».countUntil, runInstruction, tag] using remaining
 
-private theorem executionCorrect : Requirements.executionConforms (fun code => observed (runCode code)) := by
+private theorem executionCorrect : Requirements.executionConforms (fun code => observed (RunCode code)) := by
   intro code hc
   obtain ⟨steps, final, status, bound, exec⟩ := boundedExecution code ⟨0, #[]⟩ rfl (Nat.zero_le _) (Nat.zero_le _)
   have count : steps ≤ code.size / 2 + 1 := by simpa using bound
@@ -322,7 +322,7 @@ private theorem classifyRecognized (word : ByteArray) (tok : Token)
       congr <;> assumption
 
 private def compileResult (source : ByteArray) : Requirements.Compilation :=
-  let r := compile source
+  let r := Compile source
   ⟨r.«field:Code», r.«field:Type», r.«field:Error».«field:Kind», r.«field:Error».«field:Offset».toNat⟩
 
 private inductive Steps (code : ByteArray) : State → State → Prop where
@@ -336,13 +336,13 @@ private theorem Steps.trans {code : ByteArray} {s t u : State}
   | cons h _ ih => exact .cons h (ih b)
 
 private theorem Steps.finish {code : ByteArray} {s t : State} (a : Steps code s t)
-    {status : Status} (h : StackMachineCompiler.Spec.instruction code t = .stop status) :
+    {status : StackMachineCompiler.Spec.Status} (h : StackMachineCompiler.Spec.instruction code t = .stop status) :
     ∃ n, Execution code s n t status := by
   induction a with
   | refl => exact ⟨_, .stop h⟩
   | cons step _ ih => obtain ⟨n, e⟩ := ih h; exact ⟨_, .next step e⟩
 
-private theorem executionUnique {code : ByteArray} {s t u : State} {m n : Nat} {a b : Status}
+private theorem executionUnique {code : ByteArray} {s t u : State} {m n : Nat} {a b : StackMachineCompiler.Spec.Status}
     (first : Execution code s m t a) (second : Execution code s n u b) : t = u ∧ a = b := by
   induction first generalizing n u b with
   | stop h => cases second <;> grind
@@ -436,7 +436,7 @@ private theorem evalSteps (e : Expr) (v : Value) (ev : e.eval = some v)
         simpa [before, middle, Expr.instructions, Nat.add_assoc] using Steps.cons finish Steps.refl
 
 private theorem preservesMeaning (cc : Requirements.compilationConforms compileResult) :
-    Requirements.preservesSourceMeaning compileResult (fun code => observed (runCode code)) := by
+    Requirements.preservesSourceMeaning compileResult (fun code => observed (RunCode code)) := by
   intro src e ty fits success
   have exactCode := ((cc src fits).2 _ success).2.2.2
   cases success with
@@ -612,7 +612,7 @@ private theorem classifyValid (data : ByteArray) (fits : data.size ≤ maxInt)
                 | cons f tail => exact False.elim (wide (by simp [← ByteArray.size_data, Array.size_eq_length_toList] <;> omega))
 
 private theorem closeRecognizedWord (source : ByteArray) (start stop : UInt64)
-    (words : Array lexeme) (error : diagnostic) (oldScan : scanState)
+    (words : Array lexeme) (error : Diagnostic) (oldScan : scanState)
     (token : Token) (recognized : Recognizes (source.extract start.toNat stop.toNat).data.toList token) :
     closeWord stop ⟨source, words, oldScan, error⟩ ⟨start, false⟩ =
       (⟨source, words.push ⟨(tokenClass token).«field:Kind», (tokenClass token).«field:Value», start⟩,
@@ -620,7 +620,7 @@ private theorem closeRecognizedWord (source : ByteArray) (start stop : UInt64)
   simp [closeWord, classifyRecognized _ token recognized, tokenKindNonzero token]
 
 private theorem scanNonspace (source : ByteArray) (i : UInt64) (words : Array lexeme)
-    (start : UInt64) (inside : Bool) (error : diagnostic) (byte : UInt8)
+    (start : UInt64) (inside : _root_.Bool) (error : Diagnostic) (byte : UInt8)
     (atByte : source[i.toNat]? = some byte) (nonspace : ¬ whitespace byte) :
     scanSourceByte i ⟨source, words, ⟨start, inside⟩, error⟩ =
       (⟨source, words, ⟨if inside then start else i, true⟩, error⟩, false) := by
@@ -631,7 +631,7 @@ private theorem scanNonspace (source : ByteArray) (i : UInt64) (words : Array le
   cases inside <;> simp [scanSourceByte, scanByte, atByte, h]
 
 private theorem scanWordBytes (source : ByteArray) (i start : UInt64)
-    (words : Array lexeme) (error : diagnostic) (bytes tail : List UInt8)
+    (words : Array lexeme) (error : Diagnostic) (bytes tail : List UInt8)
     (suffix : source.data.toList.drop i.toNat = bytes ++ tail)
     (fits : source.size ≤ maxInt) (nonspace : ∀ b ∈ bytes, ¬ whitespace b) :
     («fold».countUntil scanSourceByte bytes.length i
@@ -657,14 +657,14 @@ private theorem scanWordBytes (source : ByteArray) (i start : UInt64)
       (nonspace b (by simp))]
     exact ih (i + 1) rest (fun c mem => nonspace c (by simp [mem]))
 private theorem scanDelimiter (source : ByteArray) (i start : UInt64) (words : Array lexeme)
-    (inside : Bool) (error : diagnostic) (byte : UInt8)
+    (inside : _root_.Bool) (error : Diagnostic) (byte : UInt8)
     (atByte : source[i.toNat]? = some byte) (space : whitespace byte) :
     scanSourceByte i ⟨source, words, ⟨start, inside⟩, error⟩ =
       if inside then closeWord i ⟨source, words, ⟨start, true⟩, error⟩ ⟨start, false⟩
       else (⟨source, words, ⟨start, false⟩, error⟩, false) := by
   cases inside <;> simp [scanSourceByte, scanByte, atByte, (scannerSpace byte).mpr space]
 
-private theorem scanFoldAppend {S : Type} (step : UInt64 → S → S × Bool)
+private theorem scanFoldAppend {S : Type} (step : UInt64 → S → S × _root_.Bool)
     (n m : Nat) (i : UInt64) (state : S) :
     «fold».countUntil step (n + m) i state =
       let first := «fold».countUntil step n i state
@@ -684,7 +684,7 @@ private theorem scanFoldAppend {S : Type} (step : UInt64 → S → S × Bool)
       | true => rfl
 
 private theorem scanWordStart (source : ByteArray) (i start : UInt64)
-    (words : Array lexeme) (error : diagnostic) (b : UInt8) (bytes tail : List UInt8)
+    (words : Array lexeme) (error : Diagnostic) (b : UInt8) (bytes tail : List UInt8)
     (suffix : source.data.toList.drop i.toNat = (b :: bytes) ++ tail)
     (fits : source.size ≤ maxInt) (nonspace : ∀ c ∈ b :: bytes, ¬ whitespace c) :
     («fold».countUntil scanSourceByte (b :: bytes).length i
@@ -704,7 +704,7 @@ private theorem scanWordStart (source : ByteArray) (i start : UInt64)
   rw [List.length_cons, «fold».countUntil, scanNonspace source i words start false error b atByte
     (nonspace b (by simp))]
   exact scanWordBytes source (i + 1) i words error bytes tail rest fits (fun c mem => nonspace c (by simp [mem]))
-private def finishScan (sourceSize : UInt64) (scanned : lexer × Bool) : lexer :=
+private def finishScan (sourceSize : UInt64) (scanned : lexer × _root_.Bool) : lexer :=
   if scanned.2 || !scanned.1.«field:Scan».«field:InWord» then scanned.1
   else (closeWord sourceSize scanned.1 ⟨scanned.1.«field:Scan».«field:Start», false⟩).1
 
@@ -712,7 +712,7 @@ private theorem scanRecognized (source : ByteArray) (fits : source.size ≤ maxI
     {offset : Nat} {bytes : List UInt8} {words : List Word} (splitWords : Words offset bytes words)
     (suffix : source.data.toList.drop offset = bytes) (length : offset + bytes.length = source.size)
     (tokens : List LocatedToken) (lexed : Lexed words tokens)
-    (prior : Array lexeme) (start : UInt64) (err : diagnostic) :
+    (prior : Array lexeme) (start : UInt64) (err : Diagnostic) :
     let result := finishScan (UInt64.ofNat source.size)
       («fold».countUntil scanSourceByte bytes.length (UInt64.ofNat offset)
         ⟨source, prior, ⟨start, false⟩, err⟩)
@@ -813,7 +813,7 @@ private def modelRoots : List Expr → Array expression
 @[simp] private theorem modelRootsSize (roots : List Expr) : (modelRoots roots).size = roots.length := by
   induction roots <;> simp_all [modelRoots]
 
-private def viewParse (result : parser × Bool) : Option (Array expression) :=
+private def viewParse (result : parser × _root_.Bool) : Option (Array expression) :=
   if result.2 then none else some result.1.«field:Roots»
 
 set_option linter.unusedSimpArgs false in
@@ -1310,12 +1310,12 @@ private theorem compilationCorrect : Requirements.compilationConforms compileRes
       have := wordOffsets splitWords word (by simp)
       simp at this
       omega
-    simp [compileResult, compile, bad, failed, Requirements.observesCompilation,
+    simp [compileResult, Compile, bad, failed, Requirements.observesCompilation,
       Requirements.Diagnostic.tag, sizeNat representable]
   case «syntax» splitWords lexed invalid =>
     have ⟨layout, clean, bound⟩ := tokenizeLayout source fits splitWords lexed
     have reject := parseReject _ _ layout bound invalid
-    simp [compileResult, compile, clean, reject, failed, Requirements.observesCompilation,
+    simp [compileResult, Compile, clean, reject, failed, Requirements.observesCompilation,
       Requirements.Diagnostic.tag, sizeNat fits]
   case typeMismatch words offset e splitWords lexed bad =>
     have ⟨layout, clean, bound⟩ := tokenizeLayout source fits splitWords lexed
@@ -1327,7 +1327,7 @@ private theorem compilationCorrect : Requirements.compilationConforms compileRes
       have := checkErrorOffset e source.data.toList.length (by simpa using offsets) bad
       simp at this
       omega
-    simp [compileResult, compile, clean, stop, roots, chk, mismatch, failed,
+    simp [compileResult, Compile, clean, stop, roots, chk, mismatch, failed,
       Requirements.observesCompilation, Requirements.Diagnostic.tag, sizeNat representable]
   case codeTooLarge words ty e splitWords lexed good large =>
     have ⟨layout, clean, bound⟩ := tokenizeLayout source fits splitWords lexed
@@ -1341,7 +1341,7 @@ private theorem compilationCorrect : Requirements.compilationConforms compileRes
       · rfl
       · have := (codeFitsIff _ bound).mp h
         omega
-    simp [compileResult, compile, clean, stop, roots, chk, typed, noDiagnostic, tooLarge, failed,
+    simp [compileResult, Compile, clean, stop, roots, chk, typed, noDiagnostic, tooLarge, failed,
       Requirements.observesCompilation, Requirements.Diagnostic.tag, sizeNat fits]
   case success words ty e splitWords lexed good small =>
     have ⟨layout, clean, bound⟩ := tokenizeLayout source fits splitWords lexed
@@ -1351,10 +1351,10 @@ private theorem compilationCorrect : Requirements.compilationConforms compileRes
     have count : (tokenize source).«field:Words».size = e.tokens.length := by
       simpa using congrArg List.length layout
     have enough := (codeFitsIff _ bound).mpr (by omega)
-    simp [compileResult, compile, clean, stop, roots, chk, typed, noDiagnostic, enough,
+    simp [compileResult, Compile, clean, stop, roots, chk, typed, noDiagnostic, enough,
       Requirements.observesCompilation, emit, emitCorrect, Expr.bytecode, List.append_assoc]
 
 theorem «all» : Laws.«all» :=
   ⟨compilationCorrect, stepCorrect, executionCorrect, preservesMeaning compilationCorrect⟩
 
-end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler».Proofs
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler/model».Proofs

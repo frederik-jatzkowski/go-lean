@@ -19,8 +19,8 @@ Use the exact `//golean:` prefix in Go doc comments.
 
 | Directive | Purpose |
 | --- | --- |
-| `//golean:export` | Select an operation for modeling and allow concrete calls from another modeled Go package. |
-| `//golean:verify name : proposition` | Declare a package-unique law. On a function or method, select that operation for modeling. |
+| `//golean:export` | Make the package modeled and allow concrete calls to the annotated function or method from another modeled Go package. |
+| `//golean:verify name : proposition` | Declare a package-unique law and make the package modeled. Attach it to a function, method, or package doc comment. |
 | `//golean:verify+ continuation` | Continue a law on consecutive lines. |
 | `//golean:verify:import Lean.Module` | Import one Lean module from a package doc comment. |
 | `//golean:assume name : proposition` | Declare a law about a scalar dependency function. Use its unqualified Go name in the law. |

@@ -2,6 +2,10 @@
 
 -- Laws for review (formal definitions below the model)
 --
+-- youCantWin :
+--   ∀ (wrap : Bool) (moves : List UInt8),
+--   Won (Replay moves wrap) = false
+--
 -- stepBoundedEdge :
 --   let actual := Step (Position.mk 0 3) 2 false
 --   let expected := (Position.mk 0 3)
@@ -46,14 +50,10 @@
 --   let actual := (Step Start 255 true)
 --   let expected := Start
 --   actual.«field:X» = expected.«field:X» ∧ actual.«field:Y» = expected.«field:Y»
---
--- youCantWin :
---   ∀ (wrap : Bool) (moves : List UInt8),
---   Won (Replay moves wrap) = false
 
 import Std
 
-namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game»
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model»
 
 namespace «fold»
 
@@ -62,19 +62,35 @@ def list {T S : Type} (step : T → S → S) (items : List T) (state : S) : S :=
 
 end «fold»
 
+def «Size» : _root_.Int64 := (8 : _root_.Int64)
+
 structure «Position» where
   «field:X» : _root_.UInt8
   «field:Y» : _root_.UInt8
 
-structure «replayState» where
-  «field:Position» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«Position»
-  «field:Wrap» : _root_.Bool
+abbrev «Direction» : Type := _root_.UInt8
 
-def «Start» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«Position» :=
-  (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«Position».mk (1 : _root_.UInt8) (1 : _root_.UInt8))
+def «Up» : _root_.UInt8 := (0 : _root_.UInt8)
 
-def «backward» («local:0» : _root_.UInt8) («local:1» : _root_.Bool) : _root_.UInt8 :=
-  (if (_root_.Decidable.decide («local:0» > (0 : _root_.UInt8))) then («local:0» - (1 : _root_.UInt8)) else (if «local:1» then (7 : _root_.UInt8) else «local:0»))
+def «Down» : _root_.UInt8 := (1 : _root_.UInt8)
+
+def «Left» : _root_.UInt8 := (2 : _root_.UInt8)
+
+def «Right» : _root_.UInt8 := (3 : _root_.UInt8)
+
+def «Start» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«Position» :=
+  (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«Position».mk (1 : _root_.UInt8) (1 : _root_.UInt8))
+
+def «Won» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«Position») : _root_.Bool :=
+  (if (_root_.Decidable.decide ((«local:0»).«field:X» = (7 : _root_.UInt8))) then (_root_.Decidable.decide ((«local:0»).«field:Y» = (1 : _root_.UInt8))) else _root_.Bool.false)
+
+abbrev «Cell» : Type := _root_.UInt8
+
+def «Open» : _root_.UInt8 := (0 : _root_.UInt8)
+
+def «Wall» : _root_.UInt8 := (1 : _root_.UInt8)
+
+def «WrapWall» : _root_.UInt8 := (2 : _root_.UInt8)
 
 def «layout» : (_root_.Array (_root_.Array _root_.UInt8)) :=
   (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (#[] : (_root_.Array (_root_.Array _root_.UInt8))) (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (#[] : (_root_.Array _root_.UInt8)) (2 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (1 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8))) (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (#[] : (_root_.Array _root_.UInt8)) (2 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (1 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8))) (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (#[] : (_root_.Array _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (1 : _root_.UInt8)) (1 : _root_.UInt8))) (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (#[] : (_root_.Array _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8))) (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (#[] : (_root_.Array _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8))) (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (#[] : (_root_.Array _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8))) (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (#[] : (_root_.Array _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8))) (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (_root_.Array.push (#[] : (_root_.Array _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (0 : _root_.UInt8)) (2 : _root_.UInt8)) (2 : _root_.UInt8)))
@@ -82,32 +98,40 @@ def «layout» : (_root_.Array (_root_.Array _root_.UInt8)) :=
 def «cellIndex» («local:0» : _root_.UInt8) : _root_.UInt64 :=
   (if (_root_.Decidable.decide («local:0» = (0 : _root_.UInt8))) then (0 : _root_.UInt64) else (if (_root_.Decidable.decide («local:0» = (1 : _root_.UInt8))) then (1 : _root_.UInt64) else (if (_root_.Decidable.decide («local:0» = (2 : _root_.UInt8))) then (2 : _root_.UInt64) else (if (_root_.Decidable.decide («local:0» = (3 : _root_.UInt8))) then (3 : _root_.UInt64) else (if (_root_.Decidable.decide («local:0» = (4 : _root_.UInt8))) then (4 : _root_.UInt64) else (if (_root_.Decidable.decide («local:0» = (5 : _root_.UInt8))) then (5 : _root_.UInt64) else (if (_root_.Decidable.decide («local:0» = (6 : _root_.UInt8))) then (6 : _root_.UInt64) else (if (_root_.Decidable.decide («local:0» = (7 : _root_.UInt8))) then (7 : _root_.UInt64) else (8 : _root_.UInt64)))))))))
 
-def «IsWall» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«Position») («local:1» : _root_.Bool) : _root_.Bool :=
-  (let «local:2» := (_root_.Option.getD ((_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«layout»))[((_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«cellIndex» («local:0»).«field:Y»)).toNat]? (#[] : (_root_.Array _root_.UInt8))); (let «local:3» := (_root_.Option.getD («local:2»)[((_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«cellIndex» («local:0»).«field:X»)).toNat]? (0 : _root_.UInt8)); (if (_root_.Decidable.decide («local:3» = (1 : _root_.UInt8))) then _root_.Bool.true else (if «local:1» then (_root_.Decidable.decide («local:3» = (2 : _root_.UInt8))) else _root_.Bool.false))))
+def «IsWall» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«Position») («local:1» : _root_.Bool) : _root_.Bool :=
+  (let «local:2» := (_root_.Option.getD ((_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«layout»))[((_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«cellIndex» («local:0»).«field:Y»)).toNat]? (#[] : (_root_.Array _root_.UInt8))); (let «local:3» := (_root_.Option.getD («local:2»)[((_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«cellIndex» («local:0»).«field:X»)).toNat]? (0 : _root_.UInt8)); (if (_root_.Decidable.decide («local:3» = (1 : _root_.UInt8))) then _root_.Bool.true else (if «local:1» then (_root_.Decidable.decide («local:3» = (2 : _root_.UInt8))) else _root_.Bool.false))))
 
-def «moveIfOpen» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«Position») («local:1» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«Position») («local:2» : _root_.Bool) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«Position» :=
-  (if (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«IsWall» «local:1» «local:2») then «local:0» else «local:1»)
+def «backward» («local:0» : _root_.UInt8) («local:1» : _root_.Bool) : _root_.UInt8 :=
+  (if (_root_.Decidable.decide («local:0» > (0 : _root_.UInt8))) then («local:0» - (1 : _root_.UInt8)) else (if «local:1» then (7 : _root_.UInt8) else «local:0»))
 
 def «forward» («local:0» : _root_.UInt8) («local:1» : _root_.Bool) : _root_.UInt8 :=
   (if (_root_.Decidable.decide («local:0» < (7 : _root_.UInt8))) then («local:0» + (1 : _root_.UInt8)) else (if «local:1» then (0 : _root_.UInt8) else «local:0»))
 
-def «Step» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«Position») («local:1» : _root_.UInt8) («local:2» : _root_.Bool) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«Position» :=
-  (if (_root_.Decidable.decide («local:1» = (0 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«moveIfOpen» «local:0» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«Position».mk («local:0»).«field:X» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«backward» («local:0»).«field:Y» «local:2»)) «local:2») else (if (_root_.Decidable.decide («local:1» = (1 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«moveIfOpen» «local:0» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«Position».mk («local:0»).«field:X» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«forward» («local:0»).«field:Y» «local:2»)) «local:2») else (if (_root_.Decidable.decide («local:1» = (2 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«moveIfOpen» «local:0» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«Position».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«backward» («local:0»).«field:X» «local:2») («local:0»).«field:Y») «local:2») else (if (_root_.Decidable.decide («local:1» = (3 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«moveIfOpen» «local:0» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«Position».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«forward» («local:0»).«field:X» «local:2») («local:0»).«field:Y») «local:2») else «local:0»))))
+def «moveIfOpen» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«Position») («local:1» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«Position») («local:2» : _root_.Bool) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«Position» :=
+  (if (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«IsWall» «local:1» «local:2») then «local:0» else «local:1»)
 
-def «replayMove» («local:0» : _root_.UInt8) («local:1» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«replayState») : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«replayState» :=
-  (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«replayState».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«Step» («local:1»).«field:Position» «local:0» («local:1»).«field:Wrap») («local:1»).«field:Wrap»)
+def «Step» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«Position») («local:1» : _root_.UInt8) («local:2» : _root_.Bool) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«Position» :=
+  (if (_root_.Decidable.decide («local:1» = (0 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«moveIfOpen» «local:0» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«Position».mk («local:0»).«field:X» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«backward» («local:0»).«field:Y» «local:2»)) «local:2») else (if (_root_.Decidable.decide («local:1» = (1 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«moveIfOpen» «local:0» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«Position».mk («local:0»).«field:X» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«forward» («local:0»).«field:Y» «local:2»)) «local:2») else (if (_root_.Decidable.decide («local:1» = (2 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«moveIfOpen» «local:0» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«Position».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«backward» («local:0»).«field:X» «local:2») («local:0»).«field:Y») «local:2») else (if (_root_.Decidable.decide («local:1» = (3 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«moveIfOpen» «local:0» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«Position».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«forward» («local:0»).«field:X» «local:2») («local:0»).«field:Y») «local:2») else «local:0»))))
 
-def «Replay» («local:0» : (_root_.List _root_.UInt8)) («local:1» : _root_.Bool) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«Position» :=
-  ((_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«fold».list _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«replayMove» «local:0» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«replayState».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«Start») «local:1»))).«field:Position»
+structure «replayState» where
+  «field:Position» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«Position»
+  «field:Wrap» : _root_.Bool
 
-def «Won» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».«Position») : _root_.Bool :=
-  (if (_root_.Decidable.decide ((«local:0»).«field:X» = (7 : _root_.UInt8))) then (_root_.Decidable.decide ((«local:0»).«field:Y» = (1 : _root_.UInt8))) else _root_.Bool.false)
+def «replayMove» («local:0» : _root_.UInt8) («local:1» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«replayState») : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«replayState» :=
+  (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«replayState».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«Step» («local:1»).«field:Position» «local:0» («local:1»).«field:Wrap») («local:1»).«field:Wrap»)
 
-end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game»
+def «Replay» («local:0» : (_root_.List _root_.UInt8)) («local:1» : _root_.Bool) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«Position» :=
+  ((_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«fold».list _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«replayMove» «local:0» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«replayState».mk (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».«Start») «local:1»))).«field:Position»
 
-namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».Laws
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model»
+
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».Laws
 
 set_option autoImplicit false
+
+def «youCantWin» : Prop :=
+  ∀ (wrap : Bool) (moves : List UInt8),
+  Won (Replay moves wrap) = false
 
 def «stepBoundedEdge» : Prop :=
   let actual := Step (Position.mk 0 3) 2 false
@@ -154,8 +178,4 @@ def «stepUnknownDirection» : Prop :=
   let expected := Start
   actual.«field:X» = expected.«field:X» ∧ actual.«field:Y» = expected.«field:Y»
 
-def «youCantWin» : Prop :=
-  ∀ (wrap : Bool) (moves : List UInt8),
-  Won (Replay moves wrap) = false
-
-end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game».Laws
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model».Laws

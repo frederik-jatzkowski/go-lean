@@ -67,13 +67,23 @@ func TestPackageSelection(t *testing.T) {
 import numbers "example.test/model/math"
 //golean:verify law : Client 0 = 1
 func Client(x int64) int64 { return numbers.Increment(x) }
-func Ignored() { go func(){}() }
+func Unmarked() bool { return true }
 `
 	put(t, "client/client.go", source)
 	put(t, "math/math.go", `package math
 //golean:export
 func Increment(x int64) int64 { return helper(x) }
 func helper(x int64) int64 { return x + 1 }
+`)
+	put(t, "math/other.go", "package math\nfunc uncalled() bool { return true }\n")
+	put(t, "math/other_test.go", "package math\nvar testOnly = []int{1}\n")
+	put(t, "math/excluded.go", "//go:build ignore\n\npackage math\nvar excluded int\n")
+	put(t, "ordinary/runtime.go", `//golean:verify:import Some.Unused.Module
+package ordinary
+var mutable int
+func init() { mutable++ }
+//golean:assume identity : ∀ x, Identity x = x
+func Identity(x int64) int64 { return x }
 `)
 	put(t, "client/nested/nested.go", "package nested\n//golean:export\nfunc Export() bool { return true }\n")
 	put(t, "legacy/go.mod", "module example.test/legacy\n")
@@ -93,6 +103,8 @@ func helper(x int64) int64 { return x + 1 }
 	}
 	numbers := get(t, "math/math.lean")
 	if !strings.Contains(client, "import «math».«math»") ||
+		!strings.Contains(client, "def «Unmarked»") ||
+		!strings.Contains(numbers, "def «uncalled»") ||
 		strings.Index(numbers, "def «helper»") > strings.Index(numbers, "def «Increment»") {
 		t.Fatal("dependency was not generated and ordered")
 	}
@@ -113,6 +125,7 @@ func helper(x int64) int64 { return x + 1 }
 		t.Fatal(err)
 	}
 	lake := get(t, "lakefile.toml")
+	missing(t, "ordinary/ordinary.lean")
 	if !strings.Contains(lake, "'Manual'") || strings.Contains(lake, "legacy") || get(t, proofFile) != handwritten {
 		t.Fatal("generation changed a manual entry or proof, or selected an archived package")
 	}
@@ -123,9 +136,23 @@ func helper(x int64) int64 { return x + 1 }
 		t.Fatal("generation is not deterministic")
 	}
 
+	put(t, "math/other.go", "package math\nfunc uncalled() bool { for { return true } }\n")
+	err := command("transpile", "./client")
+	if err == nil || !strings.Contains(err.Error(), "other.go:2:") || !strings.Contains(err.Error(), "raw loops are unsupported") {
+		t.Fatalf("expected an error in the uncalled dependency function, got %v", err)
+	}
+	put(t, "math/other.go", "package math\nfunc uncalled() bool { return true }\n")
+	put(t, "client/client.go", strings.Replace(source, "numbers.Increment(x)", "numbers.GoOnly(x)", 1))
+	put(t, "math/other.go", "package math\nfunc GoOnly(x int64) int64 { return x }\n")
+	err = command("transpile", "./client")
+	if err == nil || !strings.Contains(err.Error(), "requires golean:export or a contract") {
+		t.Fatalf("expected a cross-package export error, got %v", err)
+	}
+	put(t, "math/other.go", "package math\nfunc uncalled() bool { return true }\n")
+
 	put(t, "client/client.go", strings.Replace(source, "return numbers.Increment(x)",
 		"for x > 0 { x-- }; return numbers.Increment(x)", 1))
-	err := command("transpile", "./...")
+	err = command("transpile", "./...")
 	if err == nil || !strings.Contains(err.Error(), "client.go:4:") || !strings.Contains(err.Error(), "raw loops are unsupported") {
 		t.Fatalf("expected source-located loop rejection, got %v", err)
 	}
@@ -145,7 +172,6 @@ package model
 //golean:export
 func Step(n int64) int64 { return n + 1 }
 
-//golean:export
 func Initial() int64 { return 0 }
 `)
 	put(t, "model/b.go", `//golean:verify:import spec.Spec
@@ -192,6 +218,23 @@ func Call(n int64) int64 { return model.Step(n) }
 	if !strings.Contains(get(t, "standalone/standalone.lean"), "def «onlyLaw» : Prop") {
 		t.Fatal("a package law must select a package with no modeled functions")
 	}
+}
+
+func TestModelledPackageDeclarationDiagnostics(t *testing.T) {
+	workspace(t, false)
+	for _, tc := range []struct{ marker, decl, diagnostic string }{
+		{"package example\n//golean:export\nfunc F() bool { return true }", "type unused []byte", "unsupported type"},
+		{"package example\ntype Value int\n//golean:verify law : True\nfunc (v Value) Check() bool { return v == 0 }", "var mutable int", "package variables"},
+		{"//golean:verify law : True\npackage example", "func init() {}", "unsupported function declaration init"},
+	} {
+		put(t, "f.go", tc.marker+"\n")
+		put(t, "unused.go", "package example\n"+tc.decl+"\n")
+		err := command("transpile", ".")
+		if err == nil || !strings.Contains(err.Error(), "unused.go:2:") || !strings.Contains(err.Error(), tc.diagnostic) {
+			t.Errorf("%s: expected %q at unused.go:2, got %v", tc.decl, tc.diagnostic, err)
+		}
+	}
+	missing(t, "example.lean")
 }
 
 func TestPackageDirectiveDiagnostics(t *testing.T) {
@@ -255,14 +298,15 @@ func TestFoldCallbackDiagnostics(t *testing.T) {
 	} {
 		put(t, "f.go", `package example
 import "github.com/frederik-jatzkowski/go-lean/pkg/lean"
+//golean:export
+func F(n uint) uint { `+tc.body+` }
 func add(i, state uint) uint { return i + state }
 var saved = add
 func generic[T ~uint](i uint, state T) T { return state }
 func recursive(i, state uint) uint { return F(i + state) }
 type receiver struct{}
 func (receiver) step(i, state uint) uint { return i + state }
-//golean:export
-func F(n uint) uint { `+tc.body+" }\n")
+`)
 		err := command("transpile", ".")
 		if err == nil || !strings.Contains(err.Error(), tc.diagnostic) {
 			t.Errorf("%s: got %v, expected %q", tc.body, err, tc.diagnostic)
@@ -310,6 +354,8 @@ func TestTargetWordSize(t *testing.T) {
 	t.Setenv("GOARCH", "386")
 	put(t, "word.go", `package word
 import "github.com/frederik-jatzkowski/go-lean/pkg/lean"
+const Default = 1<<31 - 1
+const Wide uint64 = 1<<64 - 1
 func next(index, x uint) uint { return x + index }
 //golean:export
 func Sum(n uint) uint { return lean.FoldN(n, uint(0), next) }
@@ -318,8 +364,18 @@ func Sum(n uint) uint { return lean.FoldN(n, uint(0), next) }
 		t.Fatal(err)
 	}
 	model := get(t, "word.lean")
-	if !strings.Contains(model, "step : _root_.UInt32") || strings.Contains(model, "_root_.UInt64") {
+	if !strings.Contains(model, "step : _root_.UInt32") ||
+		!strings.Contains(model, "def «Default» : _root_.Int32") ||
+		!strings.Contains(model, "def «Wide» : _root_.UInt64") {
 		t.Fatalf("Go 386 word size did not reach the model:\n%s", model)
+	}
+	put(t, "overflow.go", "package word\nconst Overflow = 1<<31\n")
+	err := command("transpile", ".")
+	if err == nil || !strings.Contains(err.Error(), "overflow.go:2:") || !strings.Contains(err.Error(), "not representable as int") {
+		t.Fatalf("expected a target-width error, got %v", err)
+	}
+	if get(t, "word.lean") != model {
+		t.Fatal("an unrepresentable constant changed generated output")
 	}
 }
 
@@ -342,7 +398,7 @@ func TestCuratedLeanSemantics(t *testing.T) {
 	if !errors.As(err, &failure) || !strings.Contains(string(output), "unapproved axiom sorryAx") {
 		t.Fatalf("expected scaffold to fail axiom audit, got %v\n%s", err, output)
 	}
-	for _, law := range []string{"arrays", "bits", "bytes", "branches", "folds", "lists", "options", "ordered", "overflow", "signedMinimum"} {
+	for _, law := range []string{"arrays", "bits", "bytes", "branches", "folds", "lists", "options", "ordered", "overflow", "packageDefinitions", "signedMinimum"} {
 		proof := "theorem «" + law + "» : Laws.«" + law + "» := by\n"
 		scaffold = strings.Replace(scaffold, proof+"  sorry", proof+"  unfold Laws.«"+law+"»\n  decide", 1)
 	}
@@ -353,11 +409,19 @@ func TestCuratedLeanSemantics(t *testing.T) {
 	}
 }
 
-const curatedGo = `package model
+const curatedGo = `//golean:verify packageDefinitions : let value : Scalar := Seven
+//golean:verify+   let result : Alias := unreferenced value
+//golean:verify+   result.«field:Value» = 7
+package model
 
 import curated "github.com/frederik-jatzkowski/go-lean/pkg/lean"
 
 type key int16
+type Scalar uint8
+type Record struct { Value Scalar }
+type Alias = Record
+const Seven Scalar = 7
+func unreferenced(value Scalar) Record { return Record{Value: value} }
 
 //golean:export
 func Bool() bool { return true }

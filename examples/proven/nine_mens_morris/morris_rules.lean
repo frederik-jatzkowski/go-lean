@@ -1,6 +1,6 @@
-import nine_mens_morris.morris
+import nine_mens_morris.model.morris
 
-namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/nine_mens_morris».Rules
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/nine_mens_morris/model».Rules
 
 -- Share the state representation with the implementation. The rules below
 -- use its fields without calling any translated Go operation.
@@ -123,13 +123,13 @@ def history (act : Game → Action → ActionResult) (result : Game → UInt8)
     let ⟨next, accepted⟩ := act s a
     (accepted, next, result next) :: history act result next rest
 
-end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/nine_mens_morris».Rules
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/nine_mens_morris/model».Rules
 
-namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/nine_mens_morris»
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/nine_mens_morris/model»
 
 def act (s : Game) : Rules.Action → ActionResult
-  | .place p => «Game$place» s p
-  | .move f t => «Game$move» s f t
-  | .capture p => «Game$capture» s p
+  | .place p => «Game$Place» s p
+  | .move f t => «Game$Move» s f t
+  | .capture p => «Game$Capture» s p
 
-end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/nine_mens_morris»
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/nine_mens_morris/model»

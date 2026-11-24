@@ -4,9 +4,11 @@ package lower
 import (
 	"fmt"
 	"go/ast"
+	"go/constant"
 	"go/token"
 	"go/types"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/frederik-jatzkowski/go-lean/internal/ir"
@@ -19,7 +21,7 @@ type compiler struct {
 	packages map[string]*ir.Package
 	state    map[types.Object]uint8
 	abstract map[*types.Func]bool
-	roots    []*types.Func
+	pending  []string
 }
 
 func Program(source *load.Program) ([]*ir.Package, error) {
@@ -28,14 +30,17 @@ func Program(source *load.Program) ([]*ir.Package, error) {
 		packages: make(map[string]*ir.Package),
 		state:    make(map[types.Object]uint8),
 		abstract: make(map[*types.Func]bool),
-		roots:    slices.Clone(source.Roots),
 	}
-	for _, path := range source.LawPackages {
+	for _, path := range source.SelectedPackages {
 		c.output(path)
 	}
-	for i := 0; i < len(c.roots); i++ {
-		if err := c.function(c.roots[i]); err != nil {
-			return nil, err
+	for i := 0; i < len(c.pending); i++ {
+		path := c.pending[i]
+		p := source.Packages[path]
+		for _, decl := range source.Declarations[path] {
+			if err := c.declaration(p, decl); err != nil {
+				return nil, err
+			}
 		}
 	}
 	result := make([]*ir.Package, 0, len(c.packages))
@@ -50,6 +55,63 @@ func Program(source *load.Program) ([]*ir.Package, error) {
 		}
 	}
 	return result, nil
+}
+
+func (c *compiler) declaration(p *packages.Package, decl load.Declaration) error {
+	pos := decl.Pos
+	switch obj := decl.Object.(type) {
+	case *types.Func:
+		if (obj.Name() == "init" && obj.Signature().Recv() == nil) || obj.Name() == "_" {
+			return load.Error(p, pos, "unsupported function declaration %s", obj.Name())
+		}
+		return c.function(obj)
+	case *types.TypeName:
+		if alias, ok := obj.Type().(*types.Alias); ok && alias.TypeParams().Len() != 0 {
+			return load.Error(p, pos, "unsupported generic type alias %s", obj.Name())
+		}
+		t, err := c.goType(p, pos, obj.Type())
+		if err != nil {
+			return err
+		}
+		if obj.Name() != "_" && (t.Kind != ir.Record || obj.IsAlias()) {
+			out := c.output(p.PkgPath)
+			out.Decls = append(out.Decls, ir.TypeAlias{Symbol: symbol(obj), Type: t})
+		}
+	case *types.Const:
+		typ := types.Default(obj.Type())
+		t, err := c.goType(p, pos, typ)
+		if err != nil {
+			return err
+		}
+		value := obj.Val().ExactString()
+		switch obj.Val().Kind() {
+		case constant.String:
+			value = constant.StringVal(obj.Val())
+		case constant.Int:
+			if !fitsInteger(p.TypesSizes, typ, value) {
+				return load.Error(p, pos, "constant %s is not representable as %s", obj.Name(), typ)
+			}
+		}
+		if obj.Name() != "_" {
+			out := c.output(p.PkgPath)
+			out.Decls = append(out.Decls, ir.NamedConstant{Symbol: symbol(obj), Value: ir.Constant{Type: t, Value: value}})
+		}
+	case *types.Var:
+		return load.Error(p, pos, "package variables are unsupported in modeled Go")
+	default:
+		return load.Error(p, pos, "unsupported package declaration")
+	}
+	return nil
+}
+
+func fitsInteger(sizes types.Sizes, typ types.Type, value string) bool {
+	bits := int(sizes.Sizeof(typ)) * 8
+	if typ.Underlying().(*types.Basic).Info()&types.IsUnsigned != 0 {
+		_, err := strconv.ParseUint(value, 10, bits)
+		return err == nil
+	}
+	_, err := strconv.ParseInt(value, 10, bits)
+	return err == nil
 }
 
 func symbol(obj types.Object) ir.Symbol {
@@ -83,14 +145,15 @@ func (c *compiler) output(path string) *ir.Package {
 		for _, law := range laws {
 			p.Laws = append(p.Laws, ir.Law{Proposition: law})
 		}
-		// Focused generation must retain the marked functions that a package law can reference.
-		c.roots = append(c.roots, c.source.PackageRoots[path]...)
 	}
 	p.Word = ir.UInt64
 	if source.TypesSizes.Sizeof(types.Typ[types.Uint]) == 4 {
 		p.Word = ir.UInt32
 	}
 	c.packages[path] = p
+	if _, modeled := c.source.Declarations[path]; modeled {
+		c.pending = append(c.pending, path)
+	}
 	return p
 }
 

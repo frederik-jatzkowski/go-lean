@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler"
+	model "github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler/model"
 )
 
 func main() {
@@ -14,32 +15,32 @@ func main() {
 	}
 
 	compiled, diagnostic := compiler.Compile([]byte(os.Args[1]))
-	if diagnostic.Kind != compiler.NoDiagnostic {
+	if diagnostic.Kind != model.NoDiagnostic {
 		fmt.Fprintf(os.Stderr, "%s at byte %d\n", diagnosticName(diagnostic.Kind), diagnostic.Offset)
 		os.Exit(1)
 	}
 
 	state, status := compiler.Run(compiled.Code)
-	if status != compiler.Halted || len(state.Stack) != 1 {
+	if status != model.Halted || len(state.Stack) != 1 {
 		fmt.Fprintf(os.Stderr, "VM stopped with status %d and stack depth %d\n", status, len(state.Stack))
 		os.Exit(1)
 	}
-	if compiled.Type == compiler.Bool {
+	if compiled.Type == model.Bool {
 		fmt.Printf("Bool: %t\n", state.Stack[0] != 0)
 	} else {
 		fmt.Printf("U8: %d\n", state.Stack[0])
 	}
 }
 
-func diagnosticName(kind compiler.DiagnosticKind) string {
+func diagnosticName(kind model.DiagnosticKind) string {
 	switch kind {
-	case compiler.CodeTooLarge:
+	case model.CodeTooLarge:
 		return "CodeTooLarge"
-	case compiler.InvalidLexeme:
+	case model.InvalidLexeme:
 		return "InvalidLexeme"
-	case compiler.SyntaxError:
+	case model.SyntaxError:
 		return "SyntaxError"
-	case compiler.TypeMismatch:
+	case model.TypeMismatch:
 		return "TypeMismatch"
 	}
 	return "UnexpectedDiagnostic"

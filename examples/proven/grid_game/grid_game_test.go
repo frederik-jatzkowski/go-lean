@@ -3,10 +3,12 @@ package grid_game
 import (
 	"slices"
 	"testing"
+
+	model "github.com/frederik-jatzkowski/go-lean/examples/proven/grid_game/model"
 )
 
 func TestWallLayout(t *testing.T) {
-	want := [Size]string{
+	want := [model.Size]string{
 		"S....W..",
 		"S....W..",
 		"......WW",
@@ -19,16 +21,16 @@ func TestWallLayout(t *testing.T) {
 	for _, wrap := range []bool{false, true} {
 		for y, row := range want {
 			for x, cell := range row {
-				position := Position{X: uint8(x), Y: uint8(y)}
+				position := model.Position{X: uint8(x), Y: uint8(y)}
 				expected := cell == 'W' || (wrap && cell == 'S')
-				if got := IsWall(position, wrap); got != expected {
-					t.Errorf("IsWall(%v, %t) = %t, want %t", position, wrap, got, expected)
+				if got := model.IsWall(position, wrap); got != expected {
+					t.Errorf("model.IsWall(%v, %t) = %t, want %t", position, wrap, got, expected)
 				}
 			}
 		}
-		for _, position := range []Position{{X: Size, Y: 2}, {X: 7, Y: Size}} {
-			if IsWall(position, wrap) {
-				t.Errorf("IsWall(%v, %t) = true outside the board", position, wrap)
+		for _, position := range []model.Position{{X: model.Size, Y: 2}, {X: 7, Y: model.Size}} {
+			if model.IsWall(position, wrap) {
+				t.Errorf("model.IsWall(%v, %t) = true outside the board", position, wrap)
 			}
 		}
 	}
@@ -38,23 +40,23 @@ func TestPlay(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		wrap bool
-		want []Position
+		want []model.Position
 	}{
-		{"bounded", false, []Position{Start(), {0, 1}, {0, 1}, {0, 2}}},
-		{"wraparound", true, []Position{Start(), Start(), Start(), {1, 2}}},
+		{"bounded", false, []model.Position{model.Start(), {X: 0, Y: 1}, {X: 0, Y: 1}, {X: 0, Y: 2}}},
+		{"wraparound", true, []model.Position{model.Start(), model.Start(), model.Start(), {X: 1, Y: 2}}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			moves := []Direction{Left, Left, Down}
-			var shown []Position
+			moves := []model.Direction{model.Left, model.Left, model.Down}
+			var shown []model.Position
 			calls := 0
-			Play(test.wrap, func() (Direction, bool) {
+			Play(test.wrap, func() (model.Direction, bool) {
 				index := calls
 				calls++
 				if index >= len(moves) {
-					return Right, false
+					return model.Right, false
 				}
 				return moves[index], true
-			}, func(position Position) {
+			}, func(position model.Position) {
 				shown = append(shown, position)
 			})
 			if calls != len(moves)+1 || !slices.Equal(shown, test.want) {

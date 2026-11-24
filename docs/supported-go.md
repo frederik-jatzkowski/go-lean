@@ -1,6 +1,8 @@
 # Supported Go
 
-go-lean checks the call graph reached from exported and verified operations. Ordinary Go at the boundary can use the full language. Within the modeled graph, use immutable local initializers, fully keyed value literals, conditionals, early returns, and one unnamed result per function or method.
+A function or method with `//golean:export` or `//golean:verify` makes its package modeled. A package-level `//golean:verify` law also makes the package modeled. go-lean checks all active production Go files in each modeled package it generates, including unused private declarations. Test files and files excluded by the current Go build configuration are outside that check. Keep ordinary Go code in a separate package.
+
+Use immutable local initializers, fully keyed value literals, conditionals, early returns, and one unnamed result per function or method. Package variables and `init` functions are unsupported.
 
 ## Types and operations
 
@@ -18,6 +20,8 @@ go-lean checks the call graph reached from exported and verified operations. Ord
 | `lean.BitVec` | A width paired with a bit vector of that width. Widths above 64 yield `None`. Index zero is the least significant bit. |
 
 Empty curated collection literals model empty collections. Updates preserve earlier values. Byte extraction clamps half-open bounds. Use `lean.ByteArrayFromBytes` to copy a Go slice at the boundary. When applying a Lean statement over arbitrary collection sizes to Go, account for the lengths representable by Go's `int`.
+
+Package constants use Go’s compile-time values. Lean emits a named definition for each named constant, using the declared Go type or the default type for an untyped constant. The value must fit that type on the current Go target. Supported named scalar types and type aliases become Lean abbreviations.
 
 ## Calls and traversal
 
@@ -38,4 +42,4 @@ For direct recursion, supply a Lean `Nat` measure in scope of the entry paramete
 
 Raw slices and maps, pointers, interfaces, function values, reassignments, raw Go loops, switches, user-defined generics, and unannotated or mutual recursion are outside the modeled subset. Receiver support covers concrete value methods. Pointer receivers, implicit dereferences, promoted methods, and stored method values are outside that support.
 
-When translation reports a Go location, trace the call from the marked operation and decide which values should cross the model boundary. The [grid game](../examples/proven/grid_game/README.md) shows a runtime driver calling a modeled step, and the [compiler](../examples/proven/stack_machine_compiler/README.md) shows raw bytes converted at the boundary.
+When translation reports a Go location, adapt that declaration to the subset or move it to an ordinary Go package. Choose which values should cross the package boundary. The [grid game](../examples/proven/grid_game/README.md) shows a runtime driver calling a modeled step, and the [compiler](../examples/proven/stack_machine_compiler/README.md) shows raw bytes converted at the boundary.

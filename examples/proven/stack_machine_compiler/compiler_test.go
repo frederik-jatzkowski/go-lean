@@ -3,7 +3,6 @@ package compiler
 import (
 	"bytes"
 	"errors"
-	"math"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -11,31 +10,33 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	model "github.com/frederik-jatzkowski/go-lean/examples/proven/stack_machine_compiler/model"
 )
 
 func TestCompileAndRun(t *testing.T) {
 	for _, tc := range []struct {
 		source string
 		value  byte
-		typ    Type
+		typ    model.Type
 	}{
-		{"0", 0, U8},
-		{"255", 255, U8},
-		{" \tadd 255\r\n1 ", 0, U8},
-		{"sub 2 5", 253, U8},
-		{"eq 255 0", 0, Bool},
-		{"lt 2 5", 1, Bool},
-		{"lt 5 2", 0, Bool},
-		{"and false true", 0, Bool},
-		{"and eq add 255 1 0 not false", 1, Bool},
+		{"0", 0, model.U8},
+		{"255", 255, model.U8},
+		{" \tadd 255\r\n1 ", 0, model.U8},
+		{"sub 2 5", 253, model.U8},
+		{"eq 255 0", 0, model.Bool},
+		{"lt 2 5", 1, model.Bool},
+		{"lt 5 2", 0, model.Bool},
+		{"and false true", 0, model.Bool},
+		{"and eq add 255 1 0 not false", 1, model.Bool},
 	} {
 		t.Run(tc.source, func(t *testing.T) {
 			compiled, diagnostic := Compile([]byte(tc.source))
-			if diagnostic != (Diagnostic{}) || compiled.Type != tc.typ {
+			if diagnostic != (model.Diagnostic{}) || compiled.Type != tc.typ {
 				t.Fatalf("Compile returned type %v and %+v, want %v and no diagnostic", compiled.Type, diagnostic, tc.typ)
 			}
 			state, status := Run(compiled.Code)
-			if status != Halted || len(state.Stack) != 1 || state.Stack[0] != tc.value {
+			if status != model.Halted || len(state.Stack) != 1 || state.Stack[0] != tc.value {
 				t.Fatalf("Run returned %+v with status %v, want a single value %d at halt", state, status, tc.value)
 			}
 		})
@@ -45,8 +46,8 @@ func TestCompileAndRun(t *testing.T) {
 func TestDecimalLiterals(t *testing.T) {
 	for value := range 256 {
 		compiled, diagnostic := Compile([]byte(strconv.Itoa(value)))
-		if diagnostic != (Diagnostic{}) || compiled.Type != U8 ||
-			!bytes.Equal(compiled.Code, []byte{Push, byte(value), Halt, 0}) {
+		if diagnostic != (model.Diagnostic{}) || compiled.Type != model.U8 ||
+			!bytes.Equal(compiled.Code, []byte{model.Push, byte(value), model.Halt, 0}) {
 			t.Fatalf("decimal %d compiled to %+v with diagnostic %+v", value, compiled, diagnostic)
 		}
 	}
@@ -54,8 +55,8 @@ func TestDecimalLiterals(t *testing.T) {
 
 func TestCompileEmitsRightOperandFirst(t *testing.T) {
 	compiled, diagnostic := Compile([]byte("sub sub 9 2 sub 5 1"))
-	want := []byte{Push, 1, Push, 5, Sub, 0, Push, 2, Push, 9, Sub, 0, Sub, 0, Halt, 0}
-	if diagnostic != (Diagnostic{}) || !bytes.Equal(compiled.Code, want) {
+	want := []byte{model.Push, 1, model.Push, 5, model.Sub, 0, model.Push, 2, model.Push, 9, model.Sub, 0, model.Sub, 0, model.Halt, 0}
+	if diagnostic != (model.Diagnostic{}) || !bytes.Equal(compiled.Code, want) {
 		t.Fatalf("Compile returned %+v and %+v, want %v and no diagnostic", compiled, diagnostic, want)
 	}
 }
@@ -63,14 +64,14 @@ func TestCompileEmitsRightOperandFirst(t *testing.T) {
 func TestVariableSize(t *testing.T) {
 	source := strings.Repeat("sub ", 80) + "1" + strings.Repeat(" 1", 80)
 	compiled, d := Compile([]byte(source))
-	if d != (Diagnostic{}) || len(compiled.Code) != 324 {
+	if d != (model.Diagnostic{}) || len(compiled.Code) != 324 {
 		t.Fatal(d, len(compiled.Code))
 	}
 	var st State
 	for i := 0; i < 81; i++ {
-		var status Status
+		var status model.Status
 		st, status = Step(compiled.Code, st)
-		if status != Continue {
+		if status != model.Continue {
 			t.Fatal(i, status)
 		}
 	}
@@ -78,40 +79,34 @@ func TestVariableSize(t *testing.T) {
 		t.Fatal(len(st.Stack))
 	}
 	st, status := Run(compiled.Code)
-	if status != Halted || st.PC != 322 || !bytes.Equal(st.Stack, []byte{177}) {
+	if status != model.Halted || st.PC != 322 || !bytes.Equal(st.Stack, []byte{177}) {
 		t.Fatal(st, status)
-	}
-}
-func TestCodeFits(t *testing.T) {
-	const last = (math.MaxInt - 2) / 2
-	if !codeFits(last) || codeFits(last+1) || codeFits(^uint(0)) {
-		t.Fatal("incorrect output-size boundary")
 	}
 }
 func TestCompileDiagnostics(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		source []byte
-		want   Diagnostic
+		want   model.Diagnostic
 	}{
-		{"nil", nil, Diagnostic{SyntaxError, 0}},
-		{"empty", []byte{}, Diagnostic{SyntaxError, 0}},
-		{"whitespace only", []byte(" \t\r\n"), Diagnostic{SyntaxError, 4}},
-		{"wide offset", []byte(strings.Repeat(" ", 70000) + "?"), Diagnostic{InvalidLexeme, 70000}},
-		{"non-ASCII", []byte{0x80}, Diagnostic{InvalidLexeme, 0}},
-		{"invalid word", []byte("add maybe 1"), Diagnostic{InvalidLexeme, 4}},
-		{"case sensitive", []byte("False"), Diagnostic{InvalidLexeme, 0}},
-		{"lexeme too long", []byte("not foolish"), Diagnostic{InvalidLexeme, 4}},
-		{"literal overflow", []byte("256"), Diagnostic{InvalidLexeme, 0}},
-		{"leading zero", []byte("00"), Diagnostic{InvalidLexeme, 0}},
-		{"missing operand at full length", []byte("add 1" + strings.Repeat(" ", 251)), Diagnostic{SyntaxError, 256}},
-		{"extra expression", []byte("true false "), Diagnostic{SyntaxError, 11}},
-		{"extra expressions", []byte(strings.Repeat("0 ", 32) + "0"), Diagnostic{SyntaxError, 65}},
-		{"invalid 33rd token", []byte(strings.Repeat("0 ", 32) + "?"), Diagnostic{InvalidLexeme, 64}},
-		{"type mismatch", []byte("  add true 1"), Diagnostic{TypeMismatch, 2}},
-		{"syntax before type mismatch", []byte("add true 1 2"), Diagnostic{SyntaxError, 12}},
-		{"two unary type errors", []byte("and not 1 not 2"), Diagnostic{TypeMismatch, 10}},
-		{"right mismatch before left", []byte("and add true 1 sub false 2"), Diagnostic{TypeMismatch, 15}},
+		{"nil", nil, model.Diagnostic{Kind: model.SyntaxError, Offset: 0}},
+		{"empty", []byte{}, model.Diagnostic{Kind: model.SyntaxError, Offset: 0}},
+		{"whitespace only", []byte(" \t\r\n"), model.Diagnostic{Kind: model.SyntaxError, Offset: 4}},
+		{"wide offset", []byte(strings.Repeat(" ", 70000) + "?"), model.Diagnostic{Kind: model.InvalidLexeme, Offset: 70000}},
+		{"non-ASCII", []byte{0x80}, model.Diagnostic{Kind: model.InvalidLexeme, Offset: 0}},
+		{"invalid word", []byte("add maybe 1"), model.Diagnostic{Kind: model.InvalidLexeme, Offset: 4}},
+		{"case sensitive", []byte("False"), model.Diagnostic{Kind: model.InvalidLexeme, Offset: 0}},
+		{"lexeme too long", []byte("not foolish"), model.Diagnostic{Kind: model.InvalidLexeme, Offset: 4}},
+		{"literal overflow", []byte("256"), model.Diagnostic{Kind: model.InvalidLexeme, Offset: 0}},
+		{"leading zero", []byte("00"), model.Diagnostic{Kind: model.InvalidLexeme, Offset: 0}},
+		{"missing operand at full length", []byte("add 1" + strings.Repeat(" ", 251)), model.Diagnostic{Kind: model.SyntaxError, Offset: 256}},
+		{"extra expression", []byte("true false "), model.Diagnostic{Kind: model.SyntaxError, Offset: 11}},
+		{"extra expressions", []byte(strings.Repeat("0 ", 32) + "0"), model.Diagnostic{Kind: model.SyntaxError, Offset: 65}},
+		{"invalid 33rd token", []byte(strings.Repeat("0 ", 32) + "?"), model.Diagnostic{Kind: model.InvalidLexeme, Offset: 64}},
+		{"type mismatch", []byte("  add true 1"), model.Diagnostic{Kind: model.TypeMismatch, Offset: 2}},
+		{"syntax before type mismatch", []byte("add true 1 2"), model.Diagnostic{Kind: model.SyntaxError, Offset: 12}},
+		{"two unary type errors", []byte("and not 1 not 2"), model.Diagnostic{Kind: model.TypeMismatch, Offset: 10}},
+		{"right mismatch before left", []byte("and add true 1 sub false 2"), model.Diagnostic{Kind: model.TypeMismatch, Offset: 15}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			compiled, diagnostic := Compile(tc.source)
@@ -127,12 +122,12 @@ func TestRawVM(t *testing.T) {
 		name   string
 		code   []byte
 		pc     uint
-		status Status
+		status model.Status
 	}{
-		{"empty", nil, 0, InvalidPC}, {"odd PC", []byte{Halt, 0}, 1, InvalidPC}, {"extreme PC", []byte{Push, 0}, ^uint(0) - 1, InvalidPC},
-		{"lone halt", []byte{Halt}, 0, InvalidPC}, {"truncated unknown", []byte{255}, 0, InvalidPC},
-		{"unknown", []byte{255, 0}, 0, InvalidOpcode}, {"unary underflow", []byte{Not, 0}, 0, InvalidStack},
-		{"binary underflow", []byte{Sub, 0}, 0, InvalidStack}, {"early halt", []byte{Halt, 2, 255}, 0, Halted},
+		{"empty", nil, 0, model.InvalidPC}, {"odd PC", []byte{model.Halt, 0}, 1, model.InvalidPC}, {"extreme PC", []byte{model.Push, 0}, ^uint(0) - 1, model.InvalidPC},
+		{"lone halt", []byte{model.Halt}, 0, model.InvalidPC}, {"truncated unknown", []byte{255}, 0, model.InvalidPC},
+		{"unknown", []byte{255, 0}, 0, model.InvalidOpcode}, {"unary underflow", []byte{model.Not, 0}, 0, model.InvalidStack},
+		{"binary underflow", []byte{model.Sub, 0}, 0, model.InvalidStack}, {"early halt", []byte{model.Halt, 2, 255}, 0, model.Halted},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			state := State{PC: tc.pc}
@@ -148,26 +143,26 @@ func TestRawVM(t *testing.T) {
 			}
 		})
 	}
-	for _, code := range [][]byte{{Push, 7}, {Push, 7, Halt}} {
+	for _, code := range [][]byte{{model.Push, 7}, {model.Push, 7, model.Halt}} {
 		state, status := Run(code)
-		if status != InvalidPC || state.PC != 2 || !bytes.Equal(state.Stack, []byte{7}) {
+		if status != model.InvalidPC || state.PC != 2 || !bytes.Equal(state.Stack, []byte{7}) {
 			t.Fatal(state, status)
 		}
 	}
 }
 func TestRawBooleanInstructionsNormalize(t *testing.T) {
-	code := []byte{And, 255, Not, 255, Halt, 255}
+	code := []byte{model.And, 255, model.Not, 255, model.Halt, 255}
 	input := State{Stack: []byte{9, 2, 3}}
 	combined, status := Step(code, input)
-	if status != Continue || combined.PC != 2 || !slices.Equal(combined.Stack, []byte{9, 1}) || !slices.Equal(input.Stack, []byte{9, 2, 3}) {
+	if status != model.Continue || combined.PC != 2 || !slices.Equal(combined.Stack, []byte{9, 1}) || !slices.Equal(input.Stack, []byte{9, 2, 3}) {
 		t.Fatal(combined, input, status)
 	}
 	negated, status := Step(code, combined)
-	if status != Continue || negated.PC != 4 || !slices.Equal(negated.Stack, []byte{9, 0}) || !slices.Equal(combined.Stack, []byte{9, 1}) {
+	if status != model.Continue || negated.PC != 4 || !slices.Equal(negated.Stack, []byte{9, 0}) || !slices.Equal(combined.Stack, []byte{9, 1}) {
 		t.Fatal(negated, combined, status)
 	}
 	final, status := Step(code, negated)
-	if status != Halted || final.PC != negated.PC || !slices.Equal(final.Stack, negated.Stack) {
+	if status != model.Halted || final.PC != negated.PC || !slices.Equal(final.Stack, negated.Stack) {
 		t.Fatal(final, status)
 	}
 }

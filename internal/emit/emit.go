@@ -134,6 +134,10 @@ func (r renderer) model(p *ir.Package, modules map[string]string) string {
 		switch d := decl.(type) {
 		case ir.Struct:
 			writeStruct(&b, d)
+		case ir.TypeAlias:
+			fmt.Fprintf(&b, "\nabbrev %s : Type := %s\n", identifier(d.Symbol.Name), leanType(d.Type))
+		case ir.NamedConstant:
+			fmt.Fprintf(&b, "\ndef %s : %s := %s\n", identifier(d.Symbol.Name), leanType(d.Value.Type), r.expr(d.Value))
 		case ir.Contract:
 			fmt.Fprintf(&b, "\nstructure %s where\n  operation : ", contractName(d.Caller, d.Callee))
 			for _, t := range d.Params {

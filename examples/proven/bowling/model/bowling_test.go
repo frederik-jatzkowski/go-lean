@@ -10,7 +10,7 @@ func TestScore(t *testing.T) {
 	tests := []struct {
 		name  string
 		rolls []int
-		score int
+		score int64
 	}{
 		{"gutter game", make([]int, 20), 0},
 		{"perfect game", slices.Repeat([]int{10}, 12), 300},
@@ -25,13 +25,13 @@ func TestScore(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			game := Start()
 			for i, pins := range test.rolls {
-				if score, complete := game.Score(); score != 0 || complete {
-					t.Fatalf("before delivery %d, Score() = (%d, %t)", i+1, score, complete)
+				if result := game.Score(); result.Total != 0 || result.Complete {
+					t.Fatalf("before delivery %d, Score() = (%d, %t)", i+1, result.Total, result.Complete)
 				}
 				game = roll(t, game, pins)
 			}
-			if score, complete := game.Score(); score != test.score || !complete {
-				t.Fatalf("Score() = (%d, %t), want (%d, true)", score, complete, test.score)
+			if result := game.Score(); result.Total != test.score || !result.Complete {
+				t.Fatalf("Score() = (%d, %t), want (%d, true)", result.Total, result.Complete, test.score)
 			}
 			checkRejected(t, game, 0)
 		})
@@ -52,23 +52,23 @@ func TestRejectsIllegalRolls(t *testing.T) {
 	game = roll(t, game, 7)
 	checkRejected(t, game, 4)
 	game = roll(t, game, 3)
-	if score, complete := game.Score(); score != 29 || !complete {
-		t.Fatalf("Score() after retry = (%d, %t), want (29, true)", score, complete)
+	if result := game.Score(); result.Total != 29 || !result.Complete {
+		t.Fatalf("Score() after retry = (%d, %t), want (29, true)", result.Total, result.Complete)
 	}
 }
 
 func roll(t *testing.T, game Game, pins int) Game {
 	t.Helper()
-	next, accepted := game.Roll(pins)
-	if !accepted {
+	result := game.Roll(int64(pins))
+	if !result.Accepted {
 		t.Fatalf("Roll(%d) was rejected", pins)
 	}
-	return next
+	return result.Game
 }
 
 func checkRejected(t *testing.T, game Game, pins int) {
 	t.Helper()
-	if next, accepted := game.Roll(pins); accepted || next != game {
+	if result := game.Roll(int64(pins)); result.Accepted || result.Game != game {
 		t.Fatalf("Roll(%d) should reject and preserve the game", pins)
 	}
 }

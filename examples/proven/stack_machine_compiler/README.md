@@ -26,7 +26,7 @@ A program contains one prefix expression. These are its forms:
 2. `parse` reads tokens right to left and builds a tree of boxed expressions. An operator takes one or two subtrees from the stack according to its arity.
 3. `checkExpression` checks children right before left and then checks the operator. Arithmetic and comparisons take unsigned byte operands. `and` and `not` take Boolean operands.
 4. `emitExpression` emits a binary operator's right operand first so the left operand is on top for operations such as subtraction. Instructions are opcode and payload pairs. The compiler appends a final halt.
-5. The VM fetches a pair at the byte-offset program counter, checks the instruction and stack, then executes it. The runner stops at the first halt or fault. [Compiler](compiler.go), [VM](vm.go), and [runner](run.go)
+5. The VM fetches a pair at the byte-offset program counter, checks the instruction and stack, then executes it. The runner stops at the first halt or fault. [Compiler](model/compiler.go), [VM](model/vm.go), and [runner](model/run.go)
 
 ## go-lean features
 
@@ -47,11 +47,11 @@ Expression children use `lean.Box[expression]`. Both type checking and emission 
 
 The VM has its own precedence rules. A bad instruction address wins over an unknown opcode or stack fault. The step proof checks this ordering as well as stack effects. The run proof relates the early-stopping Go fold to the specification's first halt or fault.
 
-Correct emission also needs a compositional stack argument. `evalSteps` relates evaluation of a typed expression to execution of its emitted instructions in a bytecode context. That result allows the proof to compose the two operand executions with the operator and preserve the stack already present beneath them. `preservesMeaning` combines it with compilation conformance to obtain a halt with a single byte representing the typed source result. The final theorem `«all»` supplies the four proofs. [Lean proofs](compiler_proofs.lean)
+Correct emission also needs a compositional stack argument. `evalSteps` relates evaluation of a typed expression to execution of its emitted instructions in a bytecode context. That result allows the proof to compose the two operand executions with the operator and preserve the stack already present beneath them. `preservesMeaning` combines it with compilation conformance to obtain a halt with a single byte representing the typed source result. The final theorem `«all»` supplies the four proofs. [Lean proofs](model/compiler_proofs.lean)
 
 ```sh
 go test ./examples/proven/stack_machine_compiler/...
-go run ./cmd/go-lean verify ./examples/proven/stack_machine_compiler
+go run ./cmd/go-lean verify ./examples/proven/stack_machine_compiler/model
 ```
 
 Use a 64-bit Go target for this proof. Its size premises use the maximum Go `int` on that target.

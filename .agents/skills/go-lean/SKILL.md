@@ -19,9 +19,9 @@ In the go-lean repository, use `go run ./cmd/go-lean` in place of `go tool go-le
 
 # Write the modeled Go
 
-Separate pure, total decision logic from I/O and other runtime behavior. Every modeled Go function has one unnamed result and a statically resolved call graph. Use named value structs with fully keyed literals, explicit immutable local initializers, `if`, early returns, scalar comparisons, Boolean operators, and integer addition or subtraction. Use integer constants or typed parameters for inputs. Fixed-width Go arithmetic wraps in Lean, and `int` and `uint` follow the Go target architecture. Strings model raw bytes in lexicographic order.
+Put pure, total decision logic in a separate Go package from I/O and other runtime behavior. A function or method with `//golean:verify` or `//golean:export`, or a package-level verification law, makes the entire package modeled. All active production files and unused declarations must conform. Tests and build-excluded files stay outside the check. Call model definitions directly and keep runtime adapters for operations such as I/O and representation conversion. Every modeled Go function has one unnamed result and a statically resolved call graph. Use named value structs with fully keyed literals, explicit immutable local initializers, `if`, early returns, scalar comparisons, Boolean operators, and integer addition or subtraction. Use integer constants or typed parameters for inputs. Fixed-width Go arithmetic wraps in Lean, and `int` and `uint` follow the Go target architecture. Strings model raw bytes in lexicographic order.
 
-The modeled graph supports boolean, integer, and string scalars, value structs, and curated types. Pointers, raw slices and maps, interfaces, function values, reassignment, raw Go loops, unannotated or mutual recursion, switches, and user-defined generics are outside the subset. Ordinary Go can use these features outside the modeled graph. Use a curated fold when the complete bounded traversal belongs in the model.
+A modeled package supports boolean, integer, and string scalars, value structs, and curated types. Pointers, raw slices and maps, interfaces, function values, reassignment, raw Go loops, unannotated or mutual recursion, switches, and user-defined generics are outside the subset. Package variables and `init` functions are also unsupported. Use ordinary Go packages for code that needs these features. Use a curated fold when the complete bounded traversal belongs in the model.
 
 Direct calls to user-defined methods on supported concrete value receivers are modeled as functions with the receiver first. This includes `value.Method(args)` and `Type.Method(value, args)`. Refer to the generated method as `«Type$Method»` in Lean laws. Pointer receivers, implicit dereferences, promoted methods, and stored method values are outside the subset. Methods follow the same directive and single-result rules as functions. Name ordinary functions in dependency contracts.
 
@@ -58,7 +58,7 @@ Lean unfolds `«fold».count` and `«fold».countUntil` by recursion on a natura
 
 Use direct `lean.Box[Record]` fields to define a self-recursive record. Construct a populated box with `lean.NewBox(value)` and an empty box with `lean.Box[Record]{}`. Guard child reads with `IsSome()` before recursing on `Get()`. An empty box returns the Go zero value from `Get()`.
 
-Add `//golean:termination:by sizeOf node` to a directly recursive function with a boxed record parameter named `node`. The measure is a Lean `Nat` expression scoped to the Go entry parameters. For example, use `n.toNat` for an unsigned countdown guarded against underflow. Verification checks that each recursive call decreases the measure. The generated function retains its ordinary modeled result type and exposes its `.eq_def` unfolding equation. Select the function with an export or verification directive, or call it from another modeled function.
+Add `//golean:termination:by sizeOf node` to a directly recursive function with a boxed record parameter named `node`. The measure is a Lean `Nat` expression scoped to the Go entry parameters. For example, use `n.toNat` for an unsigned countdown guarded against underflow. Verification checks that each recursive call decreases the measure. The generated function retains its ordinary modeled result type and exposes its `.eq_def` unfolding equation. In a modeled package, the function is translated even when no other function calls it.
 
 # Select functions and state laws
 
@@ -66,8 +66,8 @@ Use directives in function or package doc comments with the exact `//golean:` pr
 
 | Directive | Purpose |
 | --- | --- |
-| `//golean:export` | Model a function and permit concrete calls from other packages. Unmarked local helpers are modeled when reached. |
-| `//golean:verify name : proposition` | Declare a Lean proposition with a name unique within the package. On a function or method, also select that operation for modeling. Continue it on consecutive `//golean:verify+` lines. |
+| `//golean:export` | Make the package modeled and permit concrete calls to the annotated function or method from other packages. |
+| `//golean:verify name : proposition` | Declare a Lean proposition with a name unique within the package. On a function, method, or package, make the package modeled. Continue it on consecutive `//golean:verify+` lines. |
 | `//golean:verify:import Lean.Module` | In a package doc comment, import a Lean module into the generated model and law file. Use one dot-separated module name per directive. |
 | `//golean:assume name : proposition` | Declare an explicit law about a scalar function. Refer to the operation by its unqualified Go name. Continue it with `//golean:assume+`. |
 | `//golean:abstract alias.Function` | In a verified root, replace an explicitly named direct call with a contract parameter. Use the Go import alias or an unqualified local function name. |
@@ -76,7 +76,7 @@ An abstract root takes the generated contracts before its ordinary arguments. In
 
 Concrete cross-package calls use the dependency's generated model. Export each called function and import the dependency's verification module from a handwritten proof to reuse its `Checked` theorems. See [clamp_import](../../../examples/proven/clamp_import/clamp_import_proofs.lean).
 
-A package law can use operations selected by function directives or reached through modeled calls. Imported specifications must load independently of the model that uses them and its proof and verification modules. Put handwritten specification roots outside the managed Lake block.
+Package laws can use any generated definition, including unmarked operations, named records, constants, and abbreviations for supported scalar types and aliases. Imported specifications must load independently of the model that uses them and its proof and verification modules. Put handwritten specification roots outside the managed Lake block.
 
 # Discharge proof obligations
 

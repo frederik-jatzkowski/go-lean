@@ -53,6 +53,20 @@ type Struct struct {
 
 func (Struct) declaration() {}
 
+type TypeAlias struct {
+	Symbol Symbol
+	Type   Type
+}
+
+func (TypeAlias) declaration() {}
+
+type NamedConstant struct {
+	Symbol Symbol
+	Value  Constant
+}
+
+func (NamedConstant) declaration() {}
+
 type Binding struct {
 	Unused bool
 	Name   string

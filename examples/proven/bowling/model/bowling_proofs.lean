@@ -1,8 +1,8 @@
-import bowling.bowling
+import bowling.model.bowling
 import Lean.Elab.Command
 import Lean.Util.CollectAxioms
 
-namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».Proofs
+namespace GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling/model».Proofs
 
 open Bowling.Rules
 
@@ -10,29 +10,29 @@ theorem startEmpty : Laws.startEmpty := rfl
 
 theorem rejectionUnchanged : Laws.rejectionUnchanged := by
   intro s pins rejected
-  unfold «Game$roll» at rejected ⊢
+  unfold «Game$Roll» at rejected ⊢
   repeat (split <;> try simp_all [«Game$record»])
 
 theorem finalScore : Laws.finalScore := by
   intro s
-  simp [«Game$score»]
+  simp [«Game$Score»]
 
 theorem completedGameIsStable : Laws.completedGameIsStable := by
   intro game total pins complete
   have frame : game.«field:frame» = 10 := by
     by_cases frame : game.«field:frame» = 10
     · exact frame
-    · simp [«Game$score», frame] at complete
-  simp [«Game$roll», frame, complete]
+    · simp [«Game$Score», frame] at complete
+  simp [«Game$Roll», frame, complete]
 
 -- Project the named Go results into the pair representation of the public API.
 def rollPair (game : Game) (pins : Int64) : Game × Bool :=
-  let result := «Game$roll» game pins
-  (result.«field:game», result.«field:accepted»)
+  let result := «Game$Roll» game pins
+  (result.«field:Game», result.«field:Accepted»)
 
 def scorePair (game : Game) : Int64 × Bool :=
-  let result := «Game$score» game
-  (result.«field:total», result.«field:complete»)
+  let result := «Game$Score» game
+  (result.«field:Total», result.«field:Complete»)
 
 private abbrev run := replay rollPair
 
@@ -90,7 +90,7 @@ theorem rollMatchesRules (phase : Phase) (valid : phase.valid)
     rollPair (encode phase total one two) pins =
       modelRoll phase total one two pins.toInt := by
   by_cases neg : pins.toInt < 0
-  · cases phase <;> simp [encode, pack, rollPair, «Game$roll», modelRoll, delivery,
+  · cases phase <;> simp [encode, pack, rollPair, «Game$Roll», modelRoll, delivery,
       Int64.lt_iff_toInt_lt, neg]
   have machineNeg : ¬ pins < (0 : Int64) := by simpa [Int64.lt_iff_toInt_lt] using neg
   by_cases high : 10 < pins.toInt
@@ -113,7 +113,7 @@ theorem rollMatchesRules (phase : Phase) (valid : phase.valid)
       all_goals try (exfalso; omega)
       all_goals try have hWord := strikeWord strike
       all_goals
-        simp [encode, pack, rollPair, «Game$roll», «Game$rack», «Game$record», «nextBonus», «secondBonus», creditWord pins credits,
+        simp [encode, pack, rollPair, «Game$Roll», «Game$rack», «Game$record», «nextBonus», «secondBonus», creditWord pins credits,
           modelRoll, delivery, nextFrame, owesNext, owesSecond, Int64.ofInt_add,
           Int64.ofInt_sub, machineNeg, neg, tenLt, ltTen, n9, n10, hn9, high, strike, below] <;> simp_all
     | second n a =>
@@ -135,7 +135,7 @@ theorem rollMatchesRules (phase : Phase) (valid : phase.valid)
       by_cases overRack : 10 < a + pins.toInt
       all_goals
         by_cases hn9 : n = 9 <;> by_cases eqRack : a + pins.toInt = 10 <;>
-          simp [encode, pack, rollPair, «Game$roll», «Game$rack», «Game$record», «nextBonus», «secondBonus», creditWord pins credits,
+          simp [encode, pack, rollPair, «Game$Roll», «Game$rack», «Game$record», «nextBonus», «secondBonus», creditWord pins credits,
           modelRoll, delivery, nextFrame, owesNext, owesSecond, Int64.ofInt_add,
           machineNeg, neg, n9, n10, hn9, high, over, spare, over', spare', overRack, eqRack]
       all_goals try have pinsEq := spare'.mpr eqRack
@@ -150,7 +150,7 @@ theorem rollMatchesRules (phase : Phase) (valid : phase.valid)
       all_goals try (exfalso; omega)
       all_goals try have hWord := strikeWord strike
       all_goals
-        simp [encode, pack, rollPair, «Game$roll», «Game$rack», «Game$record», «nextBonus», «secondBonus», creditWord pins credits, modelRoll, delivery,
+        simp [encode, pack, rollPair, «Game$Roll», «Game$rack», «Game$record», «nextBonus», «secondBonus», creditWord pins credits, modelRoll, delivery,
           owesNext, owesSecond, Int64.ofInt_add, Int64.ofInt_sub,
           machineNeg, neg, high, strikeEq, strike, tenLt, ltTen, below] <;> simp_all
     | fill rack =>
@@ -160,11 +160,11 @@ theorem rollMatchesRules (phase : Phase) (valid : phase.valid)
         rw [Int64.lt_iff_toInt_lt, hr]
       by_cases within : pins.toInt ≤ rack
       all_goals
-        simp [encode, pack, rollPair, «Game$roll», «Game$rack», «Game$record», «nextBonus», «secondBonus», creditWord pins credits,
+        simp [encode, pack, rollPair, «Game$Roll», «Game$rack», «Game$record», «nextBonus», «secondBonus», creditWord pins credits,
           modelRoll, delivery, owesNext, owesSecond, Int64.ofInt_add,
           machineNeg, neg, high, over, within, show (rack < pins.toInt) ↔ ¬ pins.toInt ≤ rack by omega]
       all_goals omega
-    | done => simp [encode, pack, rollPair, «Game$roll», modelRoll, delivery, neg, high]
+    | done => simp [encode, pack, rollPair, «Game$Roll», modelRoll, delivery, neg, high]
 
 
 private def budget : Phase → Int
@@ -320,11 +320,11 @@ private theorem scoreAgrees (phase : Phase) (valid : phase.valid) (total one two
   cases phase with
   | first n =>
     obtain ⟨lo, hi⟩ := valid
-    simp [encode, pack, scorePair, «Game$score», scoreFrom, answer, notDone n lo hi]
+    simp [encode, pack, scorePair, «Game$Score», scoreFrom, answer, notDone n lo hi]
   | second n a =>
     obtain ⟨⟨lo, hi⟩, _⟩ := valid
-    simp [encode, pack, scorePair, «Game$score», scoreFrom, answer, notDone n lo hi]
-  | afterStrike | fill | done => simp [encode, pack, scorePair, «Game$score», scoreFrom, answer]
+    simp [encode, pack, scorePair, «Game$Score», scoreFrom, answer, notDone n lo hi]
+  | afterStrike | fill | done => simp [encode, pack, scorePair, «Game$Score», scoreFrom, answer]
 
 -- Each pending obligation adds to the score of the accepted suffix. The
 -- reference scorer gets the same deliveries by looking ahead from their frame.
@@ -371,8 +371,8 @@ private theorem collectAttempts (game : Game) (prior : List Bool) (attempts : Li
   | nil => rfl
   | cons pins attempts ih =>
     change «fold».list replayAttempt attempts
-      (ReplayResult.mk («Game$roll» game pins).«field:game»
-        ((«Game$roll» game pins).«field:accepted» :: prior)) = _
+      (ReplayResult.mk («Game$Roll» game pins).«field:Game»
+        ((«Game$Roll» game pins).«field:Accepted» :: prior)) = _
     rw [ih]
     simp [replay, rollPair, List.append_assoc]
 
@@ -428,4 +428,4 @@ run_cmd
       unless [`propext, `Quot.sound, `Classical.choice].contains axiomName do
         throwError "Bowling proof {theoremName} depends on unapproved axiom {axiomName}"
 
-end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling».Proofs
+end GoLean.«github.com/frederik-jatzkowski/go-lean/examples/proven/bowling/model».Proofs

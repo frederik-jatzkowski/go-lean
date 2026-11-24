@@ -31,10 +31,15 @@ type Function struct {
 	Selected          bool
 }
 
+type Declaration struct {
+	Pos    token.Pos
+	Object types.Object
+}
+
 type Program struct {
-	Roots         []*types.Func
-	PackageRoots  map[string][]*types.Func
-	LawPackages   []string
+	SelectedPackages []string
+	// Declarations has an entry for every modeled package, including law-only packages.
+	Declarations  map[string][]Declaration
 	PackageLaws   map[string][]ir.Proposition
 	LeanImports   map[string][]string
 	Functions     map[*types.Func]Function
@@ -60,7 +65,7 @@ func Read(ctx context.Context, dir, pattern string) (*Program, error) {
 		return nil, fmt.Errorf("%s", strings.Join(slices.Compact(diagnostics), "\n"))
 	}
 	program := &Program{
-		PackageRoots:  make(map[string][]*types.Func),
+		Declarations:  make(map[string][]Declaration),
 		PackageLaws:   make(map[string][]ir.Proposition),
 		LeanImports:   make(map[string][]string),
 		Functions:     make(map[*types.Func]Function),
@@ -74,6 +79,8 @@ func Read(ctx context.Context, dir, pattern string) (*Program, error) {
 	}
 	packages.Visit(roots, nil, func(p *packages.Package) {
 		program.Packages[p.PkgPath] = p
+		var declarations []Declaration
+		var marked bool
 		files := slices.Clone(p.Syntax)
 		slices.SortFunc(files, func(a, b *ast.File) int {
 			return strings.Compare(p.Fset.PositionFor(a.Pos(), false).Filename, p.Fset.PositionFor(b.Pos(), false).Filename)
@@ -81,48 +88,45 @@ func Read(ctx context.Context, dir, pattern string) (*Program, error) {
 		for _, file := range files {
 			program.readPackageDirectives(p, file.Doc)
 			for _, decl := range file.Decls {
-				if d, ok := decl.(*ast.GenDecl); ok && d.Tok == token.TYPE {
+				switch d := decl.(type) {
+				case *ast.GenDecl:
 					for _, raw := range d.Specs {
-						spec := raw.(*ast.TypeSpec)
-						if pos := firstDirective(d.Doc, spec.Doc); pos.IsValid() {
-							if obj, ok := p.TypesInfo.Defs[spec.Name].(*types.TypeName); ok {
+						switch spec := raw.(type) {
+						case *ast.TypeSpec:
+							obj := p.TypesInfo.Defs[spec.Name].(*types.TypeName)
+							if pos := firstDirective(d.Doc, spec.Doc); pos.IsValid() {
 								program.TypeIssues[obj] = Error(p, pos, "type directives are unsupported; attach laws to functions")
+							}
+							declarations = append(declarations, Declaration{Pos: spec.Pos(), Object: obj})
+						case *ast.ValueSpec:
+							for _, name := range spec.Names {
+								obj := p.TypesInfo.Defs[name]
+								declarations = append(declarations, Declaration{Pos: name.Pos(), Object: obj})
 							}
 						}
 					}
-				}
-				f, ok := decl.(*ast.FuncDecl)
-				if !ok {
-					continue
-				}
-				obj, ok := p.TypesInfo.Defs[f.Name].(*types.Func)
-				if !ok {
-					continue
-				}
-				entry := Function{Package: p, File: file, Decl: f}
-				entry.readDirectives()
-				program.Functions[obj] = entry
-				if p.PkgPath != Curated && entry.Selected {
-					program.PackageRoots[p.PkgPath] = append(program.PackageRoots[p.PkgPath], obj)
+				case *ast.FuncDecl:
+					object := p.TypesInfo.Defs[d.Name]
+					declarations = append(declarations, Declaration{Pos: d.Pos(), Object: object})
+					obj, ok := object.(*types.Func)
+					if !ok {
+						continue
+					}
+					entry := Function{Package: p, File: file, Decl: d}
+					entry.readDirectives()
+					program.Functions[obj] = entry
+					marked = marked || entry.Selected
 				}
 			}
 		}
-		marked := program.PackageRoots[p.PkgPath]
-		slices.SortFunc(marked, func(a, b *types.Func) int {
-			return strings.Compare(a.FullName(), b.FullName())
-		})
-		if p.PkgPath != Curated && requested[p.ID] {
-			if len(program.PackageLaws[p.PkgPath]) != 0 {
-				program.LawPackages = append(program.LawPackages, p.PkgPath)
-			} else {
-				program.Roots = append(program.Roots, marked...)
+		if p.PkgPath != Curated && (marked || len(program.PackageLaws[p.PkgPath]) != 0) {
+			program.Declarations[p.PkgPath] = declarations
+			if requested[p.ID] {
+				program.SelectedPackages = append(program.SelectedPackages, p.PkgPath)
 			}
 		}
 	})
-	slices.Sort(program.LawPackages)
-	slices.SortFunc(program.Roots, func(a, b *types.Func) int {
-		return strings.Compare(a.FullName(), b.FullName())
-	})
+	slices.Sort(program.SelectedPackages)
 	for _, p := range roots {
 		if issue := program.PackageIssues[p.PkgPath]; issue != nil {
 			diagnostics = append(diagnostics, issue.Error())

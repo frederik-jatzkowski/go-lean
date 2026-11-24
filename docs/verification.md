@@ -6,10 +6,12 @@ Lean checks laws against the generated model. Applying a checked theorem to a Go
 
 ## From Go comment to checked theorem
 
-1. Put a named `//golean:verify` law in a Go doc comment. On a function or method, the law selects that operation. For a package-level law, select entry points with directives and refer to the resulting modeled operations.
+1. Put a named `//golean:verify` law in a Go doc comment. A law on a function, method, or package makes the package modeled. Package laws can refer to any generated definition, including unmarked functions and methods.
 2. Run `go tool go-lean transpile ./pkg`. In `<stem>.lean`, read the law review block, generated declarations, and definitions under `Laws`.
 3. In `<stem>_proofs.lean`, import the model and declare `theorem lawName : Laws.lawName` in `GoLean.«full/go/import/path».Proofs`. Replace each scaffold `sorry` with a proof. Generation preserves an existing companion.
 4. Run `go tool go-lean verify ./pkg`. The generated `<stem>_verify.lean` checks theorem types and axiom dependencies and exposes the proved statements through the package's `Checked` namespace.
+
+Generated definitions use their Go names. If a Go name shadows a Lean name in a law or proof, qualify the Lean name, such as `_root_.Bool`.
 
 ## Specify the behavior independently
 

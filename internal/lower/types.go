@@ -89,6 +89,9 @@ func (c *compiler) goType(p *packages.Package, pos token.Pos, typ types.Type) (i
 		if t.TypeParams().Len() != 0 {
 			break
 		}
+		if enum, ok := c.source.Enums[obj]; ok {
+			return c.enumType(p, pos, obj, enum)
+		}
 		switch u := t.Underlying().(type) {
 		case *types.Basic:
 			return basic(p, pos, u)
@@ -99,9 +102,6 @@ func (c *compiler) goType(p *packages.Package, pos token.Pos, typ types.Type) (i
 			id := symbol(obj)
 			if err := c.depend(p, id.Package, pos); err != nil {
 				return ir.Type{}, err
-			}
-			if c.state[obj] == 1 {
-				return ir.Type{}, load.Error(p, pos, "recursive record %s", obj.Name())
 			}
 			if c.state[obj] == 0 {
 				c.state[obj] = 1
@@ -145,6 +145,14 @@ func isSelfBox(typ types.Type, owner *types.TypeName) bool {
 
 func (c *compiler) zero(t ir.Type) ir.Expr {
 	switch t.Kind {
+	case ir.EnumType:
+		for _, decl := range c.output(t.Record.Package).Decls {
+			if enum, ok := decl.(ir.Enum); ok && enum.Symbol == t.Record {
+				variant := enum.Variants[enum.Default]
+				return ir.Constructor{Enum: t.Record, Variant: variant.Name, Value: c.zero(variant.Type)}
+			}
+		}
+		panic("missing enum for Go zero value")
 	case ir.Record:
 		for _, decl := range c.output(t.Record.Package).Decls {
 			if record, ok := decl.(ir.Struct); ok && record.Symbol == t.Record {

@@ -1,5 +1,6 @@
 // Package compiler translates typed prefix expressions to stack bytecode.
 //
+//golean:generate:enum Lexeme { MissingLexeme default, IntegerLexeme, BooleanLexeme, AddLexeme, SubLexeme, EqLexeme, LtLexeme, AndLexeme, NotLexeme }
 //golean:verify:import spec
 //golean:verify all : let observe := fun result : machineResult =>
 //golean:verify+     let state := result.«field:State»
@@ -37,21 +38,76 @@ const (
 	TypeMismatch
 )
 
-const (
-	integerToken byte = iota + 1
-	booleanToken
-	addToken
-	subToken
-	eqToken
-	ltToken
-	andToken
-	notToken
-)
+type MissingLexeme struct{}
 
-type lexeme struct {
-	Kind   byte
-	Value  byte
+type IntegerLexeme struct {
 	Offset uint
+	Value  byte
+}
+
+type BooleanLexeme struct {
+	Offset uint
+	Value  bool
+}
+
+type AddLexeme struct{ Offset uint }
+
+type SubLexeme struct{ Offset uint }
+
+type EqLexeme struct{ Offset uint }
+
+type LtLexeme struct{ Offset uint }
+
+type AndLexeme struct{ Offset uint }
+
+type NotLexeme struct{ Offset uint }
+
+func missingLexeme(word Lexeme) bool {
+	switch word.Case().(type) {
+	case MissingLexeme:
+		return true
+	case IntegerLexeme:
+		return false
+	case BooleanLexeme:
+		return false
+	case AddLexeme:
+		return false
+	case SubLexeme:
+		return false
+	case EqLexeme:
+		return false
+	case LtLexeme:
+		return false
+	case AndLexeme:
+		return false
+	case NotLexeme:
+		return false
+	}
+	return false
+}
+
+func lexemeOffset(word Lexeme) uint {
+	switch token := word.Case().(type) {
+	case MissingLexeme:
+		return 0
+	case IntegerLexeme:
+		return token.Offset
+	case BooleanLexeme:
+		return token.Offset
+	case AddLexeme:
+		return token.Offset
+	case SubLexeme:
+		return token.Offset
+	case EqLexeme:
+		return token.Offset
+	case LtLexeme:
+		return token.Offset
+	case AndLexeme:
+		return token.Offset
+	case NotLexeme:
+		return token.Offset
+	}
+	return 0
 }
 
 type Diagnostic struct {
@@ -71,31 +127,26 @@ func isDigit(b byte) bool {
 	return b >= '0' && b <= '9'
 }
 
-type classification struct {
-	Kind  byte
-	Value byte
-}
-
 func timesTen(n byte) byte {
 	twice := n + n
 	four := twice + twice
 	return four + four + twice
 }
 
-func decimal(a, b, c byte, width uint) classification {
-	invalid := classification{Kind: 0, Value: 0}
+func decimal(a, b, c byte, width uint) lean.Option[byte] {
+	invalid := lean.None[byte]()
 	if !isDigit(a) {
 		return invalid
 	}
 	if width == 1 {
-		return classification{Kind: integerToken, Value: a - '0'}
+		return lean.Some(a - '0')
 	}
 	if a == '0' || !isDigit(b) {
 		return invalid
 	}
 	prefix := timesTen(a-'0') + (b - '0')
 	if width == 2 {
-		return classification{Kind: integerToken, Value: prefix}
+		return lean.Some(prefix)
 	}
 	if width != 3 || !isDigit(c) {
 		return invalid
@@ -103,44 +154,52 @@ func decimal(a, b, c byte, width uint) classification {
 	if a > '2' || (a == '2' && (b > '5' || (b == '5' && c > '5'))) {
 		return invalid
 	}
-	return classification{Kind: integerToken, Value: timesTen(prefix) + (c - '0')}
+	return lean.Some(timesTen(prefix) + (c - '0'))
 }
 
-func classify(source lean.ByteArray) classification {
+func classify(source lean.ByteArray, offset uint) Lexeme {
 	width := source.Size()
 	a := source.Get(0).UnwrapOr(0)
 	b := source.Get(1).UnwrapOr(0)
 	c := source.Get(2).UnwrapOr(0)
 	if width == 2 {
 		if a == 'e' && b == 'q' {
-			return classification{Kind: eqToken, Value: 0}
+			return NewLexemeEqLexeme(EqLexeme{Offset: offset})
 		}
 		if a == 'l' && b == 't' {
-			return classification{Kind: ltToken, Value: 0}
+			return NewLexemeLtLexeme(LtLexeme{Offset: offset})
 		}
 	}
 	if width == 3 {
 		if a == 'a' && b == 'd' && c == 'd' {
-			return classification{Kind: addToken, Value: 0}
+			return NewLexemeAddLexeme(AddLexeme{Offset: offset})
 		}
 		if a == 's' && b == 'u' && c == 'b' {
-			return classification{Kind: subToken, Value: 0}
+			return NewLexemeSubLexeme(SubLexeme{Offset: offset})
 		}
 		if a == 'a' && b == 'n' && c == 'd' {
-			return classification{Kind: andToken, Value: 0}
+			return NewLexemeAndLexeme(AndLexeme{Offset: offset})
 		}
 		if a == 'n' && b == 'o' && c == 't' {
-			return classification{Kind: notToken, Value: 0}
+			return NewLexemeNotLexeme(NotLexeme{Offset: offset})
 		}
 	}
 	if width == 4 && a == 't' && b == 'r' && c == 'u' && source.Get(3).UnwrapOr(0) == 'e' {
-		return classification{Kind: booleanToken, Value: 1}
+		return NewLexemeBooleanLexeme(BooleanLexeme{Offset: offset, Value: true})
 	}
 	if width == 5 && a == 'f' && b == 'a' && c == 'l' &&
 		source.Get(3).UnwrapOr(0) == 's' && source.Get(4).UnwrapOr(0) == 'e' {
-		return classification{Kind: booleanToken, Value: 0}
+		return NewLexemeBooleanLexeme(BooleanLexeme{Offset: offset, Value: false})
 	}
-	return decimal(a, b, c, width)
+	return decimalLexeme(a, b, c, width, offset)
+}
+
+func decimalLexeme(a, b, c byte, width, offset uint) Lexeme {
+	number := decimal(a, b, c, width)
+	if number.IsSome() {
+		return NewLexemeIntegerLexeme(IntegerLexeme{Offset: offset, Value: number.UnwrapOr(0)})
+	}
+	return Lexeme{}
 }
 
 type scanState struct {
@@ -165,7 +224,7 @@ func scanByte(state scanState, index uint, b byte) scanResult {
 
 type lexer struct {
 	Source lean.ByteArray
-	Words  lean.Array[lexeme]
+	Words  lean.Array[Lexeme]
 	Scan   scanState
 	Error  Diagnostic
 }
@@ -180,11 +239,11 @@ func scanSourceByte(index uint, state lexer) lean.FoldControl[lexer] {
 
 func closeWord(index uint, state lexer, scan scanState) lean.FoldControl[lexer] {
 	start := scan.Start
-	word := classify(state.Source.Extract(start, index))
-	if word.Kind == 0 {
+	word := classify(state.Source.Extract(start, index), start)
+	if missingLexeme(word) {
 		return lexError(state, InvalidLexeme, start)
 	}
-	words := state.Words.Push(lexeme{Kind: word.Kind, Value: word.Value, Offset: start})
+	words := state.Words.Push(word)
 	return lean.FoldControl[lexer]{State: lexer{Source: state.Source, Words: words, Scan: scan, Error: state.Error}, Stop: false}
 }
 
@@ -196,7 +255,7 @@ func lexError(state lexer, kind DiagnosticKind, offset uint) lean.FoldControl[le
 }
 
 func tokenize(source lean.ByteArray) lexer {
-	initial := lexer{Source: source, Words: lean.Array[lexeme]{}, Scan: scanState{Start: 0, InWord: false}, Error: noDiagnostic()}
+	initial := lexer{Source: source, Words: lean.Array[Lexeme]{}, Scan: scanState{Start: 0, InWord: false}, Error: noDiagnostic()}
 	scanned := lean.FoldNUntil(source.Size(), initial, scanSourceByte)
 	if scanned.Stop || !scanned.State.Scan.InWord {
 		return scanned.State
@@ -205,37 +264,51 @@ func tokenize(source lean.ByteArray) lexer {
 }
 
 type expression struct {
-	Word  lexeme
+	Word  Lexeme
 	Left  lean.Box[expression]
 	Right lean.Box[expression]
 }
 
-func leaf(word lexeme) expression {
+func leaf(word Lexeme) expression {
 	return expression{Word: word, Left: lean.Box[expression]{}, Right: lean.Box[expression]{}}
 }
 
 func emptyExpression() expression {
-	return leaf(lexeme{Kind: 0, Value: 0, Offset: 0})
+	return leaf(Lexeme{})
 }
 
 type parser struct {
-	Words lean.Array[lexeme]
+	Words lean.Array[Lexeme]
 	Roots lean.Array[expression]
 }
 
-func arity(kind byte) uint {
-	if kind == integerToken || kind == booleanToken {
+func arity(word Lexeme) uint {
+	switch word.Case().(type) {
+	case MissingLexeme:
+		return 2
+	case IntegerLexeme:
 		return 0
-	}
-	if kind == notToken {
+	case BooleanLexeme:
+		return 0
+	case AddLexeme:
+		return 2
+	case SubLexeme:
+		return 2
+	case EqLexeme:
+		return 2
+	case LtLexeme:
+		return 2
+	case AndLexeme:
+		return 2
+	case NotLexeme:
 		return 1
 	}
 	return 2
 }
 
 func parseWord(index uint, state parser) lean.FoldControl[parser] {
-	word := state.Words.Get(state.Words.Size() - 1 - index).UnwrapOr(lexeme{Kind: 0, Value: 0, Offset: 0})
-	operands := arity(word.Kind)
+	word := state.Words.Get(state.Words.Size() - 1 - index).UnwrapOr(Lexeme{})
+	operands := arity(word)
 	roots := state.Roots
 	depth := roots.Size()
 	if depth < operands {
@@ -254,7 +327,7 @@ func parseWord(index uint, state parser) lean.FoldControl[parser] {
 	return lean.FoldControl[parser]{State: parser{Words: state.Words, Roots: roots.Pop().Pop().Push(node)}, Stop: false}
 }
 
-func parse(words lean.Array[lexeme]) lean.FoldControl[parser] {
+func parse(words lean.Array[Lexeme]) lean.FoldControl[parser] {
 	initial := parser{Words: words, Roots: lean.Array[expression]{}}
 	return lean.FoldNUntil(words.Size(), initial, parseWord)
 }
@@ -264,14 +337,52 @@ type signature struct {
 	Result  Type
 }
 
-func operatorTypes(kind byte) signature {
-	if kind == addToken || kind == subToken {
+func operatorTypes(word Lexeme) signature {
+	switch word.Case().(type) {
+	case MissingLexeme:
+		return signature{Operand: Bool, Result: Bool}
+	case IntegerLexeme:
+		return signature{Operand: Bool, Result: Bool}
+	case BooleanLexeme:
+		return signature{Operand: Bool, Result: Bool}
+	case AddLexeme:
 		return signature{Operand: U8, Result: U8}
-	}
-	if kind == eqToken || kind == ltToken {
+	case SubLexeme:
+		return signature{Operand: U8, Result: U8}
+	case EqLexeme:
 		return signature{Operand: U8, Result: Bool}
+	case LtLexeme:
+		return signature{Operand: U8, Result: Bool}
+	case AndLexeme:
+		return signature{Operand: Bool, Result: Bool}
+	case NotLexeme:
+		return signature{Operand: Bool, Result: Bool}
 	}
 	return signature{Operand: Bool, Result: Bool}
+}
+
+func literalType(word Lexeme) Type {
+	switch word.Case().(type) {
+	case MissingLexeme:
+		return 0
+	case IntegerLexeme:
+		return U8
+	case BooleanLexeme:
+		return Bool
+	case AddLexeme:
+		return 0
+	case SubLexeme:
+		return 0
+	case EqLexeme:
+		return 0
+	case LtLexeme:
+		return 0
+	case AndLexeme:
+		return 0
+	case NotLexeme:
+		return 0
+	}
+	return 0
 }
 
 type typing struct {
@@ -290,14 +401,12 @@ func mismatch(offset uint) typing {
 //golean:termination:by sizeOf expr
 func checkExpression(expr expression) typing {
 	word := expr.Word
-	if word.Kind == integerToken {
-		return typed(U8)
-	}
-	if word.Kind == booleanToken {
-		return typed(Bool)
+	literal := literalType(word)
+	if literal != 0 {
+		return typed(literal)
 	}
 	if !expr.Left.IsSome() {
-		return mismatch(word.Offset)
+		return mismatch(lexemeOffset(word))
 	}
 	if expr.Right.IsSome() {
 		right := checkExpression(expr.Right.Get())
@@ -308,9 +417,9 @@ func checkExpression(expr expression) typing {
 		if left.Error.Kind != NoDiagnostic {
 			return left
 		}
-		sig := operatorTypes(word.Kind)
+		sig := operatorTypes(word)
 		if left.Type != sig.Operand || right.Type != sig.Operand {
-			return mismatch(word.Offset)
+			return mismatch(lexemeOffset(word))
 		}
 		return typed(sig.Result)
 	}
@@ -319,26 +428,36 @@ func checkExpression(expr expression) typing {
 		return operand
 	}
 	if operand.Type != Bool {
-		return mismatch(word.Offset)
+		return mismatch(lexemeOffset(word))
 	}
 	return typed(Bool)
 }
 
-type instruction struct {
-	Opcode  byte
-	Operand byte
-}
-
-func encode(kind, value byte) instruction {
-	if kind == integerToken || kind == booleanToken {
-		return instruction{Opcode: Push, Operand: value}
+func emitWord(word Lexeme, code lean.ByteArray) lean.ByteArray {
+	switch token := word.Case().(type) {
+	case MissingLexeme:
+		return code.Push(255).Push(0)
+	case IntegerLexeme:
+		return code.Push(Push).Push(token.Value)
+	case BooleanLexeme:
+		if token.Value {
+			return code.Push(Push).Push(1)
+		}
+		return code.Push(Push).Push(0)
+	case AddLexeme:
+		return code.Push(Add).Push(0)
+	case SubLexeme:
+		return code.Push(Sub).Push(0)
+	case EqLexeme:
+		return code.Push(Eq).Push(0)
+	case LtLexeme:
+		return code.Push(Lt).Push(0)
+	case AndLexeme:
+		return code.Push(And).Push(0)
+	case NotLexeme:
+		return code.Push(Not).Push(0)
 	}
-	return instruction{Opcode: kind - addToken + Add, Operand: 0}
-}
-
-func emitWord(word lexeme, code lean.ByteArray) lean.ByteArray {
-	inst := encode(word.Kind, word.Value)
-	return code.Push(inst.Opcode).Push(inst.Operand)
+	return code
 }
 
 //golean:termination:by sizeOf expr

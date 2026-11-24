@@ -6,6 +6,7 @@ Run from the Go module root. In a checkout of go-lean, replace `go tool go-lean`
 | --- | --- |
 | `go tool go-lean setup` | Initialize the Lean workspace, preserving existing configuration. |
 | `go tool go-lean doctor` | Check workspace and toolchain prerequisites. |
+| `go tool go-lean generate ./pkg` | Generate the selected packages’ Go enum declarations in `lean.gen.go`. |
 | `go tool go-lean transpile ./pkg` | Generate the selected package's Lean files and modeled dependencies. |
 | `go tool go-lean transpile ./...` | Generate across the module and reconcile managed artifacts. |
 | `go tool go-lean verify ./pkg` | Generate and check the selected package. |
@@ -19,6 +20,7 @@ Use the exact `//golean:` prefix in Go doc comments.
 
 | Directive | Purpose |
 | --- | --- |
+| `//golean:generate:enum Expr { Lit default, Add }` | Define an enum from package-local payload types and make the package modeled. Put it in a package doc comment. |
 | `//golean:export` | Make the package modeled and allow concrete calls to the annotated function or method from another modeled Go package. |
 | `//golean:verify name : proposition` | Declare a package-unique law and make the package modeled. Attach it to a function, method, or package doc comment. |
 | `//golean:verify+ continuation` | Continue a law on consecutive lines. |

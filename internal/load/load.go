@@ -12,6 +12,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/frederik-jatzkowski/go-lean/internal/enums"
 	"github.com/frederik-jatzkowski/go-lean/internal/ir"
 	"golang.org/x/tools/go/packages"
 )
@@ -38,6 +39,9 @@ type Declaration struct {
 
 type Program struct {
 	SelectedPackages []string
+	Enums            map[*types.TypeName]Enum
+	EnumConstructors map[*types.Func]EnumConstructor
+	EnumCases        map[*types.Func]*types.TypeName
 	// Declarations has an entry for every modeled package, including law-only packages.
 	Declarations  map[string][]Declaration
 	PackageLaws   map[string][]ir.Proposition
@@ -49,6 +53,9 @@ type Program struct {
 }
 
 func Read(ctx context.Context, dir, pattern string) (*Program, error) {
+	if err := enums.Process(ctx, dir, pattern, false); err != nil {
+		return nil, err
+	}
 	cfg := &packages.Config{Context: ctx, Dir: dir, Mode: packages.LoadAllSyntax | packages.NeedModule}
 	roots, err := packages.Load(cfg, pattern)
 	if err != nil {
@@ -65,13 +72,16 @@ func Read(ctx context.Context, dir, pattern string) (*Program, error) {
 		return nil, fmt.Errorf("%s", strings.Join(slices.Compact(diagnostics), "\n"))
 	}
 	program := &Program{
-		Declarations:  make(map[string][]Declaration),
-		PackageLaws:   make(map[string][]ir.Proposition),
-		LeanImports:   make(map[string][]string),
-		Functions:     make(map[*types.Func]Function),
-		Packages:      make(map[string]*packages.Package),
-		PackageIssues: make(map[string]error),
-		TypeIssues:    make(map[*types.TypeName]error),
+		Enums:            make(map[*types.TypeName]Enum),
+		EnumConstructors: make(map[*types.Func]EnumConstructor),
+		EnumCases:        make(map[*types.Func]*types.TypeName),
+		Declarations:     make(map[string][]Declaration),
+		PackageLaws:      make(map[string][]ir.Proposition),
+		LeanImports:      make(map[string][]string),
+		Functions:        make(map[*types.Func]Function),
+		Packages:         make(map[string]*packages.Package),
+		PackageIssues:    make(map[string]error),
+		TypeIssues:       make(map[*types.TypeName]error),
 	}
 	requested := make(map[string]bool)
 	for _, p := range roots {
@@ -85,7 +95,21 @@ func Read(ctx context.Context, dir, pattern string) (*Program, error) {
 		slices.SortFunc(files, func(a, b *ast.File) int {
 			return strings.Compare(p.Fset.PositionFor(a.Pos(), false).Filename, p.Fset.PositionFor(b.Pos(), false).Filename)
 		})
+		generated, enumErr := program.readEnums(p, files)
+		if enumErr != nil {
+			program.PackageIssues[p.PkgPath] = enumErr
+			return
+		}
 		for _, file := range files {
+			if file == generated {
+				for _, raw := range file.Decls {
+					if decl, ok := raw.(*ast.GenDecl); ok {
+						spec := decl.Specs[0].(*ast.TypeSpec)
+						declarations = append(declarations, Declaration{Pos: spec.Pos(), Object: p.TypesInfo.Defs[spec.Name]})
+					}
+				}
+				continue
+			}
 			program.readPackageDirectives(p, file.Doc)
 			for _, decl := range file.Decls {
 				switch d := decl.(type) {
@@ -119,7 +143,7 @@ func Read(ctx context.Context, dir, pattern string) (*Program, error) {
 				}
 			}
 		}
-		if p.PkgPath != Curated && (marked || len(program.PackageLaws[p.PkgPath]) != 0) {
+		if p.PkgPath != Curated && (marked || generated != nil || len(program.PackageLaws[p.PkgPath]) != 0) {
 			program.Declarations[p.PkgPath] = declarations
 			if requested[p.ID] {
 				program.SelectedPackages = append(program.SelectedPackages, p.PkgPath)
@@ -180,6 +204,8 @@ func (program *Program) readPackageDirectives(p *packages.Package, doc *ast.Comm
 			program.PackageIssues[path] = Error(p, comment.Pos(), message, args...)
 		}
 		switch kind {
+		case "generate:enum":
+			previous = nil
 		case "verify":
 			law, valid := proposition(value)
 			if !valid {

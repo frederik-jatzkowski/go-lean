@@ -77,23 +77,30 @@ var scalar = map[ir.Kind]string{
 }
 
 func leanType(t ir.Type) string {
+	return renderType(t, nil)
+}
+
+func renderType(t ir.Type, mutual map[ir.Symbol]bool) string {
 	switch t.Kind {
-	case ir.Record:
+	case ir.Record, ir.EnumType:
+		if mutual[t.Record] {
+			return identifier(t.Record.Name)
+		}
 		return qualified(t.Record)
 	case ir.Array:
-		return "(_root_.Array " + leanType(*t.Element) + ")"
+		return "(_root_.Array " + renderType(*t.Element, mutual) + ")"
 	case ir.ByteArray:
 		return "_root_.ByteArray"
 	case ir.OrderedMap:
-		return "(_root_.Std.TreeMap " + leanType(*t.Key) + " " + leanType(*t.Element) + " _root_.Ord.compare)"
+		return "(_root_.Std.TreeMap " + renderType(*t.Key, mutual) + " " + renderType(*t.Element, mutual) + " _root_.Ord.compare)"
 	case ir.OrderedSet:
-		return "(_root_.Std.TreeSet " + leanType(*t.Key) + " _root_.Ord.compare)"
+		return "(_root_.Std.TreeSet " + renderType(*t.Key, mutual) + " _root_.Ord.compare)"
 	case ir.Option, ir.Box:
-		return "(_root_.Option " + leanType(*t.Element) + ")"
+		return "(_root_.Option " + renderType(*t.Element, mutual) + ")"
 	case ir.List:
-		return "(_root_.List " + leanType(*t.Element) + ")"
+		return "(_root_.List " + renderType(*t.Element, mutual) + ")"
 	case ir.FoldControl:
-		return "(_root_.Prod " + leanType(*t.Element) + " _root_.Bool)"
+		return "(_root_.Prod " + renderType(*t.Element, mutual) + " _root_.Bool)"
 	case ir.BitVec:
 		return "(_root_.Sigma (fun w : {n : _root_.Nat // n ≤ 64} => _root_.BitVec w.val))"
 	default:
@@ -130,10 +137,42 @@ func (r renderer) model(p *ir.Package, modules map[string]string) string {
 	}
 	fmt.Fprintf(&b, "\nnamespace %s\n", namespace(p.Path))
 	r.writeFolds(&b, p.Folds)
+	hasMutual := false
+	for _, decl := range p.Decls {
+		if _, ok := decl.(ir.Mutual); ok {
+			hasMutual = true
+			break
+		}
+	}
 	for _, decl := range p.Decls {
 		switch d := decl.(type) {
 		case ir.Struct:
 			writeStruct(&b, d)
+		case ir.Enum:
+			writeEnum(&b, d, nil)
+		case ir.Mutual:
+			b.WriteString("\nmutual\n")
+			var projections strings.Builder
+			members := make(map[ir.Symbol]bool)
+			for _, typ := range d.Types {
+				switch t := typ.(type) {
+				case ir.Enum:
+					members[t.Symbol] = true
+				case ir.Struct:
+					members[t.Symbol] = true
+				}
+			}
+			for _, typ := range d.Types {
+				switch t := typ.(type) {
+				case ir.Enum:
+					writeEnum(&b, t, members)
+				case ir.Struct:
+					writeRecordInductive(&b, t, members)
+					writeRecordProjections(&projections, t, members)
+				}
+			}
+			b.WriteString("end\n")
+			b.WriteString(projections.String())
 		case ir.TypeAlias:
 			fmt.Fprintf(&b, "\nabbrev %s : Type := %s\n", identifier(d.Symbol.Name), leanType(d.Type))
 		case ir.NamedConstant:
@@ -167,7 +206,7 @@ func (r renderer) model(p *ir.Package, modules map[string]string) string {
 			body.self = d.Symbol
 			fmt.Fprintf(&b, " : %s :=\n  %s\n", leanType(d.Result), body.expr(d.Body))
 			if body.measured {
-				writeTermination(&b, d)
+				writeTermination(&b, d, hasMutual)
 			}
 		}
 	}
@@ -281,6 +320,23 @@ func (r renderer) expr(e ir.Expr) string {
 		return "(" + r.expr(v.Record) + ")." + field(v.Name)
 	case ir.StructLiteral:
 		return r.apply(qualified(v.Type)+".mk", v.Fields)
+	case ir.Constructor:
+		return r.apply(qualified(v.Enum)+"."+identifier(v.Variant), []ir.Expr{v.Value})
+	case ir.Match:
+		var b strings.Builder
+		b.WriteString("(match ")
+		b.WriteString(r.expr(v.Value))
+		b.WriteString(" with")
+		for _, c := range v.Cases {
+			body := r.expr(c.Body)
+			binding := "_"
+			if c.Binding >= 0 && strings.Contains(body, local(c.Binding)) {
+				binding = local(c.Binding)
+			}
+			fmt.Fprintf(&b, " | .%s %s => %s", identifier(c.Variant), binding, body)
+		}
+		b.WriteString(")")
+		return b.String()
 	case ir.Call:
 		if r.measured && v.Target == r.self {
 			return r.apply(identifier(v.Target.Name), v.Args)
@@ -339,7 +395,7 @@ func (r renderer) binary(v ir.Binary) string {
 	}
 }
 
-func writeTermination(b *strings.Builder, d ir.Function) {
+func writeTermination(b *strings.Builder, d ir.Function, hasMutual bool) {
 	fmt.Fprint(b, "termination_by (")
 	for _, param := range d.Params {
 		if !param.Unused {
@@ -356,8 +412,11 @@ func writeTermination(b *strings.Builder, d ir.Function) {
         UInt8.lt_iff_toNat_lt, UInt16.lt_iff_toNat_lt, UInt32.lt_iff_toNat_lt, UInt64.lt_iff_toNat_lt,
         UInt8.le_iff_toNat_le, UInt16.le_iff_toNat_le, UInt32.le_iff_toNat_le, UInt64.le_iff_toNat_le,
         ← UInt8.toNat_inj, ← UInt16.toNat_inj, ← UInt32.toNat_inj, ← UInt64.toNat_inj] <;> omega
-    | fail "go-lean could not prove that the recursive call decreases its termination measure"
 `)
+	if hasMutual {
+		b.WriteString("    | grind\n")
+	}
+	b.WriteString("    | fail \"go-lean could not prove that the recursive call decreases its termination measure\"\n")
 }
 
 func selfBox(t ir.Type, record ir.Symbol) bool {
@@ -373,15 +432,32 @@ func writeStruct(b *strings.Builder, d ir.Struct) {
 		}
 		return
 	}
+	writeRecordInductive(b, d, nil)
+	writeRecordProjections(b, d, nil)
+}
+
+func writeEnum(b *strings.Builder, d ir.Enum, members map[ir.Symbol]bool) {
+	fmt.Fprintf(b, "\ninductive %s where\n", identifier(d.Symbol.Name))
+	for _, variant := range d.Variants {
+		fmt.Fprintf(b, "  | %s (payload : %s)\n", identifier(variant.Name), renderType(variant.Type, members))
+	}
+}
+
+func writeRecordInductive(b *strings.Builder, d ir.Struct, members map[ir.Symbol]bool) {
+	name := identifier(d.Symbol.Name)
 	fmt.Fprintf(b, "\ninductive %s where\n  | mk", name)
 	for _, f := range d.Fields {
-		typ := leanType(f.Type)
+		typ := renderType(f.Type, members)
 		if selfBox(f.Type, d.Symbol) {
 			typ = "(_root_.Option " + name + ")"
 		}
 		fmt.Fprintf(b, " (%s : %s)", field(f.Name), typ)
 	}
 	fmt.Fprintf(b, " : %s\n", name)
+}
+
+func writeRecordProjections(b *strings.Builder, d ir.Struct, members map[ir.Symbol]bool) {
+	name := identifier(d.Symbol.Name)
 	for i, f := range d.Fields {
 		pattern := make([]string, len(d.Fields))
 		for j := range pattern {
@@ -390,12 +466,28 @@ func writeStruct(b *strings.Builder, d ir.Struct) {
 		pattern[i] = "value"
 		projection := field(f.Name)
 		fmt.Fprintf(b, "\ndef %s.%s : %s → %s\n  | .mk %s => value\n", name, projection, name, leanType(f.Type), strings.Join(pattern, " "))
-		if selfBox(f.Type, d.Symbol) {
-			fmt.Fprintf(b, "\n@[local simp] theorem %s.%s (node fallback : %s)\n    (present : node.%s.isSome = true) :\n    sizeOf (node.%s.getD fallback) < sizeOf node := by\n", name, identifier("box_size:"+f.Name), name, projection, projection)
-			for j := range pattern {
-				pattern[j] = fmt.Sprintf("arg%d", j)
+		boxed := f.Type.Kind == ir.Box && (selfBox(f.Type, d.Symbol) || members[f.Type.Element.Record])
+		direct := (f.Type.Kind == ir.Record || f.Type.Kind == ir.EnumType) && members[f.Type.Record]
+		if !boxed && !direct {
+			continue
+		}
+		for j := range pattern {
+			pattern[j] = fmt.Sprintf("arg%d", j)
+		}
+		if boxed {
+			binders := "(node fallback : " + name + ")"
+			if !selfBox(f.Type, d.Symbol) {
+				binders = "(node : " + name + ") (fallback : " + leanType(*f.Type.Element) + ")"
 			}
+			fmt.Fprintf(b, "\n@[local simp] theorem %s.%s %s\n    (present : node.%s.isSome = true) :\n    sizeOf (node.%s.getD fallback) < sizeOf node := by\n", name, identifier("box_size:"+f.Name), binders, projection, projection)
 			fmt.Fprintf(b, "  cases node with\n  | mk %s =>\n    cases %s <;> simp_all [%s.%s] <;> omega\n", strings.Join(pattern, " "), pattern[i], name, projection)
+			if len(members) > 0 {
+				fmt.Fprintf(b, "local grind_pattern %s.%s => node.%s.getD fallback\n", name, identifier("box_size:"+f.Name), projection)
+			}
+		} else {
+			fmt.Fprintf(b, "\ntheorem %s.%s (node : %s) :\n    sizeOf node.%s < sizeOf node := by\n", name, identifier("field_size:"+f.Name), name, projection)
+			fmt.Fprintf(b, "  cases node with\n  | mk %s => simp [%s.%s] <;> omega\n", strings.Join(pattern, " "), name, projection)
+			fmt.Fprintf(b, "local grind_pattern %s.%s => node.%s\n", name, identifier("field_size:"+f.Name), projection)
 		}
 	}
 }

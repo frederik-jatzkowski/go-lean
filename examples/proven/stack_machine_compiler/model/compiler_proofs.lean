@@ -284,43 +284,6 @@ private theorem outcomeExists (src : List UInt8) : ∃ outcome, SourceOutcome sr
         · exact ⟨_, .codeTooLarge splitWords lex h (by omega)⟩
     · exact ⟨_, .syntax splitWords lex (fun ⟨e, he⟩ => parsed ⟨e, (parseTokensIff ts e).mpr he⟩)⟩
 
-private def tokenClass : Token → classification
-  | .literal (.number n) => ⟨1, n⟩
-  | .literal (.boolean b) => ⟨2, boolByte b⟩
-  | .binary .add => ⟨3, 0⟩
-  | .binary .sub => ⟨4, 0⟩
-  | .binary .eq => ⟨5, 0⟩
-  | .binary .lt => ⟨6, 0⟩
-  | .binary .and => ⟨7, 0⟩
-  | .not => ⟨8, 0⟩
-
-set_option maxRecDepth 8192 in
-set_option maxHeartbeats 4000000 in
-private theorem classifyRecognized (word : ByteArray) (tok : Token)
-    (h : Recognizes word.data.toList tok) : classify word = tokenClass tok := by
-  have bytes {s : String} (eq : word.data.toList = ascii s) : word = s.toUTF8 := by
-    cases word
-    congr
-    exact Array.toList_inj.mp eq
-  cases tok with
-  | not => rw [bytes h]; rfl
-  | binary op => cases op <;> rw [bytes h] <;> rfl
-  | literal v =>
-    cases v with
-    | boolean b => cases b <;> rw [bytes h] <;> rfl
-    | number n =>
-      rw [bytes h]
-      have decimalTable : ∀ i : Fin 256,
-          let result := classify (toString i.val).toUTF8
-          result.«field:Kind» = 1 ∧ result.«field:Value» = UInt8.ofNat i.val := by decide
-      obtain ⟨kind, value⟩ := decimalTable n.toBitVec.toFin
-      change (classify (toString n.toNat).toUTF8).«field:Kind» = 1 at kind
-      change (classify (toString n.toNat).toUTF8).«field:Value» = UInt8.ofNat n.toNat at value
-      simp only [UInt8.ofNat_toNat] at value
-      generalize classify (toString n.toNat).toUTF8 = result at *
-      cases result
-      congr <;> assumption
-
 private def compileResult (source : ByteArray) : Requirements.Compilation :=
   let r := Compile source
   ⟨r.«field:Code», r.«field:Type», r.«field:Error».«field:Kind», r.«field:Error».«field:Offset».toNat⟩
@@ -463,15 +426,63 @@ private theorem sizeNat {n : Nat} (fits : n ≤ maxInt) : (UInt64.ofNat n).toNat
   apply Nat.mod_eq_of_lt
   unfold maxInt at fits; omega
 
-private def locatedLexeme (t : LocatedToken) : lexeme :=
-  let c := tokenClass t.1
-  ⟨c.«field:Kind», c.«field:Value», UInt64.ofNat t.2⟩
+private def lexemeAt (offset : UInt64) : Token → Lexeme
+  | .literal (.number n) => .IntegerLexeme ⟨offset, n⟩
+  | .literal (.boolean b) => .BooleanLexeme ⟨offset, b⟩
+  | .binary .add => .AddLexeme ⟨offset⟩
+  | .binary .sub => .SubLexeme ⟨offset⟩
+  | .binary .eq => .EqLexeme ⟨offset⟩
+  | .binary .lt => .LtLexeme ⟨offset⟩
+  | .binary .and => .AndLexeme ⟨offset⟩
+  | .not => .NotLexeme ⟨offset⟩
 
-private theorem tokenKindNonzero (t : Token) : (tokenClass t).«field:Kind» ≠ 0 := by
+private def locatedLexeme (t : LocatedToken) : Lexeme :=
+  lexemeAt (UInt64.ofNat t.2) t.1
+
+private theorem classifyIntegerOffset (word : ByteArray) (offset : UInt64) (n : UInt8)
+    (h : classify word 0 = .IntegerLexeme ⟨0, n⟩) :
+    classify word offset = .IntegerLexeme ⟨offset, n⟩ := by
+  have distribute (p : Prop) [Decidable p] (yes no result : Lexeme) :
+      ((if p then yes else no) = result) = (if p then yes = result else no = result) :=
+    apply_ite (· = result) p yes no
+  simp [classify, decimalLexeme, distribute] at h ⊢
+  exact h
+
+deriving instance DecidableEq for MissingLexeme, IntegerLexeme, BooleanLexeme,
+  AddLexeme, SubLexeme, EqLexeme, LtLexeme, AndLexeme, NotLexeme, Lexeme
+
+set_option maxRecDepth 8192 in
+set_option maxHeartbeats 4000000 in
+private theorem classifyRecognized (word : ByteArray) (offset : UInt64) (tok : Token)
+    (h : Recognizes word.data.toList tok) : classify word offset = lexemeAt offset tok := by
+  have bytes {s : String} (eq : word.data.toList = ascii s) : word = s.toUTF8 := by
+    cases word
+    congr
+    exact Array.toList_inj.mp eq
+  cases tok with
+  | not => rw [bytes h]; rfl
+  | binary op => cases op <;> rw [bytes h] <;> rfl
+  | literal v =>
+    cases v with
+    | boolean b => cases b <;> rw [bytes h] <;> rfl
+    | number n =>
+      rw [bytes h]
+      have table : ∀ i : Fin 256,
+          classify (toString i.val).toUTF8 0 = .IntegerLexeme ⟨0, UInt8.ofNat i.val⟩ := by decide
+      apply classifyIntegerOffset
+      have found := table n.toBitVec.toFin
+      change classify (toString n.toNat).toUTF8 0 = .IntegerLexeme ⟨0, UInt8.ofNat n.toNat⟩ at found
+      simpa only [UInt8.ofNat_toNat] using found
+
+private theorem arity_lexemeAt (offset : UInt64) (t : Token) :
+    arity (lexemeAt offset t) = match t with
+      | .literal _ => 0
+      | .binary _ => 2
+      | .not => 1 := by
   cases t with
-  | literal v => cases v <;> simp [tokenClass]
-  | binary op => cases op <;> decide
-  | not => decide
+  | literal v => cases v <;> rfl
+  | binary op => cases op <;> rfl
+  | not => rfl
 
 private theorem scannerSpace (b : UInt8) : isSpace b = true ↔ whitespace b := by
   simp [isSpace, whitespace, or_assoc]
@@ -491,47 +502,52 @@ private theorem digitByteExists (b : UInt8) (digit : isDigit b = true) :
   have eq : 48 + (b.toNat - 48) = b.toNat := by omega
   simp [digitByte, eq]
 
-private theorem decimalOne (a : UInt8) (accepted : (decimal a 0 0 1).«field:Kind» ≠ 0) :
-    Recognizes [a] (.literal (.number (decimal a 0 0 1).«field:Value»)) := by
+private theorem decimalOne (a : UInt8) (accepted : (decimal a 0 0 1).isSome = true) :
+    Recognizes [a] (.literal (.number ((decimal a 0 0 1).getD 0))) := by
   have digit : isDigit a = true := by
     cases h : isDigit a <;> simp_all [decimal]
   obtain ⟨i, rfl⟩ := digitByteExists a digit
   exact (show ∀ i : Fin 10, Recognizes [digitByte i]
-    (.literal (.number (decimal (digitByte i) 0 0 1).«field:Value»)) by
+    (.literal (.number ((decimal (digitByte i) 0 0 1).getD 0))) by
     simp only [Recognizes]
     decide) i
 
-private theorem decimalTwo (a b : UInt8) (accepted : (decimal a b 0 2).«field:Kind» ≠ 0) :
-    Recognizes [a, b] (.literal (.number (decimal a b 0 2).«field:Value»)) := by
+private theorem decimalTwo (a b : UInt8) (accepted : (decimal a b 0 2).isSome = true) :
+    Recognizes [a, b] (.literal (.number ((decimal a b 0 2).getD 0))) := by
   have digits : isDigit a = true ∧ isDigit b = true := by
     cases ha : isDigit a <;> cases hb : isDigit b <;> simp_all [decimal]
   obtain ⟨i, rfl⟩ := digitByteExists a digits.1
   obtain ⟨j, rfl⟩ := digitByteExists b digits.2
-  exact (show ∀ i j : Fin 10, (decimal (digitByte i) (digitByte j) 0 2).«field:Kind» ≠ 0 →
+  exact (show ∀ i j : Fin 10, (decimal (digitByte i) (digitByte j) 0 2).isSome = true →
     Recognizes [digitByte i, digitByte j]
-      (.literal (.number (decimal (digitByte i) (digitByte j) 0 2).«field:Value»)) by
+      (.literal (.number ((decimal (digitByte i) (digitByte j) 0 2).getD 0))) by
     simp only [Recognizes]
     decide) i j accepted
 
 set_option maxRecDepth 8192 in
 set_option maxHeartbeats 6000000 in
-private theorem decimalThree (a b c : UInt8) (accepted : (decimal a b c 3).«field:Kind» ≠ 0) :
-    Recognizes [a, b, c] (.literal (.number (decimal a b c 3).«field:Value»)) := by
+private theorem decimalThree (a b c : UInt8) (accepted : (decimal a b c 3).isSome = true) :
+    Recognizes [a, b, c] (.literal (.number ((decimal a b c 3).getD 0))) := by
   have digits : isDigit a = true ∧ isDigit b = true ∧ isDigit c = true := by
     cases ha : isDigit a <;> cases hb : isDigit b <;> cases hc : isDigit c <;>
       simp_all [decimal] <;> split at accepted <;> simp_all
   obtain ⟨i, rfl⟩ := digitByteExists a digits.1
   obtain ⟨j, rfl⟩ := digitByteExists b digits.2.1
   obtain ⟨k, rfl⟩ := digitByteExists c digits.2.2
-  exact (show ∀ i j k : Fin 10, (decimal (digitByte i) (digitByte j) (digitByte k) 3).«field:Kind» ≠ 0 →
+  exact (show ∀ i j k : Fin 10, (decimal (digitByte i) (digitByte j) (digitByte k) 3).isSome = true →
     Recognizes [digitByte i, digitByte j, digitByte k]
-      (.literal (.number (decimal (digitByte i) (digitByte j) (digitByte k) 3).«field:Value»)) by
+      (.literal (.number ((decimal (digitByte i) (digitByte j) (digitByte k) 3).getD 0))) by
     simp only [Recognizes]
     decide) i j k accepted
 
+private theorem missingDecimal (a b c : UInt8) (width offset : UInt64) :
+    (missingLexeme (decimalLexeme a b c width offset) = false) = ((decimal a b c width).isSome = true) := by
+  unfold decimalLexeme
+  cases decimal a b c width <;> simp [missingLexeme]
+
 set_option linter.unusedSimpArgs false in
-private theorem classifyValid (data : ByteArray) (fits : data.size ≤ maxInt)
-    (accepted : (classify data).«field:Kind» ≠ 0) :
+private theorem classifyValid (data : ByteArray) (offset : UInt64) (fits : data.size ≤ maxInt)
+    (accepted : missingLexeme (classify data offset) = false) :
     ∃ tok, Recognizes data.data.toList tok := by
   have width : (UInt64.ofNat data.size).toNat = data.size := sizeNat fits
   simp only [classify, byteAtList] at accepted
@@ -541,9 +557,10 @@ private theorem classifyValid (data : ByteArray) (fits : data.size ≤ maxInt)
       have := congrArg UInt64.toNat eq
       omega
     simp [ne 2 (by decide), ne 3 (by decide), ne 4 (by decide), ne 5 (by decide)] at accepted
+    simp only [missingDecimal] at accepted
     unfold decimal at accepted
     split at accepted
-    · simp [← ByteArray.size_data, Array.size_eq_length_toList] at accepted
+    · simp [missingDecimal, ← ByteArray.size_data, Array.size_eq_length_toList] at accepted
     · simp [ne 1 (by decide), ne 2 (by decide), ne 3 (by decide)] at accepted
   cases data with
   | mk arr =>
@@ -551,16 +568,16 @@ private theorem classifyValid (data : ByteArray) (fits : data.size ≤ maxInt)
     | mk bytes =>
       change ∃ tok, Recognizes bytes tok
       cases bytes with
-      | nil => simp [← ByteArray.size_data, Array.size_eq_length_toList, decimal, isDigit] at accepted
+      | nil => simp [missingDecimal, ← ByteArray.size_data, Array.size_eq_length_toList, decimal, isDigit] at accepted
       | cons a tail =>
         cases tail with
         | nil =>
-          simp [← ByteArray.size_data, Array.size_eq_length_toList] at accepted
+          simp [missingDecimal, ← ByteArray.size_data, Array.size_eq_length_toList] at accepted
           exact ⟨_, decimalOne a accepted⟩
         | cons b tail =>
           cases tail with
           | nil =>
-            simp [← ByteArray.size_data, Array.size_eq_length_toList] at accepted
+            simp [missingDecimal, ← ByteArray.size_data, Array.size_eq_length_toList] at accepted
             split at accepted
             · rename_i eq
               rcases eq with ⟨rfl, rfl⟩
@@ -569,11 +586,11 @@ private theorem classifyValid (data : ByteArray) (fits : data.size ≤ maxInt)
               · rename_i eq
                 rcases eq with ⟨rfl, rfl⟩
                 exact ⟨.binary .lt, rfl⟩
-              · exact ⟨_, decimalTwo a b accepted⟩
+              · exact ⟨_, decimalTwo a b (by simpa [missingDecimal] using accepted)⟩
           | cons c tail =>
             cases tail with
             | nil =>
-              simp [← ByteArray.size_data, Array.size_eq_length_toList] at accepted
+              simp [missingDecimal, ← ByteArray.size_data, Array.size_eq_length_toList] at accepted
               split at accepted
               · rename_i eq
                 rcases eq with ⟨⟨rfl, rfl⟩, rfl⟩
@@ -590,36 +607,39 @@ private theorem classifyValid (data : ByteArray) (fits : data.size ≤ maxInt)
                     · rename_i eq
                       rcases eq with ⟨⟨rfl, rfl⟩, rfl⟩
                       exact ⟨.not, rfl⟩
-                    · exact ⟨_, decimalThree a b c accepted⟩
+                    · exact ⟨_, decimalThree a b c (by simpa [missingDecimal] using accepted)⟩
             | cons d tail =>
               cases tail with
               | nil =>
-                simp [← ByteArray.size_data, Array.size_eq_length_toList] at accepted
+                simp [missingDecimal, ← ByteArray.size_data, Array.size_eq_length_toList] at accepted
                 split at accepted
                 · rename_i eq
                   rcases eq with ⟨⟨⟨rfl, rfl⟩, rfl⟩, rfl⟩
                   exact ⟨.literal (.boolean true), rfl⟩
-                · simp [decimal] at accepted
+                · simp [missingDecimal, decimal] at accepted
               | cons e tail =>
                 cases tail with
                 | nil =>
-                  simp [← ByteArray.size_data, Array.size_eq_length_toList] at accepted
+                  simp [missingDecimal, ← ByteArray.size_data, Array.size_eq_length_toList] at accepted
                   split at accepted
                   · rename_i eq
                     rcases eq with ⟨⟨⟨⟨rfl, rfl⟩, rfl⟩, rfl⟩, rfl⟩
                     exact ⟨.literal (.boolean false), rfl⟩
-                  · simp [decimal] at accepted
-                | cons f tail => exact False.elim (wide (by simp [← ByteArray.size_data, Array.size_eq_length_toList] <;> omega))
+                  · simp [missingDecimal, decimal] at accepted
+                | cons f tail => exact False.elim (wide (by simp [missingDecimal, ← ByteArray.size_data, Array.size_eq_length_toList] <;> omega))
 
 private theorem closeRecognizedWord (source : ByteArray) (start stop : UInt64)
-    (words : Array lexeme) (error : Diagnostic) (oldScan : scanState)
+    (words : Array Lexeme) (error : Diagnostic) (oldScan : scanState)
     (token : Token) (recognized : Recognizes (source.extract start.toNat stop.toNat).data.toList token) :
     closeWord stop ⟨source, words, oldScan, error⟩ ⟨start, false⟩ =
-      (⟨source, words.push ⟨(tokenClass token).«field:Kind», (tokenClass token).«field:Value», start⟩,
+      (⟨source, words.push (lexemeAt start token),
         ⟨start, false⟩, error⟩, false) := by
-  simp [closeWord, classifyRecognized _ token recognized, tokenKindNonzero token]
+  cases token with
+  | literal v => cases v <;> simp [closeWord, classifyRecognized _ _ _ recognized, lexemeAt, missingLexeme]
+  | binary op => cases op <;> simp [closeWord, classifyRecognized _ _ _ recognized, lexemeAt, missingLexeme]
+  | not => simp [closeWord, classifyRecognized _ _ _ recognized, lexemeAt, missingLexeme]
 
-private theorem scanNonspace (source : ByteArray) (i : UInt64) (words : Array lexeme)
+private theorem scanNonspace (source : ByteArray) (i : UInt64) (words : Array Lexeme)
     (start : UInt64) (inside : _root_.Bool) (error : Diagnostic) (byte : UInt8)
     (atByte : source[i.toNat]? = some byte) (nonspace : ¬ whitespace byte) :
     scanSourceByte i ⟨source, words, ⟨start, inside⟩, error⟩ =
@@ -631,7 +651,7 @@ private theorem scanNonspace (source : ByteArray) (i : UInt64) (words : Array le
   cases inside <;> simp [scanSourceByte, scanByte, atByte, h]
 
 private theorem scanWordBytes (source : ByteArray) (i start : UInt64)
-    (words : Array lexeme) (error : Diagnostic) (bytes tail : List UInt8)
+    (words : Array Lexeme) (error : Diagnostic) (bytes tail : List UInt8)
     (suffix : source.data.toList.drop i.toNat = bytes ++ tail)
     (fits : source.size ≤ maxInt) (nonspace : ∀ b ∈ bytes, ¬ whitespace b) :
     («fold».countUntil scanSourceByte bytes.length i
@@ -656,7 +676,7 @@ private theorem scanWordBytes (source : ByteArray) (i start : UInt64)
     rw [List.length_cons, «fold».countUntil, scanNonspace source i words start true error b atByte
       (nonspace b (by simp))]
     exact ih (i + 1) rest (fun c mem => nonspace c (by simp [mem]))
-private theorem scanDelimiter (source : ByteArray) (i start : UInt64) (words : Array lexeme)
+private theorem scanDelimiter (source : ByteArray) (i start : UInt64) (words : Array Lexeme)
     (inside : _root_.Bool) (error : Diagnostic) (byte : UInt8)
     (atByte : source[i.toNat]? = some byte) (space : whitespace byte) :
     scanSourceByte i ⟨source, words, ⟨start, inside⟩, error⟩ =
@@ -684,7 +704,7 @@ private theorem scanFoldAppend {S : Type} (step : UInt64 → S → S × _root_.B
       | true => rfl
 
 private theorem scanWordStart (source : ByteArray) (i start : UInt64)
-    (words : Array lexeme) (error : Diagnostic) (b : UInt8) (bytes tail : List UInt8)
+    (words : Array Lexeme) (error : Diagnostic) (b : UInt8) (bytes tail : List UInt8)
     (suffix : source.data.toList.drop i.toNat = (b :: bytes) ++ tail)
     (fits : source.size ≤ maxInt) (nonspace : ∀ c ∈ b :: bytes, ¬ whitespace c) :
     («fold».countUntil scanSourceByte (b :: bytes).length i
@@ -712,7 +732,7 @@ private theorem scanRecognized (source : ByteArray) (fits : source.size ≤ maxI
     {offset : Nat} {bytes : List UInt8} {words : List Word} (splitWords : Words offset bytes words)
     (suffix : source.data.toList.drop offset = bytes) (length : offset + bytes.length = source.size)
     (tokens : List LocatedToken) (lexed : Lexed words tokens)
-    (prior : Array lexeme) (start : UInt64) (err : Diagnostic) :
+    (prior : Array Lexeme) (start : UInt64) (err : Diagnostic) :
     let result := finishScan (UInt64.ofNat source.size)
       («fold».countUntil scanSourceByte bytes.length (UInt64.ofNat offset)
         ⟨source, prior, ⟨start, false⟩, err⟩)
@@ -817,7 +837,7 @@ private def viewParse (result : parser × _root_.Bool) : Option (Array expressio
   if result.2 then none else some result.1.«field:Roots»
 
 set_option linter.unusedSimpArgs false in
-private theorem parseStep (words : Array lexeme) (index : UInt64) (t : LocatedToken)
+private theorem parseStep (words : Array Lexeme) (index : UInt64) (t : LocatedToken)
     (atWord : words[(UInt64.ofNat words.size - 1 - index).toNat]? = some (locatedLexeme t))
     (roots : List Expr) (fits : roots.length ≤ maxInt) :
     viewParse (parseWord index ⟨words, modelRoots roots⟩) =
@@ -841,35 +861,35 @@ private theorem parseStep (words : Array lexeme) (index : UInt64) (t : LocatedTo
     exact Array.getElem?_push_size
   cases tok with
   | literal v =>
-    cases v <;> simp [parseWord, atWord, locatedLexeme, tokenClass, arity, viewParse, readToken, modelRoots, modelExpr]
+    simp [parseWord, atWord, locatedLexeme, arity_lexemeAt, viewParse, readToken, modelRoots, modelExpr]
   | not =>
     cases roots with
-    | nil => simp [parseWord, atWord, locatedLexeme, tokenClass, arity, viewParse, readToken, modelRoots]
+    | nil => simp [parseWord, atWord, locatedLexeme, arity_lexemeAt, viewParse, readToken, modelRoots]
     | cons e rest =>
       simp only [List.length_cons] at fits
-      simp only [parseWord, atWord, Option.getD_some, locatedLexeme, tokenClass,
-        arity, lexeme.«field:Kind», modelRoots, Array.size_push, modelRootsSize]
+      simp only [parseWord, atWord, Option.getD_some, locatedLexeme, arity_lexemeAt,
+        modelRoots, Array.size_push, modelRootsSize]
       simp only [last e rest fits, UInt64.lt_iff_toNat_lt, sizeNat fits]
-      simp [viewParse, readToken, modelRoots, modelExpr, tokenClass, locatedLexeme]
+      simp [viewParse, readToken, modelRoots, modelExpr, locatedLexeme]
   | binary op =>
     cases roots with
     | nil =>
-      cases op <;> simp [parseWord, atWord, locatedLexeme, tokenClass, arity, viewParse, readToken, modelRoots]
+      simp [parseWord, atWord, locatedLexeme, arity_lexemeAt, viewParse, readToken, modelRoots]
     | cons l tail =>
       cases tail with
       | nil =>
-        cases op <;> simp [parseWord, atWord, locatedLexeme, tokenClass, arity, viewParse, readToken, modelRoots]
+        simp [parseWord, atWord, locatedLexeme, arity_lexemeAt, viewParse, readToken, modelRoots]
       | cons r rest =>
         simp only [List.length_cons] at fits
         have top := last l (r :: rest) fits
         simp only [List.length_cons, modelRoots] at top
-        cases op <;>
-          simp only [parseWord, atWord, Option.getD_some, locatedLexeme, tokenClass,
-            arity, lexeme.«field:Kind», modelRoots, Array.size_push, modelRootsSize]
-        all_goals simp only [top, previous l r rest fits, UInt64.lt_iff_toNat_lt, sizeNat fits]
-        all_goals simp [viewParse, readToken, modelRoots, modelExpr, locatedLexeme, tokenClass, show ¬ rest.length + 1 + 1 < 2 by omega]
+        simp only [parseWord, atWord, Option.getD_some, locatedLexeme, arity_lexemeAt,
+          modelRoots, Array.size_push, modelRootsSize]
+        simp only [top, previous l r rest fits, UInt64.lt_iff_toNat_lt, sizeNat fits]
+        simp [viewParse, readToken, modelRoots, modelExpr, locatedLexeme,
+          show ¬ rest.length + 1 + 1 < 2 by omega]
 
-private theorem parseCorresponds (words : Array lexeme) (tokens : List LocatedToken)
+private theorem parseCorresponds (words : Array Lexeme) (tokens : List LocatedToken)
     (layout : words.toList = tokens.map locatedLexeme) (fits : words.size ≤ maxInt)
     (remaining : Nat) (index : UInt64) (roots : List Expr)
     (rootsBound : roots.length ≤ index.toNat) (count : index.toNat + remaining = words.size) :
@@ -892,7 +912,7 @@ private theorem parseCorresponds (words : Array lexeme) (tokens : List LocatedTo
     have hn : n < tokens.length := by omega
     let t := tokens[n]
     have atWord : words[n]? = some (locatedLexeme t) := by
-      have atIndex := congrArg (fun xs : List lexeme => xs[n]?) layout
+      have atIndex := congrArg (fun xs : List Lexeme => xs[n]?) layout
       simpa [List.getElem?_map, getElem?_pos tokens n hn, t] using atIndex
     have step := parseStep words index t (by rw [pos]; exact atWord) roots (by omega)
     have take : tokens.take (n + 1) = tokens.take n ++ [t] := by
@@ -953,7 +973,7 @@ private theorem parseCorresponds (words : Array lexeme) (tokens : List LocatedTo
       simpa only [ok.1, Bool.false_eq_true, ite_false, state] using
         ih (index + 1) nextStack (by omega) (by omega)
 
-private theorem parseLayout (words : Array lexeme) (tokens : List LocatedToken)
+private theorem parseLayout (words : Array Lexeme) (tokens : List LocatedToken)
     (layout : words.toList = tokens.map locatedLexeme) (fits : words.size ≤ maxInt) :
     viewParse (parse words) = (tokens.foldr readToken (some [])).map modelRoots := by
   have lengths : words.size = tokens.length := by simpa using congrArg List.length layout
@@ -974,11 +994,11 @@ private theorem checkCorrect (e : Expr) :
     rw [checkExpression.eq_def]
     cases h : operand.check with
     | error err =>
-      simp [modelExpr, locatedLexeme, tokenClass, expression.«field:Word», expression.«field:Left»,
-        expression.«field:Right», ih, h, Expr.check, Bind.bind, Except.bind, mismatch]
+      simp [modelExpr, locatedLexeme, lexemeAt, expression.«field:Word», expression.«field:Left»,
+        expression.«field:Right», literalType, ih, h, Expr.check, Bind.bind, Except.bind, mismatch]
     | ok ty =>
-      cases ty <;> simp [modelExpr, locatedLexeme, tokenClass, expression.«field:Word»,
-        expression.«field:Left», expression.«field:Right», ih, h, Expr.check, Bind.bind, Except.bind,
+      cases ty <;> simp [modelExpr, locatedLexeme, lexemeAt, expression.«field:Word»,
+        expression.«field:Left», expression.«field:Right», literalType, lexemeOffset, ih, h, Expr.check, Bind.bind, Except.bind,
         typed, noDiagnostic, mismatch, Requirements.Ty.tag, Pure.pure, Except.pure, throw, throwThe, MonadExceptOf.throw]
   | binary op offset l r il ir =>
     rw [checkExpression.eq_def]
@@ -993,16 +1013,17 @@ private theorem emitCorrect (e : Expr) (code : ByteArray) :
     (emitExpression (modelExpr e) code).data.toList = code.data.toList ++ e.instructions := by
   induction e generalizing code with
   | literal v offset =>
-    cases v <;> rw [emitExpression.eq_def] <;> simp [modelExpr, leaf, locatedLexeme, tokenClass,
-      expression.«field:Left», expression.«field:Word», emitWord, encode, Expr.instructions, Value.byte]
+    cases v <;> rw [emitExpression.eq_def] <;> simp [modelExpr, leaf, locatedLexeme, lexemeAt,
+      expression.«field:Left», expression.«field:Word», emitWord, Expr.instructions, Value.byte, boolByte]
+    split <;> simp_all
   | not offset operand ih =>
     rw [emitExpression.eq_def]
-    simp [modelExpr, locatedLexeme, tokenClass, expression.«field:Left», expression.«field:Right»,
-      expression.«field:Word», emitWord, encode, Expr.instructions, ih, List.append_assoc]
+    simp [modelExpr, locatedLexeme, lexemeAt, expression.«field:Left», expression.«field:Right»,
+      expression.«field:Word», emitWord, Expr.instructions, ih, List.append_assoc]
   | binary op offset l r il ir =>
     rw [emitExpression.eq_def]
-    cases op <;> simp [modelExpr, locatedLexeme, tokenClass, expression.«field:Left», expression.«field:Right»,
-      expression.«field:Word», emitWord, encode, Expr.instructions, BinOp.opcode, il, ir, List.append_assoc]
+    cases op <;> simp [modelExpr, locatedLexeme, lexemeAt, expression.«field:Left», expression.«field:Right»,
+      expression.«field:Word», emitWord, Expr.instructions, BinOp.opcode, il, ir, List.append_assoc]
 
 private theorem codeFitsIff (n : Nat) (repr : n ≤ maxInt) :
     codeFits (UInt64.ofNat n) = true ↔ 2 * n + 2 ≤ maxInt := by
@@ -1104,7 +1125,7 @@ private theorem checkErrorOffset (e : Expr) (bound : Nat)
         split at bad <;> simp [Pure.pure, Except.pure, throw, throwThe, MonadExceptOf.throw] at bad
         omega
 
-private theorem parseSuccess (words : Array lexeme) (e : Expr)
+private theorem parseSuccess (words : Array Lexeme) (e : Expr)
     (layout : words.toList = e.tokens.map locatedLexeme) (fits : words.size ≤ maxInt) :
     (parse words).2 = false ∧ (parse words).1.«field:Roots» = #[modelExpr e] := by
   have p := parseLayout words e.tokens layout fits
@@ -1112,7 +1133,7 @@ private theorem parseSuccess (words : Array lexeme) (e : Expr)
   cases h : (parse words).2 <;> simp [viewParse, h, modelRoots] at p ⊢
   exact p
 
-private theorem parseReject (words : Array lexeme) (tokens : List LocatedToken)
+private theorem parseReject (words : Array Lexeme) (tokens : List LocatedToken)
     (layout : words.toList = tokens.map locatedLexeme) (fits : words.size ≤ maxInt)
     (invalid : ¬ ∃ e : Expr, e.tokens = tokens) :
     (parse words).2 = true ∨ UInt64.ofNat (parse words).1.«field:Roots».size ≠ 1 := by
@@ -1178,7 +1199,7 @@ private theorem scanFirstFailure (source : ByteArray) (fits : source.size ≤ ma
     {offset failure : Nat} {bytes : List UInt8} {words : List Word}
     (splitWords : Words offset bytes words) (bad : LexicalFailure words failure)
     (suffix : source.data.toList.drop offset = bytes) (length : offset + bytes.length = source.size)
-    (prior : Array lexeme) (start : UInt64) :
+    (prior : Array Lexeme) (start : UInt64) :
     let result := finishScan (UInt64.ofNat source.size)
       («fold».countUntil scanSourceByte bytes.length (UInt64.ofNat offset)
         ⟨source, prior, ⟨start, false⟩, noDiagnostic⟩)
@@ -1229,10 +1250,10 @@ private theorem scanFirstFailure (source : ByteArray) (fits : source.size ≤ ma
       change (finishScan (UInt64.ofNat source.size) («fold».countUntil scanSourceByte tail.length j old)).«field:Error» = _
       cases bad with
       | first invalid =>
-        have rejected : (classify slice).«field:Kind» = 0 := by
-          by_cases h : (classify slice).«field:Kind» = 0
+        have rejected : missingLexeme (classify slice i) = true := by
+          by_cases h : missingLexeme (classify slice i) = true
           · exact h
-          · obtain ⟨tok, valid⟩ := classifyValid slice sliceFits h
+          · obtain ⟨tok, valid⟩ := classifyValid slice i sliceFits (by simpa using h)
             rw [sliceBytes] at valid
             exact False.elim (invalid ⟨tok, valid⟩)
         have closing : closeWord j old ⟨i, false⟩ = lexError old 2 i := by

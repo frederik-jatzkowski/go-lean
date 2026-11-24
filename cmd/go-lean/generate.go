@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/frederik-jatzkowski/go-lean/internal/emit"
+	"github.com/frederik-jatzkowski/go-lean/internal/genfile"
 	"github.com/frederik-jatzkowski/go-lean/internal/load"
 	"github.com/frederik-jatzkowski/go-lean/internal/lower"
 )
@@ -80,11 +81,11 @@ func generate(ctx context.Context, pattern string) ([]string, error) {
 			if err := createProof(out.path, out.artifact.Content); err != nil {
 				return nil, err
 			}
-		} else if err := writeChanged(out.path, out.artifact.Content); err != nil {
+		} else if err := genfile.WriteChanged(out.path, out.artifact.Content); err != nil {
 			return nil, err
 		}
 	}
-	if err := writeChanged("lakefile.toml", workspace.render()); err != nil {
+	if err := genfile.WriteChanged("lakefile.toml", workspace.render()); err != nil {
 		return nil, err
 	}
 	return targets, nil
@@ -115,28 +116,4 @@ func createProof(path, content string) error {
 		return closeErr
 	}
 	return nil
-}
-
-func writeChanged(path, content string) error {
-	old, err := os.ReadFile(path)
-	if err == nil && string(old) == content {
-		return nil
-	}
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".golean-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(f.Name())
-	_, err = f.WriteString(content)
-	closeErr := f.Close()
-	if err != nil {
-		return err
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	return os.Rename(f.Name(), path)
 }

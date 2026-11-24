@@ -75,6 +75,9 @@ func (f *function) expr(node ast.Expr) (ir.Expr, error) {
 			if err != nil {
 				return nil, err
 			}
+			if t.Kind == ir.EnumType {
+				return nil, load.Error(p, e.Pos(), "generated enum storage is private to lean.gen.go")
+			}
 			receiver, err := f.expr(e.X)
 			return ir.FieldRead{Record: receiver, Name: sel.Obj().Name(), Control: t.Kind == ir.FoldControl}, err
 		}
@@ -119,6 +122,12 @@ func (f *function) literal(e *ast.CompositeLit) (ir.Expr, error) {
 	t, err := f.goType(p, e.Pos(), typ)
 	if err != nil {
 		return nil, err
+	}
+	if t.Kind == ir.EnumType {
+		if len(e.Elts) != 0 {
+			return nil, load.Error(p, e.Pos(), "construct enum values with generated constructors or an empty literal")
+		}
+		return f.zero(t), nil
 	}
 	if t.Kind > ir.Record && t.Kind != ir.FoldControl && len(e.Elts) == 0 {
 		return ir.Primitive{Op: ir.Empty, Type: t}, nil
@@ -202,6 +211,17 @@ func (f *function) call(e *ast.CallExpr) (ir.Expr, error) {
 	}
 	if fn == nil || fn.Pkg() == nil || e.Ellipsis.IsValid() {
 		return nil, load.Error(p, e.Pos(), "expected a direct call to a supported function")
+	}
+	if constructor, ok := f.compiler.source.EnumConstructors[fn]; ok {
+		typ, err := f.goType(p, e.Pos(), constructor.Owner.Type())
+		if err != nil {
+			return nil, err
+		}
+		value, err := f.expr(e.Args[0])
+		return ir.Constructor{Enum: typ.Record, Variant: constructor.Variant, Value: value}, err
+	}
+	if _, ok := f.compiler.source.EnumCases[fn]; ok {
+		return nil, load.Error(p, e.Pos(), "enum Case() is only supported in an exhaustive enum switch")
 	}
 	if fn.Pkg().Path() == load.Curated {
 		if kind := folds[fn.Name()]; selection == nil && kind != 0 {

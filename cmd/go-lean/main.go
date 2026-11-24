@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/frederik-jatzkowski/go-lean/internal/enums"
 	"github.com/spf13/cobra"
 )
 
@@ -32,7 +33,15 @@ func newCommand() *cobra.Command {
 			return err
 		},
 	}
-	root.AddCommand(transpileCmd, newVerifyCommand(), newSetupCommand(), newDoctorCommand())
+	root.AddCommand(&cobra.Command{
+		Use: "generate <path>", Short: "Generate Go enum declarations", Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := validatePattern(args[0]); err != nil {
+				return err
+			}
+			return enums.Process(cmd.Context(), ".", args[0], true)
+		},
+	}, transpileCmd, newVerifyCommand(), newSetupCommand(), newDoctorCommand())
 	root.CompletionOptions.DisableDefaultCmd = true
 	return root
 }

@@ -53,6 +53,9 @@ func Program(source *load.Program) ([]*ir.Package, error) {
 		if issue := source.PackageIssues[p.Path]; issue != nil {
 			return nil, issue
 		}
+		if err := groupTypes(p); err != nil {
+			return nil, err
+		}
 	}
 	return result, nil
 }
@@ -73,7 +76,7 @@ func (c *compiler) declaration(p *packages.Package, decl load.Declaration) error
 		if err != nil {
 			return err
 		}
-		if obj.Name() != "_" && (t.Kind != ir.Record || obj.IsAlias()) {
+		if obj.Name() != "_" && ((t.Kind != ir.Record && t.Kind != ir.EnumType) || obj.IsAlias()) {
 			out := c.output(p.PkgPath)
 			out.Decls = append(out.Decls, ir.TypeAlias{Symbol: symbol(obj), Type: t})
 		}
@@ -419,6 +422,8 @@ func (f *function) block(stmts []ast.Stmt, tail continuation) (ir.Expr, error) {
 			return nil, load.Error(p, stmts[1].Pos(), "unreachable statements after unconditional return")
 		}
 		return branch, nil
+	case *ast.TypeSwitchStmt:
+		return f.enumMatch(s, rest, len(stmts) > 1)
 	case *ast.ForStmt, *ast.RangeStmt:
 		return nil, load.Error(p, statement.Pos(), "raw loops are unsupported in modeled Go; use lean.FoldN, lean.FoldNUntil, lean.FoldList, or lean.FoldListUntil")
 	case *ast.AssignStmt:
@@ -440,6 +445,18 @@ func (f *function) block(stmts []ast.Stmt, tail continuation) (ir.Expr, error) {
 			return nil, load.Error(p, s.Pos(), "expected a single initialized local var declaration")
 		}
 		v := d.Specs[0].(*ast.ValueSpec)
+		if len(v.Values) == 0 && len(v.Names) == 1 {
+			obj := p.TypesInfo.Defs[v.Names[0]].(*types.Var)
+			t, err := f.goType(p, v.Pos(), obj.Type())
+			if err != nil {
+				return nil, err
+			}
+			if t.Kind == ir.EnumType {
+				id := f.bind(obj)
+				body, err := rest()
+				return ir.Let{ID: id, Value: f.zero(t), Body: body}, err
+			}
+		}
 		return f.bindings(v.Names, v.Values, rest)
 	default:
 		return nil, load.Error(p, s.Pos(), "unsupported statement %T", s)
@@ -457,11 +474,11 @@ func (f *function) bindings(names []*ast.Ident, values []ast.Expr, tail continua
 		if !ok {
 			return nil, load.Error(p, name.Pos(), "reassignment is unsupported")
 		}
-		if _, err := f.goType(p, name.Pos(), v.Type()); err != nil {
-			return nil, err
-		}
 		value, err := f.expr(values[i])
 		if err != nil {
+			return nil, err
+		}
+		if _, err := f.goType(p, name.Pos(), v.Type()); err != nil {
 			return nil, err
 		}
 		bindings[i] = ir.Let{ID: f.bind(v), Value: value}

@@ -2,6 +2,14 @@
 //
 //golean:generate:enum ExprForm { UnsupportedExpr default, Parenthesized, Identifier, UnaryExpr, BinaryExpr, SelectorExpr, CompositeExpr, KeyedExpr, CallExpr }
 //golean:generate:enum StmtForm { UnsupportedStmt default, ReturnStmt, IfStmt, SwitchStmt, LoopStmt, ShortDecl, VarDecl }
+//golean:verify missingIDs : ∀ p : Program,
+//golean:verify+ «Program$LookupObject» p 0 = none ∧ «Program$LookupType» p 0 = none ∧
+//golean:verify+ «Program$LookupExpression» p 0 = none ∧ «Program$LookupStatement» p 0 = none
+//golean:verify objectLookup : ∀ (p : Program) (id : ObjectID), id ≠ 0 →
+//golean:verify+ «Program$LookupObject» p id = p.«field:Objects»[id.toNat]?
+//golean:verify identityConversionRequiresSameScalar : ∀ (target source : «Type»),
+//golean:verify+ «Type$AllowsIdentityConversion» target source = true →
+//golean:verify+ target.«field:Basic» = source.«field:Basic»
 package loaded
 
 import "github.com/frederik-jatzkowski/go-lean/pkg/lean"

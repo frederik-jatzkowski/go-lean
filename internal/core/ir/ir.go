@@ -7,6 +7,14 @@
 //golean:generate:enum Primitive { MissingPrimitive default, EmptyValue, MakeSome, MakeNone, ListNil, ListCons, ListIsEmpty, OptionIsSome, OptionUnwrapOr, BoxRead, ArrayPush, ByteArrayPush, ArrayPop, ArrayGet, ByteArrayGet, BitVecGet, ArraySet, ByteArraySet, BitVecSet, CollectionSize, ByteArrayExtract, MapFind, MapContains, MapInsert, MapErase, SetContains, SetInsert, SetErase, MakeBitVec, BitVecWidth, BitVecToUint64 }
 //golean:generate:enum Fold { CountFold default, CountUntilFold, ListFold, ListUntilFold }
 //golean:generate:enum FoldStep { DirectStep default, AbstractStep }
+//golean:verify emptyValueKeepsType : ∀ t : «Type»,
+//golean:verify+ NewEmptyValueExpr t = Expr.PrimitiveExpr (PrimitiveExpr.mk (Primitive.EmptyValue (EmptyValue.mk t)))
+//golean:verify countedFoldKeepsDirectStep : ∀ (count seed : Expr) (target : Symbol),
+//golean:verify+ FoldFromOperation FoldN count seed target false =
+//golean:verify+ Expr.FoldExpr (FoldExpr.mk (Fold.CountFold (CountFold.mk count seed (FoldStep.DirectStep (DirectStep.mk target)))))
+//golean:verify listFoldUntilKeepsAbstractStep : ∀ (items seed : Expr) (target : Symbol),
+//golean:verify+ FoldFromOperation FoldListUntil items seed target true =
+//golean:verify+ Expr.FoldExpr (FoldExpr.mk (Fold.ListUntilFold (ListUntilFold.mk items seed (FoldStep.AbstractStep (AbstractStep.mk target)))))
 package ir
 
 import "github.com/frederik-jatzkowski/go-lean/pkg/lean"

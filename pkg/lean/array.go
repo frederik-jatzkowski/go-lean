@@ -7,6 +7,11 @@ type Array[T any] struct {
 	items []T
 }
 
+// ArrayFromSlice copies values at the Go boundary.
+func ArrayFromSlice[T any](values []T) Array[T] {
+	return Array[T]{items: slices.Clone(values)}
+}
+
 // Push returns an array with value appended.
 func (a Array[T]) Push(value T) Array[T] {
 	items := make([]T, len(a.items)+1)

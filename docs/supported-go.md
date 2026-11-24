@@ -24,6 +24,8 @@ Empty curated collection literals model empty collections. Updates preserve earl
 
 Package constants use Go’s compile-time values. Lean emits a named definition for each named constant, using the declared Go type or the default type for an untyped constant. The value must fit that type on the current Go target. Supported named scalar types and type aliases become Lean abbreviations.
 
+Conversions between values with the same supported underlying scalar type, such as `uint(id)` for `type ObjectID uint`, translate to the operand itself.
+
 ## Generated enums
 
 Declare the enum in a package doc comment and define its payload types in the same Go package.

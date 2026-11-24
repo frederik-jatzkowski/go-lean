@@ -1,52 +1,19 @@
 package lower
 
 import (
-	"go/token"
-	"go/types"
+	"fmt"
 
 	"github.com/frederik-jatzkowski/go-lean/internal/core/ir"
-	"github.com/frederik-jatzkowski/go-lean/internal/load"
+	"github.com/frederik-jatzkowski/go-lean/internal/core/loaded"
 	"github.com/frederik-jatzkowski/go-lean/pkg/lean"
-	"golang.org/x/tools/go/packages"
 )
 
-func basic(p *packages.Package, pos token.Pos, b *types.Basic) (ir.Type, error) {
-	var kind ir.Kind
-	switch b.Kind() {
-	case types.Bool, types.UntypedBool:
-		kind = ir.Bool
-	case types.String, types.UntypedString:
-		kind = ir.String
-	case types.Int8:
-		kind = ir.Int8
-	case types.Int16:
-		kind = ir.Int16
-	case types.Int32, types.UntypedRune:
-		kind = ir.Int32
-	case types.Int64:
-		kind = ir.Int64
-	case types.Uint8:
-		kind = ir.UInt8
-	case types.Uint16:
-		kind = ir.UInt16
-	case types.Uint32:
-		kind = ir.UInt32
-	case types.Uint64:
-		kind = ir.UInt64
-	case types.Int, types.UntypedInt:
-		kind = ir.Int64
-		if p.TypesSizes.Sizeof(types.Typ[types.Int]) == 4 {
-			kind = ir.Int32
-		}
-	case types.Uint:
-		kind = ir.UInt64
-		if p.TypesSizes.Sizeof(b) == 4 {
-			kind = ir.UInt32
-		}
-	default:
-		return ir.Type{}, load.Error(p, pos, "unsupported scalar type %s", b)
+func basic(p loaded.Package, pos string, b loaded.Type) (ir.Type, error) {
+	kind := b.Scalar(p.WordBits)
+	if kind == loaded.NotScalar {
+		return ir.Type{}, diagnostic(pos, "unsupported scalar type %s", b.Display)
 	}
-	return ir.NewTypeScalarType(ir.ScalarType{Scalar: kind}), nil
+	return ir.ScalarFromLoaded(kind), nil
 }
 
 var curatedTypes = map[string]ir.Kind{
@@ -54,92 +21,109 @@ var curatedTypes = map[string]ir.Kind{
 	"Box": ir.Box, "Option": ir.Option, "BitVec": ir.BitVec, "List": ir.List, "FoldControl": ir.FoldControl,
 }
 
-func (c *compiler) goType(p *packages.Package, pos token.Pos, typ types.Type) (ir.Type, error) {
-	if named, ok := typ.(interface{ Obj() *types.TypeName }); ok {
-		if issue := c.source.TypeIssues[named.Obj()]; issue != nil {
-			return ir.Type{}, issue
-		}
+func (c *compiler) unalias(id loaded.TypeID) loaded.Type {
+	typ := c.inputType(id)
+	if typ.Kind == loaded.AliasType {
+		return c.inputType(typ.Underlying)
 	}
-	switch t := types.Unalias(typ).(type) {
-	case *types.Basic:
+	return typ
+}
+
+func (c *compiler) underlying(id loaded.TypeID) loaded.Type {
+	typ := c.unalias(id)
+	if typ.Kind == loaded.NamedType {
+		return c.inputType(typ.Underlying)
+	}
+	return typ
+}
+
+func (c *compiler) goType(p loaded.Package, pos string, typeID loaded.TypeID) (ir.Type, error) {
+	original := c.inputType(typeID)
+	if issue := c.object(original.Object).Issue; issue != "" {
+		return ir.Type{}, fmt.Errorf("%s", issue)
+	}
+	t := c.unalias(typeID)
+	switch t.Kind {
+	case loaded.BasicType:
 		return basic(p, pos, t)
-	case *types.Named:
-		obj := t.Obj()
-		if issue := c.source.TypeIssues[obj]; issue != nil {
-			return ir.Type{}, issue
+	case loaded.NamedType:
+		obj := c.object(t.Object)
+		if obj.Issue != "" {
+			return ir.Type{}, fmt.Errorf("%s", obj.Issue)
 		}
-		if obj.Pkg() != nil && obj.Pkg().Path() == load.Curated {
-			kind, ok := curatedTypes[obj.Name()]
-			if !ok {
-				break
-			}
-			var args [2]ir.Type
-			for i := range t.TypeArgs().Len() {
-				var err error
-				args[i], err = c.goType(p, pos, t.TypeArgs().At(i))
-				if err != nil {
-					return ir.Type{}, err
-				}
-			}
-			return curatedType(kind, args), nil
-		}
-		if t.TypeParams().Len() != 0 {
-			break
-		}
-		if enum, ok := c.source.Enums[obj]; ok {
-			return c.enumType(p, pos, obj, enum)
-		}
-		switch u := t.Underlying().(type) {
-		case *types.Basic:
-			return basic(p, pos, u)
-		case *types.Struct:
-			if obj.Parent() != obj.Pkg().Scope() {
-				break
-			}
-			id := symbol(obj)
-			if err := c.depend(p, id.Package, pos); err != nil {
-				return ir.Type{}, err
-			}
-			if c.state[obj] == 0 {
-				c.state[obj] = 1
-				owner := c.source.Packages[id.Package]
-				record := ir.Struct{Symbol: id}
-				var fields []ir.Field
-				for i := 0; i < u.NumFields(); i++ {
-					field := u.Field(i)
-					if field.Embedded() || field.Name() == "_" {
-						return ir.Type{}, load.Error(owner, field.Pos(), "embedded and blank fields are unsupported")
-					}
-					if isSelfBox(field.Type(), obj) {
-						elem := ir.NewTypeRecordType(ir.RecordType{Symbol: id})
-						fields = append(fields, ir.Field{Name: field.Name(), Type: ir.NewTypeBoxType(ir.BoxType{Element: elem})})
-						record.Recursive = true
-						continue
-					}
-					ft, err := c.goType(owner, field.Pos(), field.Type())
+		if obj.Package == loaded.Curated {
+			if kind, ok := curatedTypes[obj.Name]; ok {
+				var args [2]ir.Type
+				for i, id := range values(t.Args) {
+					var err error
+					args[i], err = c.goType(p, pos, id)
 					if err != nil {
 						return ir.Type{}, err
 					}
-					fields = append(fields, ir.Field{Name: field.Name(), Type: ft})
+				}
+				return curatedType(kind, args), nil
+			}
+			break
+		}
+		if t.Generic {
+			break
+		}
+		if obj.Enum.IsSome() {
+			return c.enumType(p, pos, t.Object, obj.Enum.UnwrapOr(loaded.Enum{}))
+		}
+		u := c.inputType(t.Underlying)
+		switch u.Kind {
+		case loaded.BasicType:
+			return basic(p, pos, u)
+		case loaded.StructType:
+			if !t.PackageScope {
+				break
+			}
+			id := c.symbol(t.Object)
+			if err := c.depend(p, id.Package, pos); err != nil {
+				return ir.Type{}, err
+			}
+			if c.state[t.Object] == 0 {
+				c.state[t.Object] = 1
+				owner := c.inputPackage(id.Package)
+				record := ir.Struct{Symbol: id}
+				var fields []ir.Field
+				for _, fieldID := range values(u.Fields) {
+					field := c.object(fieldID)
+					if field.Embedded || field.Name == "_" {
+						return ir.Type{}, diagnostic(field.Pos, "embedded and blank fields are unsupported")
+					}
+					if c.isSelfBox(field.Type, t.Object) {
+						elem := ir.NewTypeRecordType(ir.RecordType{Symbol: id})
+						fields = append(fields, ir.Field{Name: field.Name, Type: ir.NewTypeBoxType(ir.BoxType{Element: elem})})
+						record.Recursive = true
+						continue
+					}
+					ft, err := c.goType(owner, field.Pos, field.Type)
+					if err != nil {
+						return ir.Type{}, err
+					}
+					fields = append(fields, ir.Field{Name: field.Name, Type: ft})
 				}
 				out := c.output(id.Package)
 				record.Fields = list(fields)
 				out.decls = append(out.decls, ir.NewDeclarationStruct(record))
-				c.state[obj] = 2
+				c.state[t.Object] = 2
 			}
 			return ir.NewTypeRecordType(ir.RecordType{Symbol: id}), nil
 		}
 	}
-	return ir.Type{}, load.Error(p, pos, "unsupported type %s", typ)
+	return ir.Type{}, diagnostic(pos, "unsupported type %s", original.Display)
 }
 
-func isSelfBox(typ types.Type, owner *types.TypeName) bool {
-	box, ok := types.Unalias(typ).(*types.Named)
-	if !ok || box.Obj().Pkg() == nil || box.Obj().Pkg().Path() != load.Curated || box.Obj().Name() != "Box" {
+func (c *compiler) isSelfBox(id loaded.TypeID, owner loaded.ObjectID) bool {
+	box := c.unalias(id)
+	obj := c.object(box.Object)
+	if box.Kind != loaded.NamedType || obj.Package != loaded.Curated || obj.Name != "Box" {
 		return false
 	}
-	payload, ok := types.Unalias(box.TypeArgs().At(0)).(*types.Named)
-	return ok && payload.Obj() == owner
+	payload := c.unalias(at(box.Args, uint(0)))
+	return payload.Kind == loaded.NamedType && payload.Object == owner
 }
 
 func (c *compiler) zero(t ir.Type) ir.Expr {
@@ -172,7 +156,7 @@ func (c *compiler) zero(t ir.Type) ir.Expr {
 		if t.Kind() < ir.Record {
 			return ir.NewExprConstant(ir.Constant{Type: t, Value: "0"})
 		}
-		return emptyValue(t)
+		return ir.NewEmptyValueExpr(t)
 	}
 }
 

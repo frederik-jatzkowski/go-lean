@@ -7,21 +7,13 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/frederik-jatzkowski/go-lean/internal/core/loaded"
 	"github.com/frederik-jatzkowski/go-lean/internal/enums"
+	"github.com/frederik-jatzkowski/go-lean/pkg/lean"
 	"golang.org/x/tools/go/packages"
 )
 
-type Enum struct {
-	Spec     enums.Spec
-	Payloads []*types.TypeName
-}
-
-type EnumConstructor struct {
-	Owner   *types.TypeName
-	Variant string
-}
-
-func (program *Program) readEnums(p *packages.Package, files []*ast.File) (*ast.File, error) {
+func readEnums(p *packages.Package, files []*ast.File, objectID func(types.Object) loaded.ObjectID, objects *[]loaded.Object) (*ast.File, error) {
 	var generated *ast.File
 	var specs []enums.Spec
 	for _, file := range files {
@@ -39,7 +31,7 @@ func (program *Program) readEnums(p *packages.Package, files []*ast.File) (*ast.
 	if generated == nil && len(specs) == 0 {
 		return nil, nil
 	}
-	path := filepath.Join(Dir(p), enums.File)
+	path := filepath.Join(packageDir(p), enums.File)
 	actual, err := os.ReadFile(path)
 	if generated == nil || err != nil {
 		return nil, enums.Stale(path)
@@ -63,7 +55,8 @@ func (program *Program) readEnums(p *packages.Package, files []*ast.File) (*ast.
 		if !ok || owner.IsAlias() {
 			return nil, fmt.Errorf("%s: invalid generated enum %s", path, spec.Name)
 		}
-		entry := Enum{Spec: spec}
+		ownerID := objectID(owner)
+		var payloads []loaded.ObjectID
 		for _, name := range spec.Cases {
 			obj, ok := p.Types.Scope().Lookup(name).(*types.TypeName)
 			if !ok || obj.IsAlias() {
@@ -73,23 +66,25 @@ func (program *Program) readEnums(p *packages.Package, files []*ast.File) (*ast.
 			switch named.Underlying().(type) {
 			case *types.Basic, *types.Struct:
 			default:
-				return nil, Error(p, obj.Pos(), "unsupported enum payload %s", name)
+				return nil, fmt.Errorf("%s", sourceError(p, obj.Pos(), "unsupported enum payload %s", name))
 			}
 			if named.TypeParams().Len() != 0 {
-				return nil, Error(p, obj.Pos(), "generic enum payload %s", name)
+				return nil, fmt.Errorf("%s", sourceError(p, obj.Pos(), "generic enum payload %s", name))
 			}
-			entry.Payloads = append(entry.Payloads, obj)
+			payloads = append(payloads, objectID(obj))
 			fn := p.Types.Scope().Lookup(spec.Constructor(name)).(*types.Func)
-			program.EnumConstructors[fn] = EnumConstructor{Owner: owner, Variant: name}
+			id := objectID(fn)
+			(*objects)[id].Constructor = lean.Some(loaded.EnumConstructor{Owner: ownerID, Variant: name})
 		}
 		typ := owner.Type().(*types.Named)
 		for method := range typ.Methods() {
 			if method.Name() == "Case" {
-				program.EnumCases[method] = owner
+				id := objectID(method)
+				(*objects)[id].EnumCase = ownerID
 				break
 			}
 		}
-		program.Enums[owner] = entry
+		(*objects)[ownerID].Enum = lean.Some(loaded.Enum{Payloads: lean.ArrayFromSlice(payloads), Default: spec.Default})
 	}
 	return generated, nil
 }

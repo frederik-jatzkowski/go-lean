@@ -1,11 +1,8 @@
 package lower
 
 import (
-	"go/ast"
-	"go/types"
-
 	"github.com/frederik-jatzkowski/go-lean/internal/core/ir"
-	"github.com/frederik-jatzkowski/go-lean/internal/load"
+	"github.com/frederik-jatzkowski/go-lean/internal/core/loaded"
 )
 
 var folds = map[string]ir.FoldKind{
@@ -13,50 +10,37 @@ var folds = map[string]ir.FoldKind{
 	"FoldList": ir.FoldList, "FoldListUntil": ir.FoldListUntil,
 }
 
-func (f *function) fold(e *ast.CallExpr, kind ir.FoldKind) (ir.Expr, error) {
-	p := f.source.Package
-	step := ast.Unparen(e.Args[2])
-	var fn *types.Func
-	switch target := step.(type) {
-	case *ast.Ident:
-		fn, _ = p.TypesInfo.Uses[target].(*types.Func)
-	case *ast.SelectorExpr:
-		if p.TypesInfo.Selections[target] == nil {
-			fn, _ = p.TypesInfo.Uses[target.Sel].(*types.Func)
+func (f *function) fold(e loaded.Expression, call loaded.CallExpr, kind ir.FoldKind) (ir.Expr, error) {
+	p := f.pkg
+	step := f.inputExpr(at(call.Args, uint(2)))
+	for inner, ok := step.Form.Case().(loaded.Parenthesized); ok; inner, ok = step.Form.Case().(loaded.Parenthesized) {
+		step = f.inputExpr(inner.Inner)
+	}
+	var fn loaded.ObjectID
+	switch form := step.Form.Case().(type) {
+	case loaded.Identifier:
+		fn = form.Object
+	case loaded.SelectorExpr:
+		if form.Selection.Kind == loaded.NoSelection {
+			fn = form.Object
 		}
 	}
-	if fn == nil || fn.Pkg() == nil || fn.Pkg().Path() == load.Curated ||
-		fn.Type().(*types.Signature).TypeParams().Len() != 0 {
-		return ir.Expr{}, load.Error(p, step.Pos(), "fold step must be a directly named, non-generic function")
+
+	obj := f.object(fn)
+	if obj.Kind != loaded.FunctionObject || obj.Package == "" || obj.Package == loaded.Curated || f.inputType(obj.Type).Generic {
+		return ir.Expr{}, diagnostic(step.Pos, "fold step must be a directly named, non-generic function")
 	}
-	if _, err := f.goType(p, e.Pos(), p.TypesInfo.TypeOf(e)); err != nil {
+	if _, err := f.goType(p, e.Pos, e.Type); err != nil {
 		return ir.Expr{}, err
 	}
-	args, err := f.arguments(e.Args[:2])
+	args, err := f.arguments([]loaded.ExprID{at(call.Args, uint(0)), at(call.Args, uint(1))})
 	if err != nil {
 		return ir.Expr{}, err
 	}
-	abstract, err := f.callTarget(fn, step.Pos())
+	abstract, err := f.callTarget(fn, step.Pos)
 	if err != nil {
 		return ir.Expr{}, err
 	}
-	f.output(p.PkgPath).Folds |= kind
-	target := ir.NewFoldStepDirectStep(ir.DirectStep{Target: symbol(fn)})
-	if abstract {
-		target = ir.NewFoldStepAbstractStep(ir.AbstractStep{Target: symbol(fn)})
-	}
-	var fold ir.Fold
-	switch kind {
-	case ir.FoldN:
-		fold = ir.NewFoldCountFold(ir.CountFold{Count: args[0], Initial: args[1], Step: target})
-	case ir.FoldNUntil:
-		fold = ir.NewFoldCountUntilFold(ir.CountUntilFold{Count: args[0], Initial: args[1], Step: target})
-	case ir.FoldList:
-		fold = ir.NewFoldListFold(ir.ListFold{Items: args[0], Initial: args[1], Step: target})
-	case ir.FoldListUntil:
-		fold = ir.NewFoldListUntilFold(ir.ListUntilFold{Items: args[0], Initial: args[1], Step: target})
-	default:
-		panic("unknown fold kind")
-	}
-	return ir.NewExprFoldExpr(ir.FoldExpr{Fold: fold}), nil
+	f.output(p.Path).Folds |= kind
+	return ir.FoldFromOperation(kind, args[0], args[1], f.symbol(fn), abstract), nil
 }

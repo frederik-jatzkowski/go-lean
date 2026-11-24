@@ -3,58 +3,16 @@ import Std
 
 namespace GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir»
 
-structure «Symbol» where
-  «field:Package» : (_root_.List _root_.UInt8)
-  «field:Name» : (_root_.List _root_.UInt8)
-
-abbrev «Kind» : Type := _root_.UInt8
-
-def «Bool» : _root_.UInt8 := (1 : _root_.UInt8)
-
-def «String» : _root_.UInt8 := (2 : _root_.UInt8)
-
-def «Int8» : _root_.UInt8 := (3 : _root_.UInt8)
-
-def «Int16» : _root_.UInt8 := (4 : _root_.UInt8)
-
-def «Int32» : _root_.UInt8 := (5 : _root_.UInt8)
-
-def «Int64» : _root_.UInt8 := (6 : _root_.UInt8)
-
-def «UInt8» : _root_.UInt8 := (7 : _root_.UInt8)
-
-def «UInt16» : _root_.UInt8 := (8 : _root_.UInt8)
-
-def «UInt32» : _root_.UInt8 := (9 : _root_.UInt8)
-
-def «UInt64» : _root_.UInt8 := (10 : _root_.UInt8)
-
-def «Record» : _root_.UInt8 := (11 : _root_.UInt8)
-
-def «Array» : _root_.UInt8 := (12 : _root_.UInt8)
-
-def «ByteArray» : _root_.UInt8 := (13 : _root_.UInt8)
-
-def «OrderedMap» : _root_.UInt8 := (14 : _root_.UInt8)
-
-def «OrderedSet» : _root_.UInt8 := (15 : _root_.UInt8)
-
-def «Option» : _root_.UInt8 := (16 : _root_.UInt8)
-
-def «BitVec» : _root_.UInt8 := (17 : _root_.UInt8)
-
-def «List» : _root_.UInt8 := (18 : _root_.UInt8)
-
-def «FoldControl» : _root_.UInt8 := (19 : _root_.UInt8)
-
-def «Box» : _root_.UInt8 := (20 : _root_.UInt8)
-
-def «EnumType» : _root_.UInt8 := (21 : _root_.UInt8)
+structure «MissingPrimitive» where
 
 structure «MissingType» where
 
 structure «ScalarType» where
   «field:Scalar» : _root_.UInt8
+
+structure «Symbol» where
+  «field:Package» : (_root_.List _root_.UInt8)
+  «field:Name» : (_root_.List _root_.UInt8)
 
 structure «RecordType» where
   «field:Symbol» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Symbol»
@@ -83,8 +41,8 @@ inductive «OptionType» where
 inductive «SetType» where
   | mk («field:Key» : «Type») : «SetType»
 
-inductive «ArrayType» where
-  | mk («field:Element» : «Type») : «ArrayType»
+inductive «MapType» where
+  | mk («field:Key» : «Type») («field:Value» : «Type») : «MapType»
 
 inductive «Type» where
   | «MissingType» (payload : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«MissingType»)
@@ -101,8 +59,8 @@ inductive «Type» where
   | «FoldControlType» (payload : «FoldControlType»)
   | «BoxType» (payload : «BoxType»)
 
-inductive «MapType» where
-  | mk («field:Key» : «Type») («field:Value» : «Type») : «MapType»
+inductive «ArrayType» where
+  | mk («field:Element» : «Type») : «ArrayType»
 end
 
 def «BoxType».«field:Element» : «BoxType» → _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type»
@@ -165,18 +123,6 @@ local grind_pattern «SetType».«field_size:Key» => node.«field:Key»
 @[simp] theorem «SetType».«field_mk:Key» (arg0 : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type») :
     («SetType».mk arg0).«field:Key» = arg0 := rfl
 
-def «ArrayType».«field:Element» : «ArrayType» → _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type»
-  | .mk value => value
-
-theorem «ArrayType».«field_size:Element» (node : «ArrayType») :
-    sizeOf node.«field:Element» < sizeOf node := by
-  cases node with
-  | mk arg0 => simp [«ArrayType».«field:Element»] <;> omega
-local grind_pattern «ArrayType».«field_size:Element» => node.«field:Element»
-
-@[simp] theorem «ArrayType».«field_mk:Element» (arg0 : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type») :
-    («ArrayType».mk arg0).«field:Element» = arg0 := rfl
-
 def «MapType».«field:Key» : «MapType» → _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type»
   | .mk value _ => value
 
@@ -201,52 +147,26 @@ local grind_pattern «MapType».«field_size:Value» => node.«field:Value»
 @[simp] theorem «MapType».«field_mk:Value» (arg0 : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type») (arg1 : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type») :
     («MapType».mk arg0 arg1).«field:Value» = arg1 := rfl
 
-structure «Field» where
-  «field:Name» : (_root_.List _root_.UInt8)
+def «ArrayType».«field:Element» : «ArrayType» → _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type»
+  | .mk value => value
+
+theorem «ArrayType».«field_size:Element» (node : «ArrayType») :
+    sizeOf node.«field:Element» < sizeOf node := by
+  cases node with
+  | mk arg0 => simp [«ArrayType».«field:Element»] <;> omega
+local grind_pattern «ArrayType».«field_size:Element» => node.«field:Element»
+
+@[simp] theorem «ArrayType».«field_mk:Element» (arg0 : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type») :
+    («ArrayType».mk arg0).«field:Element» = arg0 := rfl
+
+structure «EmptyValue» where
   «field:Type» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type»
 
-structure «Struct» where
-  «field:Symbol» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Symbol»
-  «field:Fields» : (_root_.List _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Field»)
-  «field:Recursive» : _root_.Bool
-
-structure «Enum» where
-  «field:Symbol» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Symbol»
-  «field:Variants» : (_root_.List _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Field»)
-  «field:Default» : _root_.Int64
-
-structure «MutualRecord» where
-  «field:Record» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Struct»
-
-structure «MutualEnum» where
-  «field:Enum» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Enum»
-
-inductive «MutualMember» where
-  | «MutualRecord» (payload : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«MutualRecord»)
-  | «MutualEnum» (payload : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«MutualEnum»)
-
-structure «Mutual» where
-  «field:Types» : (_root_.List _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«MutualMember»)
-
-structure «TypeAlias» where
-  «field:Symbol» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Symbol»
-  «field:Type» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type»
+structure «MissingExpr» where
 
 structure «Constant» where
   «field:Type» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type»
   «field:Value» : (_root_.List _root_.UInt8)
-
-structure «NamedConstant» where
-  «field:Symbol» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Symbol»
-  «field:Value» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Constant»
-
-structure «Binding» where
-  «field:Unused» : _root_.Bool
-  «field:Name» : (_root_.List _root_.UInt8)
-  «field:ID» : _root_.Int64
-  «field:Type» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type»
-
-structure «MissingExpr» where
 
 structure «Local» where
   «field:ID» : _root_.Int64
@@ -260,11 +180,6 @@ structure «AbstractStep» where
 inductive «FoldStep» where
   | «DirectStep» (payload : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«DirectStep»)
   | «AbstractStep» (payload : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«AbstractStep»)
-
-structure «MissingPrimitive» where
-
-structure «EmptyValue» where
-  «field:Type» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type»
 
 structure «MakeNone» where
   «field:Type» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type»
@@ -1686,6 +1601,112 @@ local grind_pattern «Let».«field_size:Body» => node.«field:Body»
 
 @[simp] theorem «Let».«field_mk:Body» (arg0 : _root_.Int64) (arg1 : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Expr») (arg2 : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Expr») :
     («Let».mk arg0 arg1 arg2).«field:Body» = arg2 := rfl
+
+def «primitiveExpr» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive») : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Expr» :=
+  (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Expr».«PrimitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«PrimitiveExpr».mk «local:0»))
+
+def «NewEmptyValueExpr» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type») : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Expr» :=
+  (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«EmptyValue» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«EmptyValue».mk «local:0»)))
+
+def «PrimitiveFromOperation» («local:0» : _root_.UInt8) («local:1» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type») («local:2» : (_root_.Array _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Expr»)) («local:3» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Expr») : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Expr» :=
+  (let «local:4» := (_root_.Option.getD («local:2»)[((0 : _root_.UInt64)).toNat]? (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Expr».«MissingExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«MissingExpr».mk))); (let «local:5» := (_root_.Option.getD («local:2»)[((1 : _root_.UInt64)).toNat]? (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Expr».«MissingExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«MissingExpr».mk))); (let «local:6» := (_root_.Option.getD («local:2»)[((2 : _root_.UInt64)).toNat]? (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Expr».«MissingExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«MissingExpr».mk))); (if (_root_.Decidable.decide («local:0» = (1 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«MakeSome» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«MakeSome».mk «local:4»))) else (if (_root_.Decidable.decide («local:0» = (2 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«MakeNone» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«MakeNone».mk «local:1»))) else (if (_root_.Decidable.decide («local:0» = (3 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«ListNil» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«ListNil».mk «local:1»))) else (if (_root_.Decidable.decide («local:0» = (4 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«ListCons» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«ListCons».mk «local:4» «local:5»))) else (if (_root_.Decidable.decide («local:0» = (5 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«ListIsEmpty» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«ListIsEmpty».mk «local:4»))) else (if (_root_.Decidable.decide («local:0» = (6 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«OptionIsSome» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«OptionIsSome».mk «local:4»))) else (if (_root_.Decidable.decide («local:0» = (7 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«OptionUnwrapOr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«OptionUnwrapOr».mk «local:4» «local:5»))) else (if (_root_.Decidable.decide («local:0» = (8 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«BoxRead» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«BoxRead».mk «local:4» «local:3»))) else (if (_root_.Decidable.decide («local:0» = (9 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«ArrayPush» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«ArrayPush».mk «local:4» «local:5»))) else (if (_root_.Decidable.decide («local:0» = (10 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«ByteArrayPush» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«ByteArrayPush».mk «local:4» «local:5»))) else (if (_root_.Decidable.decide («local:0» = (11 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«ArrayPop» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«ArrayPop».mk «local:4»))) else (if (_root_.Decidable.decide («local:0» = (12 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«ArrayGet» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«ArrayGet».mk «local:4» «local:5»))) else (if (_root_.Decidable.decide («local:0» = (13 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«ByteArrayGet» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«ByteArrayGet».mk «local:4» «local:5»))) else (if (_root_.Decidable.decide («local:0» = (14 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«BitVecGet» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«BitVecGet».mk «local:4» «local:5»))) else (if (_root_.Decidable.decide («local:0» = (15 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«ArraySet» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«ArraySet».mk «local:4» «local:5» «local:6»))) else (if (_root_.Decidable.decide («local:0» = (16 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«ByteArraySet» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«ByteArraySet».mk «local:4» «local:5» «local:6»))) else (if (_root_.Decidable.decide («local:0» = (17 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«BitVecSet» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«BitVecSet».mk «local:1» «local:4» «local:5» «local:6»))) else (if (_root_.Decidable.decide («local:0» = (18 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«CollectionSize» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«CollectionSize».mk «local:4»))) else (if (_root_.Decidable.decide («local:0» = (19 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«ByteArrayExtract» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«ByteArrayExtract».mk «local:4» «local:5» «local:6»))) else (if (_root_.Decidable.decide («local:0» = (20 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«MapFind» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«MapFind».mk «local:4» «local:5»))) else (if (_root_.Decidable.decide («local:0» = (21 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«MapContains» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«MapContains».mk «local:4» «local:5»))) else (if (_root_.Decidable.decide («local:0» = (22 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«MapInsert» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«MapInsert».mk «local:4» «local:5» «local:6»))) else (if (_root_.Decidable.decide («local:0» = (23 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«MapErase» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«MapErase».mk «local:4» «local:5»))) else (if (_root_.Decidable.decide («local:0» = (24 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«SetContains» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«SetContains».mk «local:4» «local:5»))) else (if (_root_.Decidable.decide («local:0» = (25 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«SetInsert» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«SetInsert».mk «local:4» «local:5»))) else (if (_root_.Decidable.decide («local:0» = (26 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«SetErase» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«SetErase».mk «local:4» «local:5»))) else (if (_root_.Decidable.decide («local:0» = (27 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«MakeBitVec» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«MakeBitVec».mk «local:4» «local:5»))) else (if (_root_.Decidable.decide («local:0» = (28 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«BitVecWidth» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«BitVecWidth».mk «local:4»))) else (if (_root_.Decidable.decide («local:0» = (29 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«primitiveExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Primitive».«BitVecToUint64» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«BitVecToUint64».mk «local:4»))) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Expr».«MissingExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«MissingExpr».mk))))))))))))))))))))))))))))))))))
+
+def «ScalarFromLoaded» («local:0» : _root_.UInt8) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type» :=
+  (if (_root_.Decidable.decide («local:0» = (1 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type».«ScalarType» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«ScalarType».mk (1 : _root_.UInt8))) else (if (_root_.Decidable.decide («local:0» = (2 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type».«ScalarType» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«ScalarType».mk (2 : _root_.UInt8))) else (if (_root_.Decidable.decide («local:0» = (3 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type».«ScalarType» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«ScalarType».mk (3 : _root_.UInt8))) else (if (_root_.Decidable.decide («local:0» = (4 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type».«ScalarType» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«ScalarType».mk (4 : _root_.UInt8))) else (if (_root_.Decidable.decide («local:0» = (5 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type».«ScalarType» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«ScalarType».mk (5 : _root_.UInt8))) else (if (_root_.Decidable.decide («local:0» = (6 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type».«ScalarType» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«ScalarType».mk (6 : _root_.UInt8))) else (if (_root_.Decidable.decide («local:0» = (7 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type».«ScalarType» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«ScalarType».mk (7 : _root_.UInt8))) else (if (_root_.Decidable.decide («local:0» = (8 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type».«ScalarType» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«ScalarType».mk (8 : _root_.UInt8))) else (if (_root_.Decidable.decide («local:0» = (9 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type».«ScalarType» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«ScalarType».mk (9 : _root_.UInt8))) else (if (_root_.Decidable.decide («local:0» = (10 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type».«ScalarType» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«ScalarType».mk (10 : _root_.UInt8))) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type».«MissingType» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«MissingType».mk))))))))))))
+
+def «foldStep» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Symbol») («local:1» : _root_.Bool) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«FoldStep» :=
+  (if «local:1» then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«FoldStep».«AbstractStep» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«AbstractStep».mk «local:0»)) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«FoldStep».«DirectStep» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«DirectStep».mk «local:0»)))
+
+def «foldExpr» («local:0» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Fold») : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Expr» :=
+  (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Expr».«FoldExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«FoldExpr».mk «local:0»))
+
+def «FoldFromOperation» («local:0» : _root_.UInt8) («local:1» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Expr») («local:2» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Expr») («local:3» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Symbol») («local:4» : _root_.Bool) : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Expr» :=
+  (let «local:5» := (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«foldStep» «local:3» «local:4»); (if (_root_.Decidable.decide («local:0» = (1 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«foldExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Fold».«CountFold» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«CountFold».mk «local:1» «local:2» «local:5»))) else (if (_root_.Decidable.decide («local:0» = (2 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«foldExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Fold».«CountUntilFold» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«CountUntilFold».mk «local:1» «local:2» «local:5»))) else (if (_root_.Decidable.decide («local:0» = (4 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«foldExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Fold».«ListFold» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«ListFold».mk «local:1» «local:2» «local:5»))) else (if (_root_.Decidable.decide («local:0» = (8 : _root_.UInt8))) then (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«foldExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Fold».«ListUntilFold» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«ListUntilFold».mk «local:1» «local:2» «local:5»))) else (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Expr».«MissingExpr» (_root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«MissingExpr».mk)))))))
+
+abbrev «Kind» : Type := _root_.UInt8
+
+def «Bool» : _root_.UInt8 := (1 : _root_.UInt8)
+
+def «String» : _root_.UInt8 := (2 : _root_.UInt8)
+
+def «Int8» : _root_.UInt8 := (3 : _root_.UInt8)
+
+def «Int16» : _root_.UInt8 := (4 : _root_.UInt8)
+
+def «Int32» : _root_.UInt8 := (5 : _root_.UInt8)
+
+def «Int64» : _root_.UInt8 := (6 : _root_.UInt8)
+
+def «UInt8» : _root_.UInt8 := (7 : _root_.UInt8)
+
+def «UInt16» : _root_.UInt8 := (8 : _root_.UInt8)
+
+def «UInt32» : _root_.UInt8 := (9 : _root_.UInt8)
+
+def «UInt64» : _root_.UInt8 := (10 : _root_.UInt8)
+
+def «Record» : _root_.UInt8 := (11 : _root_.UInt8)
+
+def «Array» : _root_.UInt8 := (12 : _root_.UInt8)
+
+def «ByteArray» : _root_.UInt8 := (13 : _root_.UInt8)
+
+def «OrderedMap» : _root_.UInt8 := (14 : _root_.UInt8)
+
+def «OrderedSet» : _root_.UInt8 := (15 : _root_.UInt8)
+
+def «Option» : _root_.UInt8 := (16 : _root_.UInt8)
+
+def «BitVec» : _root_.UInt8 := (17 : _root_.UInt8)
+
+def «List» : _root_.UInt8 := (18 : _root_.UInt8)
+
+def «FoldControl» : _root_.UInt8 := (19 : _root_.UInt8)
+
+def «Box» : _root_.UInt8 := (20 : _root_.UInt8)
+
+def «EnumType» : _root_.UInt8 := (21 : _root_.UInt8)
+
+structure «Field» where
+  «field:Name» : (_root_.List _root_.UInt8)
+  «field:Type» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type»
+
+structure «Struct» where
+  «field:Symbol» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Symbol»
+  «field:Fields» : (_root_.List _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Field»)
+  «field:Recursive» : _root_.Bool
+
+structure «Enum» where
+  «field:Symbol» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Symbol»
+  «field:Variants» : (_root_.List _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Field»)
+  «field:Default» : _root_.Int64
+
+structure «MutualRecord» where
+  «field:Record» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Struct»
+
+structure «MutualEnum» where
+  «field:Enum» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Enum»
+
+inductive «MutualMember» where
+  | «MutualRecord» (payload : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«MutualRecord»)
+  | «MutualEnum» (payload : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«MutualEnum»)
+
+structure «Mutual» where
+  «field:Types» : (_root_.List _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«MutualMember»)
+
+structure «TypeAlias» where
+  «field:Symbol» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Symbol»
+  «field:Type» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type»
+
+structure «NamedConstant» where
+  «field:Symbol» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Symbol»
+  «field:Value» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Constant»
+
+structure «Binding» where
+  «field:Unused» : _root_.Bool
+  «field:Name» : (_root_.List _root_.UInt8)
+  «field:ID» : _root_.Int64
+  «field:Type» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Type»
 
 structure «Function» where
   «field:Symbol» : _root_.GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/ir».«Symbol»

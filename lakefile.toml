@@ -48,5 +48,6 @@ srcDir = "internal/core"
 roots = [
   # BEGIN go-lean managed roots
   'ir.ir',
+  'loaded.loaded',
   # END go-lean managed roots
 ]

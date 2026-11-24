@@ -403,6 +403,93 @@ func Run(first First, second Second, n int64) int64 {
 	}
 }
 
+func TestLoadedObjectIdentity(t *testing.T) {
+	if _, err := exec.LookPath("lake"); err != nil {
+		t.Skip("lake is unavailable")
+	}
+	workspace(t, false)
+	put(t, "first/step.go", `package first
+//golean:export
+func Step(x int64) int64 { return x + 1 }
+`)
+	put(t, "second/step.go", `package second
+//golean:export
+func Step(x int64) int64 { return x + 2 }
+`)
+	put(t, "client/client.go", `package client
+import (
+ a "example.test/model/first"
+ b "example.test/model/second"
+)
+//golean:verify identity : Run true 4 = 7 ∧ Run false 4 = 5
+func Run(shadow bool, x int64) int64 {
+ if shadow {
+  x := b.Step(x)
+  return a.Step(x)
+ }
+ return a.Step(x)
+}
+`)
+	put(t, "client/client_proofs.lean", `import «client».«client»
+
+namespace GoLean.«example.test/model/client».Proofs
+
+theorem «identity» : Laws.«identity» := ⟨rfl, rfl⟩
+
+end GoLean.«example.test/model/client».Proofs
+`)
+	if err := command("verify", "./client"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestIdentityScalarConversion(t *testing.T) {
+	workspace(t, true)
+	put(t, "index.go", `package index
+import "github.com/frederik-jatzkowski/go-lean/pkg/lean"
+type ObjectID uint
+type OtherID ObjectID
+type Byte byte
+//golean:verify identity : Index 3 = 3
+func Index(id ObjectID) uint { return uint(OtherID(id)) }
+func Get(items lean.Array[byte], id ObjectID) lean.Option[byte] { return items.Get(uint(id)) }
+func ByteValue(value Byte) uint8 { return uint8(value) }
+`)
+	if err := command("transpile", "."); err != nil {
+		t.Fatal(err)
+	}
+	model := get(t, "index.lean")
+	if !strings.Contains(model, "def «Index» («local:0» : _root_.UInt") ||
+		!strings.Contains(model, " :=\n  «local:0»\n") {
+		t.Fatalf("expected the conversion to emit the operand directly:\n%s", model)
+	}
+	if _, err := exec.LookPath("lake"); err == nil {
+		put(t, "index_proofs.lean", `import «index»
+
+namespace GoLean.«example.test/model».Proofs
+
+theorem «identity» : Laws.«identity» := rfl
+
+end GoLean.«example.test/model».Proofs
+`)
+		if err := command("verify", "."); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, decl := range []string{
+		"func Bad(x uint64) uint32 { return uint32(x) }",
+		"func Bad(x int) uint { return uint(x) }",
+		"func Bad(x uint64) uint { return uint(x) }",
+		"type Record struct { Value uint }; type Other Record; func Bad(x Record) Other { return Other(x) }",
+	} {
+		put(t, "bad.go", "package index\n"+decl+"\n")
+		err := command("transpile", ".")
+		if err == nil || !strings.Contains(err.Error(), "expected a direct call to a supported function") {
+			t.Errorf("%s: expected the unsupported-conversion diagnostic, got %v", decl, err)
+		}
+	}
+}
+
 func TestTargetWordSize(t *testing.T) {
 	workspace(t, true)
 	t.Setenv("GOOS", "linux")
@@ -410,6 +497,7 @@ func TestTargetWordSize(t *testing.T) {
 	put(t, "word.go", `package word
 import "github.com/frederik-jatzkowski/go-lean/pkg/lean"
 const Default = 1<<31 - 1
+const Minimum = -1<<31
 const Wide uint64 = 1<<64 - 1
 func next(index, x uint) uint { return x + index }
 //golean:export
@@ -421,6 +509,7 @@ func Sum(n uint) uint { return lean.FoldN(n, uint(0), next) }
 	model := get(t, "word.lean")
 	if !strings.Contains(model, "step : _root_.UInt32") ||
 		!strings.Contains(model, "def «Default» : _root_.Int32") ||
+		!strings.Contains(model, "def «Minimum» : _root_.Int32") ||
 		!strings.Contains(model, "def «Wide» : _root_.UInt64") {
 		t.Fatalf("Go 386 word size did not reach the model:\n%s", model)
 	}
@@ -428,6 +517,11 @@ func Sum(n uint) uint { return lean.FoldN(n, uint(0), next) }
 	err := command("transpile", ".")
 	if err == nil || !strings.Contains(err.Error(), "overflow.go:2:") || !strings.Contains(err.Error(), "not representable as int") {
 		t.Fatalf("expected a target-width error, got %v", err)
+	}
+	put(t, "overflow.go", "package word\nconst Underflow = -1<<31 - 1\n")
+	err = command("transpile", ".")
+	if err == nil || !strings.Contains(err.Error(), "constant Underflow is not representable as int") {
+		t.Fatalf("expected a target-width underflow error, got %v", err)
 	}
 	if get(t, "word.lean") != model {
 		t.Fatal("an unrepresentable constant changed generated output")

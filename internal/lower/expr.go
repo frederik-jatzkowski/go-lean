@@ -6,7 +6,7 @@ import (
 	"go/token"
 	"go/types"
 
-	"github.com/frederik-jatzkowski/go-lean/internal/ir"
+	"github.com/frederik-jatzkowski/go-lean/internal/core/ir"
 	"github.com/frederik-jatzkowski/go-lean/internal/load"
 )
 
@@ -23,70 +23,77 @@ func (f *function) expr(node ast.Expr) (ir.Expr, error) {
 		return f.expr(paren.X)
 	}
 	if binary, ok := node.(*ast.BinaryExpr); ok && binaryOps[binary.Op] == 0 {
-		return nil, load.Error(p, node.Pos(), "unsupported binary operator %s", binary.Op)
+		return ir.Expr{}, load.Error(p, node.Pos(), "unsupported binary operator %s", binary.Op)
 	}
 	tv := info.Types[node]
 	if tv.Value != nil {
 		if err := f.constantOperands(node); err != nil {
-			return nil, err
+			return ir.Expr{}, err
 		}
 		t, err := f.goType(p, node.Pos(), tv.Type)
 		if err != nil {
-			return nil, err
+			return ir.Expr{}, err
 		}
 		value := tv.Value.ExactString()
-		if t.Kind == ir.String {
+		if t.Kind() == ir.String {
 			value = constant.StringVal(tv.Value)
 		}
-		return ir.Constant{Type: t, Value: value}, nil
+		return ir.NewExprConstant(ir.Constant{Type: t, Value: value}), nil
 	}
 	switch e := node.(type) {
 	case *ast.Ident:
 		v, ok := info.Uses[e].(*types.Var)
 		id, found := f.locals[v]
 		if !ok || !found {
-			return nil, load.Error(p, e.Pos(), "expected an immutable local or constant, got %s", e.Name)
+			return ir.Expr{}, load.Error(p, e.Pos(), "expected an immutable local or constant, got %s", e.Name)
 		}
-		return ir.Local{ID: id}, nil
+		return ir.NewExprLocal(ir.Local{ID: id}), nil
 	case *ast.UnaryExpr:
 		if e.Op == token.NOT {
 			value, err := f.expr(e.X)
-			return ir.Unary{Op: ir.Not, Value: value}, err
+			return ir.NewExprUnary(ir.Unary{Op: ir.Not, Value: value}), err
 		}
 	case *ast.BinaryExpr:
 		t, err := f.goType(p, e.X.Pos(), info.TypeOf(e.X))
 		if err != nil {
-			return nil, err
+			return ir.Expr{}, err
 		}
 		op := binaryOps[e.Op]
-		if t.Kind >= ir.Record || ((op == ir.Add || op == ir.Sub) && t.Kind < ir.Int8) {
-			return nil, load.Error(p, e.Pos(), "unsupported operands for %s", e.Op)
+		if t.Kind() >= ir.Record || ((op == ir.Add || op == ir.Sub) && t.Kind() < ir.Int8) {
+			return ir.Expr{}, load.Error(p, e.Pos(), "unsupported operands for %s", e.Op)
 		}
 		left, err := f.expr(e.X)
 		if err != nil {
-			return nil, err
+			return ir.Expr{}, err
 		}
 		right, err := f.expr(e.Y)
-		return ir.Binary{Op: op, Kind: t.Kind, Left: left, Right: right}, err
+		return ir.NewExprBinary(ir.Binary{Op: op, Kind: t.Kind(), Left: left, Right: right}), err
 	case *ast.SelectorExpr:
 		sel := info.Selections[e]
 		if sel != nil && sel.Kind() == types.FieldVal && !sel.Indirect() && len(sel.Index()) == 1 {
 			t, err := f.goType(p, e.X.Pos(), sel.Recv())
 			if err != nil {
-				return nil, err
+				return ir.Expr{}, err
 			}
-			if t.Kind == ir.EnumType {
-				return nil, load.Error(p, e.Pos(), "generated enum storage is private to lean.gen.go")
+			if t.Kind() == ir.EnumType {
+				return ir.Expr{}, load.Error(p, e.Pos(), "generated enum storage is private to lean.gen.go")
 			}
 			receiver, err := f.expr(e.X)
-			return ir.FieldRead{Record: receiver, Name: sel.Obj().Name(), Control: t.Kind == ir.FoldControl}, err
+			name := sel.Obj().Name()
+			if t.Kind() == ir.FoldControl {
+				if name == "Stop" {
+					return ir.NewExprFoldStopRead(ir.FoldStopRead{Control: receiver}), err
+				}
+				return ir.NewExprFoldStateRead(ir.FoldStateRead{Control: receiver}), err
+			}
+			return ir.NewExprFieldRead(ir.FieldRead{Record: receiver, Name: name}), err
 		}
 	case *ast.CompositeLit:
 		return f.literal(e)
 	case *ast.CallExpr:
 		return f.call(e)
 	}
-	return nil, load.Error(p, node.Pos(), "unsupported expression %T", node)
+	return ir.Expr{}, load.Error(p, node.Pos(), "unsupported expression %T", node)
 }
 
 // Go's type checker evaluates constants. Validate inline operands as well so
@@ -121,29 +128,29 @@ func (f *function) literal(e *ast.CompositeLit) (ir.Expr, error) {
 	typ := p.TypesInfo.TypeOf(e)
 	t, err := f.goType(p, e.Pos(), typ)
 	if err != nil {
-		return nil, err
+		return ir.Expr{}, err
 	}
-	if t.Kind == ir.EnumType {
+	if t.Kind() == ir.EnumType {
 		if len(e.Elts) != 0 {
-			return nil, load.Error(p, e.Pos(), "construct enum values with generated constructors or an empty literal")
+			return ir.Expr{}, load.Error(p, e.Pos(), "construct enum values with generated constructors or an empty literal")
 		}
 		return f.zero(t), nil
 	}
-	if t.Kind > ir.Record && t.Kind != ir.FoldControl && len(e.Elts) == 0 {
-		return ir.Primitive{Op: ir.Empty, Type: t}, nil
+	if t.Kind() > ir.Record && t.Kind() != ir.FoldControl && len(e.Elts) == 0 {
+		return emptyValue(t), nil
 	}
-	if t.Kind != ir.Record && t.Kind != ir.FoldControl {
-		return nil, load.Error(p, e.Pos(), "expected a record literal or an empty curated value")
+	if t.Kind() != ir.Record && t.Kind() != ir.FoldControl {
+		return ir.Expr{}, load.Error(p, e.Pos(), "expected a record literal or an empty curated value")
 	}
 	record := typ.Underlying().(*types.Struct)
 	if len(e.Elts) != record.NumFields() {
-		return nil, load.Error(p, e.Pos(), "record literals must initialize every field")
+		return ir.Expr{}, load.Error(p, e.Pos(), "record literals must initialize every field")
 	}
 	fields := make([]ir.Expr, record.NumFields())
 	for _, el := range e.Elts {
 		kv, ok := el.(*ast.KeyValueExpr)
 		if !ok {
-			return nil, load.Error(p, el.Pos(), "record literals require keyed fields")
+			return ir.Expr{}, load.Error(p, el.Pos(), "record literals require keyed fields")
 		}
 		name := kv.Key.(*ast.Ident).Name
 		for i := 0; i < record.NumFields(); i++ {
@@ -152,30 +159,15 @@ func (f *function) literal(e *ast.CompositeLit) (ir.Expr, error) {
 			}
 			fields[i], err = f.expr(kv.Value)
 			if err != nil {
-				return nil, err
+				return ir.Expr{}, err
 			}
 			break
 		}
 	}
-	if t.Kind == ir.FoldControl {
-		return ir.FoldControlLiteral{State: fields[0], Stop: fields[1]}, nil
+	if t.Kind() == ir.FoldControl {
+		return ir.NewExprFoldControlLiteral(ir.FoldControlLiteral{State: fields[0], Stop: fields[1]}), nil
 	}
-	return ir.StructLiteral{Type: t.Record, Fields: fields}, nil
-}
-
-var constructors = map[string]ir.PrimitiveOp{
-	"NewBox": ir.Some, "Some": ir.Some, "None": ir.None, "Nil": ir.Nil, "Cons": ir.Cons, "NewBitVec": ir.NewBitVec,
-}
-
-var methods = map[ir.Kind]map[string]ir.PrimitiveOp{
-	ir.Array:      {"Push": ir.Push, "Pop": ir.Pop, "Get": ir.Get, "Set": ir.Set, "Size": ir.Size},
-	ir.ByteArray:  {"Push": ir.Push, "Get": ir.Get, "Set": ir.Set, "Size": ir.Size, "Extract": ir.Extract},
-	ir.OrderedMap: {"Find": ir.Find, "Contains": ir.Contains, "Insert": ir.Insert, "Erase": ir.Erase},
-	ir.OrderedSet: {"Contains": ir.Contains, "Insert": ir.Insert, "Erase": ir.Erase},
-	ir.Box:        {"IsSome": ir.IsSome, "Get": ir.BoxGet},
-	ir.Option:     {"IsSome": ir.IsSome, "UnwrapOr": ir.UnwrapOr},
-	ir.List:       {"IsEmpty": ir.IsEmpty},
-	ir.BitVec:     {"Get": ir.Get, "Set": ir.Set, "Width": ir.Width, "ToUint64": ir.ToUint64},
+	return ir.NewExprStructLiteral(ir.StructLiteral{Type: t.Case().(ir.RecordType).Symbol, Fields: exprSeq(fields)}), nil
 }
 
 func callBase(e ast.Expr) ast.Expr {
@@ -210,25 +202,25 @@ func (f *function) call(e *ast.CallExpr) (ir.Expr, error) {
 		}
 	}
 	if fn == nil || fn.Pkg() == nil || e.Ellipsis.IsValid() {
-		return nil, load.Error(p, e.Pos(), "expected a direct call to a supported function")
+		return ir.Expr{}, load.Error(p, e.Pos(), "expected a direct call to a supported function")
 	}
 	if constructor, ok := f.compiler.source.EnumConstructors[fn]; ok {
 		typ, err := f.goType(p, e.Pos(), constructor.Owner.Type())
 		if err != nil {
-			return nil, err
+			return ir.Expr{}, err
 		}
 		value, err := f.expr(e.Args[0])
-		return ir.Constructor{Enum: typ.Record, Variant: constructor.Variant, Value: value}, err
+		return ir.NewExprConstructor(ir.Constructor{Enum: typ.Case().(ir.EnumTypeRef).Symbol, Variant: constructor.Variant, Value: value}), err
 	}
 	if _, ok := f.compiler.source.EnumCases[fn]; ok {
-		return nil, load.Error(p, e.Pos(), "enum Case() is only supported in an exhaustive enum switch")
+		return ir.Expr{}, load.Error(p, e.Pos(), "enum Case() is only supported in an exhaustive enum switch")
 	}
 	if fn.Pkg().Path() == load.Curated {
 		if kind := folds[fn.Name()]; selection == nil && kind != 0 {
 			return f.fold(e, kind)
 		}
 		var t ir.Type
-		var op ir.PrimitiveOp
+		var op primitiveKind
 		var err error
 		nodes := e.Args
 		if selection == nil {
@@ -238,25 +230,25 @@ func (f *function) call(e *ast.CallExpr) (ir.Expr, error) {
 			}
 		} else if receiver != nil && !selection.Indirect() && len(selection.Index()) == 1 {
 			t, err = f.goType(p, receiver.Pos(), selection.Recv())
-			op = methods[t.Kind][fn.Name()]
+			op = methods[t.Kind()][fn.Name()]
 			nodes = append([]ast.Expr{receiver}, e.Args...)
 		}
 		if err != nil {
-			return nil, err
+			return ir.Expr{}, err
 		}
 		if op == 0 {
-			return nil, load.Error(p, e.Pos(), "unsupported curated operation %s", fn.Name())
+			return ir.Expr{}, load.Error(p, e.Pos(), "unsupported curated operation %s", fn.Name())
 		}
 		args, err := f.arguments(nodes)
-		if err == nil && op == ir.BoxGet {
-			args = append(args, f.zero(*t.Element))
+		if err != nil {
+			return ir.Expr{}, err
 		}
-		return ir.Primitive{Op: op, Type: t, Args: args}, err
+		return f.primitive(op, t, args), nil
 	}
 	nodes := e.Args
 	if selection != nil {
 		if !valueReceiver(fn) || selection.Indirect() || len(selection.Index()) != 1 {
-			return nil, load.Error(p, e.Pos(), "expected a direct call on a concrete value receiver")
+			return ir.Expr{}, load.Error(p, e.Pos(), "expected a direct call on a concrete value receiver")
 		}
 		if receiver != nil {
 			nodes = append([]ast.Expr{receiver}, nodes...)
@@ -264,20 +256,20 @@ func (f *function) call(e *ast.CallExpr) (ir.Expr, error) {
 	}
 	args, err := f.arguments(nodes)
 	if err != nil {
-		return nil, err
+		return ir.Expr{}, err
 	}
 	if fn == f.fn && f.source.Termination != "" {
 		f.recursive = true
-		return ir.Call{Target: symbol(fn), Args: args}, nil
+		return ir.NewExprCall(ir.Call{Target: symbol(fn), Args: exprSeq(args)}), nil
 	}
 	abstract, err := f.callTarget(fn, e.Pos())
 	if err != nil {
-		return nil, err
+		return ir.Expr{}, err
 	}
 	if abstract {
-		return ir.AbstractCall{Target: symbol(fn), Args: args}, nil
+		return ir.NewExprAbstractCall(ir.AbstractCall{Target: symbol(fn), Args: exprSeq(args)}), nil
 	}
-	return ir.Call{Target: symbol(fn), Args: args}, nil
+	return ir.NewExprCall(ir.Call{Target: symbol(fn), Args: exprSeq(args)}), nil
 }
 
 func (f *function) callTarget(fn *types.Func, pos token.Pos) (bool, error) {

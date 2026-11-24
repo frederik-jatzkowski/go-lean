@@ -3,7 +3,8 @@ package lower
 import (
 	"fmt"
 
-	"github.com/frederik-jatzkowski/go-lean/internal/ir"
+	"github.com/frederik-jatzkowski/go-lean/internal/core/ir"
+	"github.com/frederik-jatzkowski/go-lean/pkg/lean"
 )
 
 type typeEdge struct {
@@ -12,31 +13,39 @@ type typeEdge struct {
 }
 
 func typeEdges(t ir.Type, direct bool) []typeEdge {
-	switch t.Kind {
-	case ir.Record, ir.EnumType:
-		return []typeEdge{{target: t.Record, supported: direct}}
-	case ir.Box:
-		return typeEdges(*t.Element, direct && (t.Element.Kind == ir.Record || t.Element.Kind == ir.EnumType))
+	switch t := t.Case().(type) {
+	case ir.RecordType:
+		return []typeEdge{{target: t.Symbol, supported: direct}}
+	case ir.EnumTypeRef:
+		return []typeEdge{{target: t.Symbol, supported: direct}}
+	case ir.BoxType:
+		kind := t.Element.Kind()
+		return typeEdges(t.Element, direct && (kind == ir.Record || kind == ir.EnumType))
+	case ir.ArrayType:
+		return typeEdges(t.Element, false)
+	case ir.OptionType:
+		return typeEdges(t.Element, false)
+	case ir.ListType:
+		return typeEdges(t.Element, false)
+	case ir.FoldControlType:
+		return typeEdges(t.Element, false)
+	case ir.MapType:
+		return append(typeEdges(t.Value, false), typeEdges(t.Key, false)...)
+	case ir.SetType:
+		return typeEdges(t.Key, false)
 	default:
-		var edges []typeEdge
-		if t.Element != nil {
-			edges = append(edges, typeEdges(*t.Element, false)...)
-		}
-		if t.Key != nil {
-			edges = append(edges, typeEdges(*t.Key, false)...)
-		}
-		return edges
+		return nil
 	}
 }
 
 // Group recursive type declarations while keeping ordinary declaration order.
 // A group can pull in a type dependency that originally followed its first member.
-func groupTypes(pkg *ir.Package) error {
+func groupTypes(pkg *packageBuilder) error {
 	decls := make(map[ir.Symbol]ir.Declaration)
 	edges := make(map[ir.Symbol][]typeEdge)
 	var order []ir.Symbol
 	symbol := func(decl ir.Declaration) ir.Symbol {
-		switch d := decl.(type) {
+		switch d := decl.Case().(type) {
 		case ir.Enum:
 			return d.Symbol
 		case ir.Struct:
@@ -45,23 +54,21 @@ func groupTypes(pkg *ir.Package) error {
 			return ir.Symbol{}
 		}
 	}
-	for _, decl := range pkg.Decls {
+	for _, decl := range pkg.decls {
 		id := symbol(decl)
 		if id.Name == "" {
 			continue
 		}
 		decls[id] = decl
 		order = append(order, id)
-		var fields []ir.Field
-		switch d := decl.(type) {
+		var fields lean.List[ir.Field]
+		switch d := decl.Case().(type) {
 		case ir.Enum:
 			fields = d.Variants
 		case ir.Struct:
 			fields = d.Fields
 		}
-		for _, f := range fields {
-			edges[id] = append(edges[id], typeEdges(f.Type, true)...)
-		}
+		edges[id] = lean.FoldList(fields, nil, appendTypeEdges)
 	}
 	// Tarjan's algorithm for strongly connected components.
 	index := make(map[ir.Symbol]int)
@@ -79,7 +86,7 @@ func groupTypes(pkg *ir.Package) error {
 		active[id] = true
 		for _, edge := range edges[id] {
 			to := edge.target
-			if decls[to] == nil {
+			if _, exists := decls[to]; !exists {
 				continue
 			}
 			if index[to] == 0 {
@@ -113,11 +120,11 @@ func groupTypes(pkg *ir.Package) error {
 		hasEnum := false
 		recursive := len(group) > 1
 		for _, id := range group {
-			if _, ok := decls[id].(ir.Enum); ok {
+			if _, ok := decls[id].Case().(ir.Enum); ok {
 				hasEnum = true
 			}
 			for _, edge := range edges[id] {
-				if decls[edge.target] == nil || component[edge.target] != i {
+				if _, exists := decls[edge.target]; !exists || component[edge.target] != i {
 					continue
 				}
 				recursive = true
@@ -127,7 +134,7 @@ func groupTypes(pkg *ir.Package) error {
 			}
 		}
 		if recursive && !hasEnum {
-			record, ok := decls[group[0]].(ir.Struct)
+			record, ok := decls[group[0]].Case().(ir.Struct)
 			if len(group) != 1 || !ok || !record.Recursive {
 				return fmt.Errorf("%s: recursive record %s", pkg.Path, group[0].Name)
 			}
@@ -142,28 +149,39 @@ func groupTypes(pkg *ir.Package) error {
 		}
 		emitted[i] = true
 		group := groups[i]
-		var types []ir.Declaration
 		for _, id := range group {
 			for _, edge := range edges[id] {
-				if decls[edge.target] != nil {
+				if _, exists := decls[edge.target]; exists {
 					emit(component[edge.target])
 				}
 			}
-			types = append(types, decls[id])
 		}
-		if len(types) > 1 {
-			result = append(result, ir.Mutual{Types: types})
-		} else {
-			result = append(result, types[0])
+		if len(group) == 1 {
+			result = append(result, decls[group[0]])
+			return
 		}
+		members := make([]ir.MutualMember, 0, len(group))
+		for _, id := range group {
+			switch decl := decls[id].Case().(type) {
+			case ir.Struct:
+				members = append(members, ir.NewMutualMemberMutualRecord(ir.MutualRecord{Record: decl}))
+			case ir.Enum:
+				members = append(members, ir.NewMutualMemberMutualEnum(ir.MutualEnum{Enum: decl}))
+			}
+		}
+		result = append(result, ir.NewDeclarationMutual(ir.Mutual{Types: list(members)}))
 	}
-	for _, decl := range pkg.Decls {
+	for _, decl := range pkg.decls {
 		if id := symbol(decl); id.Name != "" {
 			emit(component[id])
 		} else {
 			result = append(result, decl)
 		}
 	}
-	pkg.Decls = result
+	pkg.decls = result
 	return nil
+}
+
+func appendTypeEdges(field ir.Field, edges []typeEdge) []typeEdge {
+	return append(edges, typeEdges(field.Type, true)...)
 }

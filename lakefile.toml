@@ -1,5 +1,5 @@
 name = "goLean"
-defaultTargets = ["ExampleProofs", "StackMachineCompiler"]
+defaultTargets = ["ExampleProofs", "StackMachineCompiler", "CoreIR"]
 moreLeanArgs = ["-DwarningAsError=true"]
 
 [[lean_lib]]
@@ -39,5 +39,14 @@ roots = [
   'model.compiler',
   'model.compiler_proofs',
   'model.compiler_verify',
+  # END go-lean managed roots
+]
+
+[[lean_lib]]
+name = "CoreIR"
+srcDir = "internal/core"
+roots = [
+  # BEGIN go-lean managed roots
+  'ir.ir',
   # END go-lean managed roots
 ]

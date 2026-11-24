@@ -4,8 +4,9 @@ import (
 	"go/token"
 	"go/types"
 
-	"github.com/frederik-jatzkowski/go-lean/internal/ir"
+	"github.com/frederik-jatzkowski/go-lean/internal/core/ir"
 	"github.com/frederik-jatzkowski/go-lean/internal/load"
+	"github.com/frederik-jatzkowski/go-lean/pkg/lean"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -45,7 +46,7 @@ func basic(p *packages.Package, pos token.Pos, b *types.Basic) (ir.Type, error) 
 	default:
 		return ir.Type{}, load.Error(p, pos, "unsupported scalar type %s", b)
 	}
-	return ir.Type{Kind: kind}, nil
+	return ir.NewTypeScalarType(ir.ScalarType{Scalar: kind}), nil
 }
 
 var curatedTypes = map[string]ir.Kind{
@@ -72,19 +73,15 @@ func (c *compiler) goType(p *packages.Package, pos token.Pos, typ types.Type) (i
 			if !ok {
 				break
 			}
-			result := ir.Type{Kind: kind}
-			for i := 0; i < t.TypeArgs().Len(); i++ {
-				arg, err := c.goType(p, pos, t.TypeArgs().At(i))
+			var args [2]ir.Type
+			for i := range t.TypeArgs().Len() {
+				var err error
+				args[i], err = c.goType(p, pos, t.TypeArgs().At(i))
 				if err != nil {
 					return ir.Type{}, err
 				}
-				if i == 0 && (kind == ir.OrderedMap || kind == ir.OrderedSet) {
-					result.Key = &arg
-				} else {
-					result.Element = &arg
-				}
 			}
-			return result, nil
+			return curatedType(kind, args), nil
 		}
 		if t.TypeParams().Len() != 0 {
 			break
@@ -107,14 +104,15 @@ func (c *compiler) goType(p *packages.Package, pos token.Pos, typ types.Type) (i
 				c.state[obj] = 1
 				owner := c.source.Packages[id.Package]
 				record := ir.Struct{Symbol: id}
+				var fields []ir.Field
 				for i := 0; i < u.NumFields(); i++ {
 					field := u.Field(i)
 					if field.Embedded() || field.Name() == "_" {
 						return ir.Type{}, load.Error(owner, field.Pos(), "embedded and blank fields are unsupported")
 					}
 					if isSelfBox(field.Type(), obj) {
-						elem := ir.Type{Kind: ir.Record, Record: id}
-						record.Fields = append(record.Fields, ir.Field{Name: field.Name(), Type: ir.Type{Kind: ir.Box, Element: &elem}})
+						elem := ir.NewTypeRecordType(ir.RecordType{Symbol: id})
+						fields = append(fields, ir.Field{Name: field.Name(), Type: ir.NewTypeBoxType(ir.BoxType{Element: elem})})
 						record.Recursive = true
 						continue
 					}
@@ -122,13 +120,14 @@ func (c *compiler) goType(p *packages.Package, pos token.Pos, typ types.Type) (i
 					if err != nil {
 						return ir.Type{}, err
 					}
-					record.Fields = append(record.Fields, ir.Field{Name: field.Name(), Type: ft})
+					fields = append(fields, ir.Field{Name: field.Name(), Type: ft})
 				}
 				out := c.output(id.Package)
-				out.Decls = append(out.Decls, record)
+				record.Fields = list(fields)
+				out.decls = append(out.decls, ir.NewDeclarationStruct(record))
 				c.state[obj] = 2
 			}
-			return ir.Type{Kind: ir.Record, Record: id}, nil
+			return ir.NewTypeRecordType(ir.RecordType{Symbol: id}), nil
 		}
 	}
 	return ir.Type{}, load.Error(p, pos, "unsupported type %s", typ)
@@ -144,36 +143,84 @@ func isSelfBox(typ types.Type, owner *types.TypeName) bool {
 }
 
 func (c *compiler) zero(t ir.Type) ir.Expr {
-	switch t.Kind {
+	switch t.Kind() {
 	case ir.EnumType:
-		for _, decl := range c.output(t.Record.Package).Decls {
-			if enum, ok := decl.(ir.Enum); ok && enum.Symbol == t.Record {
-				variant := enum.Variants[enum.Default]
-				return ir.Constructor{Enum: t.Record, Variant: variant.Name, Value: c.zero(variant.Type)}
+		id := t.Case().(ir.EnumTypeRef).Symbol
+		for _, decl := range c.output(id.Package).decls {
+			if enum, ok := decl.Case().(ir.Enum); ok && enum.Symbol == id {
+				variant := lean.FoldListUntil(enum.Variants, variantLookup{Remaining: enum.Default}, findVariant).State.Field
+				return ir.NewExprConstructor(ir.Constructor{Enum: id, Variant: variant.Name, Value: c.zero(variant.Type)})
 			}
 		}
 		panic("missing enum for Go zero value")
 	case ir.Record:
-		for _, decl := range c.output(t.Record.Package).Decls {
-			if record, ok := decl.(ir.Struct); ok && record.Symbol == t.Record {
-				fields := make([]ir.Expr, len(record.Fields))
-				for i, field := range record.Fields {
-					fields[i] = c.zero(field.Type)
-				}
-				return ir.StructLiteral{Type: t.Record, Fields: fields}
+		id := t.Case().(ir.RecordType).Symbol
+		for _, decl := range c.output(id.Package).decls {
+			if record, ok := decl.Case().(ir.Struct); ok && record.Symbol == id {
+				fields := lean.FoldList(record.Fields, zeroFields{Compiler: c}, appendZeroField).Fields
+				return ir.NewExprStructLiteral(ir.StructLiteral{Type: id, Fields: exprSeq(fields)})
 			}
 		}
 		panic("missing record for Go zero value")
 	case ir.Bool:
-		return ir.Constant{Type: t, Value: "false"}
+		return ir.NewExprConstant(ir.Constant{Type: t, Value: "false"})
 	case ir.String:
-		return ir.Constant{Type: t}
+		return ir.NewExprConstant(ir.Constant{Type: t})
 	case ir.FoldControl:
-		return ir.FoldControlLiteral{State: c.zero(*t.Element), Stop: c.zero(ir.Type{Kind: ir.Bool})}
+		return ir.NewExprFoldControlLiteral(ir.FoldControlLiteral{State: c.zero(t.Case().(ir.FoldControlType).Element), Stop: c.zero(ir.NewTypeScalarType(ir.ScalarType{Scalar: ir.Bool}))})
 	default:
-		if t.Kind < ir.Record {
-			return ir.Constant{Type: t, Value: "0"}
+		if t.Kind() < ir.Record {
+			return ir.NewExprConstant(ir.Constant{Type: t, Value: "0"})
 		}
-		return ir.Primitive{Op: ir.Empty, Type: t}
+		return emptyValue(t)
 	}
+}
+
+func curatedType(kind ir.Kind, args [2]ir.Type) ir.Type {
+	switch kind {
+	case ir.Array:
+		return ir.NewTypeArrayType(ir.ArrayType{Element: args[0]})
+	case ir.ByteArray:
+		return ir.NewTypeByteArrayType(ir.ByteArrayType{})
+	case ir.OrderedMap:
+		return ir.NewTypeMapType(ir.MapType{Key: args[0], Value: args[1]})
+	case ir.OrderedSet:
+		return ir.NewTypeSetType(ir.SetType{Key: args[0]})
+	case ir.Option:
+		return ir.NewTypeOptionType(ir.OptionType{Element: args[0]})
+	case ir.BitVec:
+		return ir.NewTypeBitVecType(ir.BitVecType{})
+	case ir.List:
+		return ir.NewTypeListType(ir.ListType{Element: args[0]})
+	case ir.FoldControl:
+		return ir.NewTypeFoldControlType(ir.FoldControlType{Element: args[0]})
+	case ir.Box:
+		return ir.NewTypeBoxType(ir.BoxType{Element: args[0]})
+	default:
+		panic("unknown curated type")
+	}
+}
+
+type variantLookup struct {
+	Remaining int
+	Field     ir.Field
+}
+
+func findVariant(field ir.Field, state variantLookup) lean.FoldControl[variantLookup] {
+	if state.Remaining == 0 {
+		state.Field = field
+		return lean.FoldControl[variantLookup]{State: state, Stop: true}
+	}
+	state.Remaining--
+	return lean.FoldControl[variantLookup]{State: state}
+}
+
+type zeroFields struct {
+	Compiler *compiler
+	Fields   []ir.Expr
+}
+
+func appendZeroField(field ir.Field, state zeroFields) zeroFields {
+	state.Fields = append(state.Fields, state.Compiler.zero(field.Type))
+	return state
 }

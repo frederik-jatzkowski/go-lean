@@ -6,8 +6,9 @@ import (
 	"go/types"
 	"strings"
 
-	"github.com/frederik-jatzkowski/go-lean/internal/ir"
+	"github.com/frederik-jatzkowski/go-lean/internal/core/ir"
 	"github.com/frederik-jatzkowski/go-lean/internal/load"
+	"github.com/frederik-jatzkowski/go-lean/pkg/lean"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -23,21 +24,23 @@ func (c *compiler) enumType(p *packages.Package, pos token.Pos, obj *types.TypeN
 		}
 		c.state[obj] = 1
 		result := ir.Enum{Symbol: id}
+		var variants []ir.Field
 		for _, payload := range enum.Payloads {
 			t, err := c.goType(owner, payload.Pos(), payload.Type())
 			if err != nil {
 				return ir.Type{}, err
 			}
 			if payload.Name() == enum.Spec.Default {
-				result.Default = len(result.Variants)
+				result.Default = len(variants)
 			}
-			result.Variants = append(result.Variants, ir.Field{Name: payload.Name(), Type: t})
+			variants = append(variants, ir.Field{Name: payload.Name(), Type: t})
 		}
+		result.Variants = list(variants)
 		out := c.output(id.Package)
-		out.Decls = append(out.Decls, result)
+		out.decls = append(out.decls, ir.NewDeclarationEnum(result))
 		c.state[obj] = 2
 	}
-	return ir.Type{Kind: ir.EnumType, Record: id}, nil
+	return ir.NewTypeEnumTypeRef(ir.EnumTypeRef{Symbol: id}), nil
 }
 
 func (c *compiler) checkEnumZero(p *packages.Package, obj *types.TypeName) error {
@@ -90,7 +93,7 @@ func (f *function) enumMatch(stmt *ast.TypeSwitchStmt, rest continuation, traili
 	p := f.source.Package
 	info := p.TypesInfo
 	invalid := func() (ir.Expr, error) {
-		return nil, load.Error(p, stmt.Pos(), "expected a type switch on enum.Case() without an initializer")
+		return ir.Expr{}, load.Error(p, stmt.Pos(), "expected a type switch on enum.Case() without an initializer")
 	}
 	if stmt.Init != nil {
 		return invalid()
@@ -128,13 +131,13 @@ func (f *function) enumMatch(stmt *ast.TypeSwitchStmt, rest continuation, traili
 	}
 	enum := f.compiler.source.Enums[owner]
 	if _, err := f.goType(p, stmt.Pos(), owner.Type()); err != nil {
-		return nil, err
+		return ir.Expr{}, err
 	}
 	value, err := f.expr(selector.X)
 	if err != nil {
-		return nil, err
+		return ir.Expr{}, err
 	}
-	result := ir.Match{Value: value}
+	var cases []ir.MatchCase
 	remaining := make(map[*types.TypeName]bool)
 	for _, variant := range enum.Payloads {
 		remaining[variant] = true
@@ -144,16 +147,16 @@ func (f *function) enumMatch(stmt *ast.TypeSwitchStmt, rest continuation, traili
 	continued := false
 	shared := func() (ir.Expr, error) {
 		continued = true
-		return ir.Jump{ID: join}, nil
+		return ir.NewExprJump(ir.Jump{ID: join}), nil
 	}
 	for _, node := range stmt.Body.List {
 		clause := node.(*ast.CaseClause)
 		if len(clause.List) != 1 {
-			return nil, load.Error(p, clause.Pos(), "enum switches require exactly one variant per case and no default")
+			return ir.Expr{}, load.Error(p, clause.Pos(), "enum switches require exactly one variant per case and no default")
 		}
 		typ, ok := types.Unalias(info.TypeOf(clause.List[0])).(*types.Named)
 		if !ok || !remaining[typ.Obj()] {
-			return nil, load.Error(p, clause.Pos(), "expected an unhandled enum payload type")
+			return ir.Expr{}, load.Error(p, clause.Pos(), "expected an unhandled enum payload type")
 		}
 		delete(remaining, typ.Obj())
 		binding, bound := info.Implicits[clause].(*types.Var)
@@ -164,24 +167,29 @@ func (f *function) enumMatch(stmt *ast.TypeSwitchStmt, rest continuation, traili
 		body, err := f.block(clause.Body, shared)
 		delete(f.locals, binding)
 		if err != nil {
-			return nil, err
+			return ir.Expr{}, err
 		}
-		result.Cases = append(result.Cases, ir.MatchCase{Variant: typ.Obj().Name(), Binding: id, Body: body})
+		cases = append(cases, ir.MatchCase{Variant: typ.Obj().Name(), Binding: id, Body: body})
 	}
 	for _, variant := range enum.Payloads {
 		if remaining[variant] {
-			return nil, load.Error(p, stmt.Pos(), "non-exhaustive enum switch, missing %s", variant.Name())
+			return ir.Expr{}, load.Error(p, stmt.Pos(), "non-exhaustive enum switch, missing %s", variant.Name())
 		}
 	}
+	var sequence ir.MatchSeq
+	for i := len(cases) - 1; i >= 0; i-- {
+		sequence = ir.MatchSeq{First: lean.NewBox(ir.MatchSeqItem{Value: cases[i], Rest: sequence})}
+	}
+	result := ir.NewExprMatch(ir.Match{Value: value, Cases: sequence})
 	// Go still requires a trailing return for an exhaustive type switch.
 	// Check it even when all cases return so it cannot hide unsupported code.
 	if continued || trailing {
 		next, err := rest()
 		if err != nil {
-			return nil, err
+			return ir.Expr{}, err
 		}
 		if continued {
-			return ir.Join{ID: join, Next: next, Body: result}, nil
+			return ir.NewExprJoin(ir.Join{ID: join, Next: next, Body: result}), nil
 		}
 	}
 	return result, nil

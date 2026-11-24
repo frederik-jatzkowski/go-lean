@@ -4,7 +4,7 @@ import (
 	"go/ast"
 	"go/types"
 
-	"github.com/frederik-jatzkowski/go-lean/internal/ir"
+	"github.com/frederik-jatzkowski/go-lean/internal/core/ir"
 	"github.com/frederik-jatzkowski/go-lean/internal/load"
 )
 
@@ -27,19 +27,36 @@ func (f *function) fold(e *ast.CallExpr, kind ir.FoldKind) (ir.Expr, error) {
 	}
 	if fn == nil || fn.Pkg() == nil || fn.Pkg().Path() == load.Curated ||
 		fn.Type().(*types.Signature).TypeParams().Len() != 0 {
-		return nil, load.Error(p, step.Pos(), "fold step must be a directly named, non-generic function")
+		return ir.Expr{}, load.Error(p, step.Pos(), "fold step must be a directly named, non-generic function")
 	}
 	if _, err := f.goType(p, e.Pos(), p.TypesInfo.TypeOf(e)); err != nil {
-		return nil, err
+		return ir.Expr{}, err
 	}
 	args, err := f.arguments(e.Args[:2])
 	if err != nil {
-		return nil, err
+		return ir.Expr{}, err
 	}
 	abstract, err := f.callTarget(fn, step.Pos())
 	if err != nil {
-		return nil, err
+		return ir.Expr{}, err
 	}
 	f.output(p.PkgPath).Folds |= kind
-	return ir.Fold{Kind: kind, Input: args[0], Initial: args[1], Step: symbol(fn), Abstract: abstract}, nil
+	target := ir.NewFoldStepDirectStep(ir.DirectStep{Target: symbol(fn)})
+	if abstract {
+		target = ir.NewFoldStepAbstractStep(ir.AbstractStep{Target: symbol(fn)})
+	}
+	var fold ir.Fold
+	switch kind {
+	case ir.FoldN:
+		fold = ir.NewFoldCountFold(ir.CountFold{Count: args[0], Initial: args[1], Step: target})
+	case ir.FoldNUntil:
+		fold = ir.NewFoldCountUntilFold(ir.CountUntilFold{Count: args[0], Initial: args[1], Step: target})
+	case ir.FoldList:
+		fold = ir.NewFoldListFold(ir.ListFold{Items: args[0], Initial: args[1], Step: target})
+	case ir.FoldListUntil:
+		fold = ir.NewFoldListUntilFold(ir.ListUntilFold{Items: args[0], Initial: args[1], Step: target})
+	default:
+		panic("unknown fold kind")
+	}
+	return ir.NewExprFoldExpr(ir.FoldExpr{Fold: fold}), nil
 }

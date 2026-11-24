@@ -4,26 +4,33 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/frederik-jatzkowski/go-lean/internal/ir"
+	"github.com/frederik-jatzkowski/go-lean/internal/core/ir"
 )
 
-var foldNames = map[ir.FoldKind]string{
-	ir.FoldN: "count", ir.FoldNUntil: "countUntil",
-	ir.FoldList: "list", ir.FoldListUntil: "listUntil",
+func (r renderer) fold(f ir.Fold) string {
+	switch v := f.Case().(type) {
+	case ir.CountFold:
+		return r.applyFold("count", v.Step, "("+r.expr(v.Count)+").toNat 0", v.Initial)
+	case ir.CountUntilFold:
+		return r.applyFold("countUntil", v.Step, "("+r.expr(v.Count)+").toNat 0", v.Initial)
+	case ir.ListFold:
+		return r.applyFold("list", v.Step, r.expr(v.Items), v.Initial)
+	case ir.ListUntilFold:
+		return r.applyFold("listUntil", v.Step, r.expr(v.Items), v.Initial)
+	default:
+		panic(fmt.Sprintf("unexpected IR fold %T", v))
+	}
 }
 
-func (r renderer) fold(f ir.Fold) string {
-	step := qualified(f.Step)
-	if f.Abstract {
-		step = contractVar(f.Step) + ".operation"
+func (r renderer) applyFold(name string, target ir.FoldStep, input string, initial ir.Expr) string {
+	var step string
+	switch v := target.Case().(type) {
+	case ir.DirectStep:
+		step = qualified(v.Target)
+	case ir.AbstractStep:
+		step = contractVar(v.Target) + ".operation"
 	}
-	input := r.expr(f.Input)
-	extra := ""
-	if f.Kind == ir.FoldN || f.Kind == ir.FoldNUntil {
-		input = "(" + input + ").toNat"
-		extra = " 0"
-	}
-	return "(" + r.foldNamespace + "." + foldNames[f.Kind] + " " + step + " " + input + extra + " " + r.expr(f.Initial) + ")"
+	return "(" + r.foldNamespace + "." + name + " " + step + " " + input + " " + r.expr(initial) + ")"
 }
 
 func (r renderer) writeFolds(b *strings.Builder, kinds ir.FoldKind) {

@@ -12,8 +12,8 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/frederik-jatzkowski/go-lean/internal/core/ir"
 	"github.com/frederik-jatzkowski/go-lean/internal/enums"
-	"github.com/frederik-jatzkowski/go-lean/internal/ir"
 	"golang.org/x/tools/go/packages"
 )
 

@@ -314,6 +314,61 @@ func (receiver) step(i, state uint) uint { return i + state }
 	}
 }
 
+func TestAbstractFoldSteps(t *testing.T) {
+	workspace(t, true)
+	put(t, "model.go", `package model
+import "github.com/frederik-jatzkowski/go-lean/pkg/lean"
+
+//golean:assume identity : ∀ i s, step i s = s
+func step(i, state uint) uint { return state }
+
+//golean:verify countLaw : True
+//golean:abstract step
+func Count(n uint) uint { return lean.FoldN(n, uint(1), step) }
+
+//golean:verify listLaw : True
+//golean:abstract step
+func Items(items lean.List[uint]) uint { return lean.FoldList(items, uint(2), step) }
+`)
+	if err := command("transpile", "."); err != nil {
+		t.Fatal(err)
+	}
+	model := get(t, "model.lean")
+	for _, want := range []string{
+		".«fold».count «dependency:example.test/model.step».operation («local:0»).toNat 0 ",
+		".«fold».list «dependency:example.test/model.step».operation «local:0» ",
+	} {
+		if !strings.Contains(model, want) {
+			t.Errorf("expected fold using the contract operation %q", want)
+		}
+	}
+}
+
+func TestAbstractEarlyStopFoldDiagnostics(t *testing.T) {
+	workspace(t, true)
+	for _, body := range []string{
+		"return lean.FoldNUntil(1, uint(0), step)",
+		"return lean.FoldListUntil(lean.Nil[uint](), uint(0), step)",
+	} {
+		put(t, "model.go", `package model
+import "github.com/frederik-jatzkowski/go-lean/pkg/lean"
+
+//golean:assume stopLaw : True
+func step(i, state uint) lean.FoldControl[uint] {
+	return lean.FoldControl[uint]{State: state, Stop: true}
+}
+
+//golean:verify law : True
+//golean:abstract step
+func Run() lean.FoldControl[uint] { `+body+` }
+`)
+		err := command("transpile", ".")
+		if err == nil || !strings.Contains(err.Error(), "abstract callee step requires scalar types") {
+			t.Errorf("%s: expected scalar contract diagnostic, got %v", body, err)
+		}
+	}
+}
+
 func TestDirectValueMethods(t *testing.T) {
 	workspace(t, false)
 	put(t, "example.go", `package example

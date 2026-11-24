@@ -52,7 +52,7 @@ func generate(ctx context.Context, pattern string) ([]string, error) {
 	for _, p := range packages {
 		loc := locations[p.Path]
 		checkStem := p.Name
-		if len(p.Laws) != 0 {
+		if !p.Laws.IsEmpty() {
 			checkStem += "_verify"
 		}
 		for _, artifact := range emit.Render(p, modules) {

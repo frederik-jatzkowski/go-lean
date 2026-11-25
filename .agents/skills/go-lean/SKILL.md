@@ -56,7 +56,7 @@ Lean unfolds `«fold».count` and `«fold».countUntil` by recursion on a natura
 
 ## Model generated enums
 
-Declare `//golean:generate:enum Expr { Lit default, Add }` in a package doc comment. Define the payload types in the package and run `go tool go-lean generate` with the package selector before building. Commit the generated `lean.gen.go`. Construct variants with `NewExprLit` and `NewExprAdd`, and use an exhaustive type switch on `expr.Case().(type)`. An empty literal or zero-initialized enum selects the default constructor with its Go-zero payload. Lean uses an inductive type directly. Recursive payload records may have direct enum fields or `lean.Box` fields. Keep the default’s zero construction finite.
+Declare `//golean:generate:enum Expr { Lit default, Add }` in a package doc comment. Define the payload types in the package and run `go tool go-lean generate` with the package selector before building. Construct variants with `NewExprLit` and `NewExprAdd`, and use an exhaustive type switch on `expr.Case().(type)`. An empty literal or zero-initialized enum selects the default constructor with its Go-zero payload. Lean uses an inductive type directly. Recursive payload records may have direct enum fields or `lean.Box` fields. Keep the default’s zero construction finite.
 
 ## Traverse recursive records
 

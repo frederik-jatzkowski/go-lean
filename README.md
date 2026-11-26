@@ -22,10 +22,11 @@ go tool go-lean doctor
 
 Follow the [quickstart](docs/quickstart.md) to declare a law, generate Lean, write a proof, and verify it.
 
-## Fully verified examples
+## Examples
 
 | Example | Techniques |
 | --- | --- |
+| [Bootstrapping go-lean (ongoing)](docs/bootstrap.md) | Modeling the subset checker and IR construction, with Lean laws over compiler internals |
 | [Stack-machine compiler](examples/proven/stack_machine_compiler/README.md) | Early-stopping folds, boxed recursion, and compiler correctness |
 | [Ten-pin bowling](examples/proven/bowling/README.md) | Value-state transitions, list folds, and refinement against scoring rules |
 | [Grid game](examples/proven/grid_game/README.md) | Finite step checks and induction over arbitrary move histories |

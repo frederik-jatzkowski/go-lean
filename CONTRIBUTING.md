@@ -76,7 +76,7 @@ go run ./cmd/go-lean verify ./examples/proven/clamp_import
 go run ./cmd/go-lean verify ./examples/proven/...
 ```
 
-The [example walkthroughs](README.md#fully-verified-examples) show the Go entry points, laws, proof arguments, and individual check commands.
+The [example walkthroughs](README.md#examples) show the Go entry points, laws, proof arguments, and individual check commands.
 
 ## Run the playable examples
 

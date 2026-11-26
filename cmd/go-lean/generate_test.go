@@ -403,6 +403,24 @@ func Run(first First, second Second, n int64) int64 {
 	}
 }
 
+func TestBodyContinuationDiagnosticOrder(t *testing.T) {
+	workspace(t, false)
+	put(t, "model.go", `package model
+//golean:export
+func Run(n int, branch bool) int {
+ if branch {
+ } else {
+  return n * n
+ }
+ return n / n
+}
+`)
+	err := command("transpile", ".")
+	if err == nil || !strings.Contains(err.Error(), "unsupported binary operator /") {
+		t.Fatalf("expected the continuation error before the else-branch error, got %v", err)
+	}
+}
+
 func TestLoadedObjectIdentity(t *testing.T) {
 	if _, err := exec.LookPath("lake"); err != nil {
 		t.Skip("lake is unavailable")

@@ -15,6 +15,7 @@
 //golean:verify listFoldUntilKeepsAbstractStep : ∀ (items seed : Expr) (target : Symbol),
 //golean:verify+ FoldFromOperation FoldListUntil items seed target true =
 //golean:verify+ Expr.FoldExpr (FoldExpr.mk (Fold.ListUntilFold (ListUntilFold.mk items seed (FoldStep.AbstractStep (AbstractStep.mk target)))))
+//golean:verify:import loaded.checked_type_termination
 package ir
 
 import "github.com/frederik-jatzkowski/go-lean/pkg/lean"

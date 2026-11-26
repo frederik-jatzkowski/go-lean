@@ -36,7 +36,7 @@ func build(roots []*packages.Package) (loaded.Program, error) {
 		id := loaded.ObjectID(len(objects))
 		objectIDs[obj] = id
 		objects = append(objects, loaded.Object{})
-		entry := loaded.Object{Name: obj.Name()}
+		entry := loaded.Object{Name: obj.Name(), ModelName: obj.Name()}
 		if pkg := obj.Pkg(); pkg != nil {
 			entry.Package = pkg.Path()
 			if p := packagesByPath[entry.Package]; p != nil {
@@ -50,6 +50,11 @@ func build(roots []*packages.Package) (loaded.Program, error) {
 		case *types.Func:
 			entry.Kind = loaded.FunctionObject
 			entry.FullName = obj.FullName()
+			if receiver := obj.Signature().Recv(); receiver != nil {
+				if named, ok := types.Unalias(receiver.Type()).(*types.Named); ok {
+					entry.ModelName = named.Obj().Name() + "$" + entry.Name
+				}
+			}
 		case *types.Var:
 			entry.Kind = loaded.Variable
 			entry.Embedded = obj.Embedded()

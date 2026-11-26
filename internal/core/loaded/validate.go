@@ -32,10 +32,88 @@ const (
 	InvalidEnumSwitch
 	InvalidSwitchClause
 	InvalidReturn
+	DependencyIssue
+	ExternalDependency
+	UnexportedCall
+	UnhandledEnumPayload
+	UnsupportedScalarType
+	LoadedTypeIssue
+	UnsupportedGoType
+	UnsupportedRecordField
+	UnknownLocalOperand
+	UnsupportedBinaryOperands
+	PrivateEnumStorage
+	NonEmptyEnumLiteral
+	UnsupportedCompositeLiteral
+	IncompleteRecordLiteral
+	UnkeyedRecordLiteral
+	UnsupportedCuratedOperation
+	InvalidFoldCallback
+	MissingFunctionSource
+	ActiveFunctionEntry
+	FunctionSourceIssue
+	ActiveCallEdge
+	RecursiveContractRoot
+	UnverifiedContractRoot
+	CallerLocalContracts
+	MissingContractAssumptions
+	DuplicateContractTarget
+	UnusedContractTarget
+	MissingMeasuredSelfCall
+	InvalidContractSignature
+	ContractScalarRequired
+	UnsupportedFunctionDeclaration
+	UnsupportedGenericAlias
+	UnsupportedPackageVariable
+	UnsupportedDeclaration
+	TypeCheckBound
+	EnumZeroCycle
+	ConstantOutOfRange
+	MissingBodyReturn
+	UnreachableBodySuffix
+	MissingInitializers
+	ReassignedBinding
+	NonExhaustiveMatch
+	DuplicatePackageLaw
+	PackageCheckIssue
+	RecursiveEdgeIssue
+	RecursiveRecordIssue
+	PackageGraphBound
 )
 
 func validDiagnostic() Diagnostic {
 	return Diagnostic{Code: Valid, Pos: "", Detail: ""}
+}
+
+// ValidateDependency checks a concrete dependency after resolving its package.
+//
+//golean:export
+func (p Package) ValidateDependency(target Package, path string, pos string) Diagnostic {
+	if p.Path == path {
+		return validDiagnostic()
+	}
+	if target.Issue != "" {
+		return Diagnostic{Code: DependencyIssue, Pos: "", Detail: target.Issue}
+	}
+	if p.Module == "" || target.Module != p.Module {
+		return Diagnostic{Code: ExternalDependency, Pos: pos, Detail: path}
+	}
+	return validDiagnostic()
+}
+
+// ValidateConcreteCall checks visibility independently of call-graph state.
+//
+//golean:export
+func (o Object) ValidateConcreteCall(caller string, pos string) Diagnostic {
+	if o.Package == caller {
+		return validDiagnostic()
+	}
+	if o.Function.IsSome() {
+		if o.Function.UnwrapOr(emptyFunction()).Export {
+			return validDiagnostic()
+		}
+	}
+	return Diagnostic{Code: UnexportedCall, Pos: pos, Detail: o.FullName}
 }
 
 func (e Expression) binaryDiagnostic(form BinaryExpr) Diagnostic {

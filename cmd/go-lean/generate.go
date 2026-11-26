@@ -7,10 +7,10 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/frederik-jatzkowski/go-lean/internal/core/ir"
 	"github.com/frederik-jatzkowski/go-lean/internal/emit"
 	"github.com/frederik-jatzkowski/go-lean/internal/genfile"
 	"github.com/frederik-jatzkowski/go-lean/internal/load"
-	"github.com/frederik-jatzkowski/go-lean/internal/lower"
 )
 
 func generate(ctx context.Context, pattern string) ([]string, error) {
@@ -22,9 +22,21 @@ func generate(ctx context.Context, pattern string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	packages, err := lower.Program(source)
-	if err != nil {
+	checked := source.Check()
+	if !checked.Complete {
+		return nil, fmt.Errorf("internal error: program checking exceeded its traversal bound")
+	}
+	if err := checkError(checked.Failure); err != nil {
 		return nil, err
+	}
+
+	program := ir.FromLoaded(checked.Program)
+	if !program.Complete {
+		return nil, fmt.Errorf("internal error: checked IR construction exceeded its traversal bound")
+	}
+	packages := make([]ir.Package, program.Packages.Size())
+	for index := range packages {
+		packages[index] = program.Packages.Get(uint(index)).UnwrapOr(ir.Package{})
 	}
 
 	modules := make(map[string]string)
@@ -55,7 +67,7 @@ func generate(ctx context.Context, pattern string) ([]string, error) {
 		if !p.Laws.IsEmpty() {
 			checkStem += "_verify"
 		}
-		for _, artifact := range emit.Render(p, modules) {
+		for _, artifact := range emit.Render(&p, modules) {
 			outputs = append(outputs, output{path: filepath.Join(p.Dir, artifact.Stem+".lean"), artifact: artifact})
 			name := loc.module(artifact.Stem)
 			workspace.blocks[loc.block].roots[name] = true

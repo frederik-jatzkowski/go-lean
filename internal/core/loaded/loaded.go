@@ -2,6 +2,7 @@
 //
 //golean:generate:enum ExprForm { UnsupportedExpr default, Parenthesized, Identifier, UnaryExpr, BinaryExpr, SelectorExpr, CompositeExpr, KeyedExpr, CallExpr }
 //golean:generate:enum StmtForm { UnsupportedStmt default, ReturnStmt, IfStmt, SwitchStmt, LoopStmt, ShortDecl, VarDecl }
+//golean:generate:enum CheckTask { IdleCheck default, CheckTop, CheckNamedType, CheckFunctionStart, CheckFunctionWork, CheckExpressionWork, CheckBodyWork }
 //golean:verify missingIDs : ∀ p : Program,
 //golean:verify+ «Program$LookupObject» p 0 = none ∧ «Program$LookupType» p 0 = none ∧
 //golean:verify+ «Program$LookupExpression» p 0 = none ∧ «Program$LookupStatement» p 0 = none
@@ -81,15 +82,15 @@ const (
 )
 
 type Object struct {
-	Kind                                ObjectKind
-	Embedded                            bool
-	Name, Package, FullName, Pos, Issue string
-	Type, DefaultType                   TypeID
-	Value                               Constant
-	Function                            lean.Option[Function]
-	Enum                                lean.Option[Enum]
-	Constructor                         lean.Option[EnumConstructor]
-	EnumCase                            ObjectID
+	Kind                                           ObjectKind
+	Embedded                                       bool
+	Name, ModelName, Package, FullName, Pos, Issue string
+	Type, DefaultType                              TypeID
+	Value                                          Constant
+	Function                                       lean.Option[Function]
+	Enum                                           lean.Option[Enum]
+	Constructor                                    lean.Option[EnumConstructor]
+	EnumCase                                       ObjectID
 }
 
 type Constant struct {

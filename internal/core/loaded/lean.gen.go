@@ -93,3 +93,45 @@ func (value StmtForm) Case() interface{} {
 	}
 	return value.payload
 }
+
+type CheckTask struct {
+	_       [0]func()
+	payload interface{}
+}
+
+func NewCheckTaskIdleCheck(value IdleCheck) CheckTask {
+	return CheckTask{payload: value}
+}
+
+func NewCheckTaskCheckTop(value CheckTop) CheckTask {
+	return CheckTask{payload: value}
+}
+
+func NewCheckTaskCheckNamedType(value CheckNamedType) CheckTask {
+	return CheckTask{payload: value}
+}
+
+func NewCheckTaskCheckFunctionStart(value CheckFunctionStart) CheckTask {
+	return CheckTask{payload: value}
+}
+
+func NewCheckTaskCheckFunctionWork(value CheckFunctionWork) CheckTask {
+	return CheckTask{payload: value}
+}
+
+func NewCheckTaskCheckExpressionWork(value CheckExpressionWork) CheckTask {
+	return CheckTask{payload: value}
+}
+
+func NewCheckTaskCheckBodyWork(value CheckBodyWork) CheckTask {
+	return CheckTask{payload: value}
+}
+
+func (value CheckTask) Case() interface{} {
+	var empty interface{}
+	if value.payload == empty {
+		var zero IdleCheck
+		return zero
+	}
+	return value.payload
+}

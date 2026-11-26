@@ -4,6 +4,8 @@ type ScalarKind uint8
 
 // AllowsIdentityConversion reports whether two underlying basic types are
 // the same supported scalar, independent of the target word width.
+//
+//golean:export
 func (t Type) AllowsIdentityConversion(source Type) bool {
 	return t.Kind == BasicType && source.Kind == BasicType &&
 		t.Basic == source.Basic && t.Scalar(64) != NotScalar

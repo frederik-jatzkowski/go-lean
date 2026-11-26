@@ -46,6 +46,7 @@ roots = [
 name = "CoreIR"
 srcDir = "internal/core"
 roots = [
+  'loaded.checked_type_termination',
   # BEGIN go-lean managed roots
   'ir.ir',
   'ir.ir_proofs',

@@ -106,7 +106,7 @@ func TestEnumRejections(t *testing.T) {
 		{"missing match case", "func missing(x Expr) byte { switch x.Case().(type) { case Lit: return 0 }; return 1 }", "missing Add"},
 		{"default match case", "func extra(x Expr) byte { switch x.Case().(type) { case Lit: return 0; case Add: return 1; default: return 2 } }", "no default"},
 		{"multiple defaults", "", "exactly one default"},
-		{"zero cycle", "", "cyclic enum zero value"},
+		{"zero cycle", "", "cyclic enum zero value: Expr -> Add -> Children -> Expr"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			workspace(t, false)

@@ -179,3 +179,81 @@ func foldStep(symbol Symbol, abstract bool) FoldStep {
 func foldExpr(f Fold) Expr {
 	return NewExprFoldExpr(FoldExpr{Fold: f})
 }
+
+// CuratedTypeFromArguments constructs a collection or other curated Go type.
+// Each argument is the already-resolved IR type in the corresponding position.
+//
+//golean:export
+func CuratedTypeFromArguments(kind loaded.CuratedType, first Type, second Type) Type {
+	if kind == loaded.CuratedArray {
+		return NewTypeArrayType(ArrayType{Element: first})
+	}
+	if kind == loaded.CuratedBytes {
+		return NewTypeByteArrayType(ByteArrayType{})
+	}
+	if kind == loaded.CuratedMap {
+		return NewTypeMapType(MapType{Key: first, Value: second})
+	}
+	if kind == loaded.CuratedSet {
+		return NewTypeSetType(SetType{Key: first})
+	}
+	if kind == loaded.CuratedOption {
+		return NewTypeOptionType(OptionType{Element: first})
+	}
+	if kind == loaded.CuratedBitVec {
+		return NewTypeBitVecType(BitVecType{})
+	}
+	if kind == loaded.CuratedList {
+		return NewTypeListType(ListType{Element: first})
+	}
+	if kind == loaded.CuratedFoldControl {
+		return NewTypeFoldControlType(FoldControlType{Element: first})
+	}
+	if kind == loaded.CuratedBox {
+		return NewTypeBoxType(BoxType{Element: first})
+	}
+	return Type{}
+}
+
+type recursiveGroupBuild struct {
+	Declarations lean.Array[Declaration]
+	Members      lean.List[MutualMember]
+}
+
+func prependRecursiveMember(index uint, state recursiveGroupBuild) recursiveGroupBuild {
+	item := state.Declarations.Get(state.Declarations.Size() - 1 - index).UnwrapOr(Declaration{})
+	switch declaration := item.Case().(type) {
+	case Struct:
+		member := NewMutualMemberMutualRecord(MutualRecord{Record: declaration})
+		return recursiveGroupBuild{Declarations: state.Declarations, Members: lean.Cons(member, state.Members)}
+	case Enum:
+		member := NewMutualMemberMutualEnum(MutualEnum{Enum: declaration})
+		return recursiveGroupBuild{Declarations: state.Declarations, Members: lean.Cons(member, state.Members)}
+	case MissingDeclaration:
+		return state
+	case Mutual:
+		return state
+	case TypeAlias:
+		return state
+	case NamedConstant:
+		return state
+	case Function:
+		return state
+	case Contract:
+		return state
+	}
+	return state
+}
+
+// RecursiveGroupFromDeclarations builds the declaration for a validated
+// component, keeping its member order.
+//
+//golean:export
+func RecursiveGroupFromDeclarations(declarations lean.Array[Declaration]) Declaration {
+	if declarations.Size() <= 1 {
+		return declarations.Get(0).UnwrapOr(Declaration{})
+	}
+	initial := recursiveGroupBuild{Declarations: declarations, Members: lean.List[MutualMember]{}}
+	group := lean.FoldN(declarations.Size(), initial, prependRecursiveMember)
+	return NewDeclarationMutual(Mutual{Types: group.Members})
+}

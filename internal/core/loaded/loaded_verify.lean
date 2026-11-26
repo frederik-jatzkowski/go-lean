@@ -25,3 +25,21 @@ theorem GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».C
 
 run_cmd auditGoProof `«loaded».«loaded_proofs» `GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Proofs.«identityConversionRequiresSameScalar» `GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Laws.«identityConversionRequiresSameScalar»
 theorem GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Checked.«identityConversionRequiresSameScalar» : GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Laws.«identityConversionRequiresSameScalar» := GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Proofs.«identityConversionRequiresSameScalar»
+
+run_cmd auditGoProof `«loaded».«loaded_proofs» `GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Proofs.«methodDispatchRequiresDirectValueReceiver» `GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Laws.«methodDispatchRequiresDirectValueReceiver»
+theorem GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Checked.«methodDispatchRequiresDirectValueReceiver» : GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Laws.«methodDispatchRequiresDirectValueReceiver» := GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Proofs.«methodDispatchRequiresDirectValueReceiver»
+
+run_cmd auditGoProof `«loaded».«loaded_proofs» `GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Proofs.«packageVariablesRejected» `GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Laws.«packageVariablesRejected»
+theorem GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Checked.«packageVariablesRejected» : GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Laws.«packageVariablesRejected» := GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Proofs.«packageVariablesRejected»
+
+run_cmd auditGoProof `«loaded».«loaded_proofs» `GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Proofs.«rawLoopsRejected» `GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Laws.«rawLoopsRejected»
+theorem GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Checked.«rawLoopsRejected» : GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Laws.«rawLoopsRejected» := GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Proofs.«rawLoopsRejected»
+
+run_cmd auditGoProof `«loaded».«loaded_proofs» `GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Proofs.«nonEnumSwitchesRejected» `GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Laws.«nonEnumSwitchesRejected»
+theorem GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Checked.«nonEnumSwitchesRejected» : GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Laws.«nonEnumSwitchesRejected» := GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Proofs.«nonEnumSwitchesRejected»
+
+run_cmd auditGoProof `«loaded».«loaded_proofs» `GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Proofs.«genericSignaturesRejected» `GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Laws.«genericSignaturesRejected»
+theorem GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Checked.«genericSignaturesRejected» : GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Laws.«genericSignaturesRejected» := GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Proofs.«genericSignaturesRejected»
+
+run_cmd auditGoProof `«loaded».«loaded_proofs» `GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Proofs.«signatureRequiresUnnamedResultAndValueReceiver» `GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Laws.«signatureRequiresUnnamedResultAndValueReceiver»
+theorem GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Checked.«signatureRequiresUnnamedResultAndValueReceiver» : GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Laws.«signatureRequiresUnnamedResultAndValueReceiver» := GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Proofs.«signatureRequiresUnnamedResultAndValueReceiver»

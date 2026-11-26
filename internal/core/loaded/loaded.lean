@@ -15,6 +15,37 @@
 --   ∀ (target source : «Type»),
 --   «Type$AllowsIdentityConversion» target source = true →
 --   target.«field:Basic» = source.«field:Basic»
+--
+-- methodDispatchRequiresDirectValueReceiver :
+--   ∀ (call : CallExpr) (signature : «Type») pos,
+--   call.«field:Selection».«field:Kind» ≠ NoSelection →
+--   ((«CallExpr$ValidateReceiver» call signature pos).«field:Code» = Valid ↔
+--   signature.«field:ValueReceiver» = true ∧ call.«field:Selection».«field:Direct» = true)
+--
+-- packageVariablesRejected :
+--   ∀ (p : Program) (declaration : Declaration) (object : «Object»),
+--   object.«field:Kind» = Variable →
+--   «Program$CheckDeclaration» p declaration object = Diagnostic.mk UnsupportedPackageVariable declaration.«field:Pos» []
+--
+-- rawLoopsRejected :
+--   ∀ pos (loop : LoopStmt),
+--   «Statement$Validate» (Statement.mk pos (StmtForm.LoopStmt loop)) =
+--   Diagnostic.mk RawLoop pos []
+--
+-- nonEnumSwitchesRejected :
+--   ∀ (s : SwitchStmt) (method : «Object») pos,
+--   s.«field:CaseMethod» = 0 ∨ method.«field:EnumCase» = 0 →
+--   «SwitchStmt$ValidateCaseMethod» s method pos = Diagnostic.mk InvalidEnumSwitch pos []
+--
+-- genericSignaturesRejected :
+--   ∀ (f : Function) (signature : «Type») (result : «Object»),
+--   signature.«field:Generic» = true →
+--   «Function$ValidateSignature» f signature result = Diagnostic.mk InvalidFunctionSignature f.«field:Pos» []
+--
+-- signatureRequiresUnnamedResultAndValueReceiver :
+--   ∀ (f : Function) (signature : «Type») (result : «Object»),
+--   («Function$ValidateSignature» f signature result).«field:Code» = Valid →
+--   result.«field:Name» = [] ∧ (signature.«field:Receiver» ≠ 0 → signature.«field:ValueReceiver» = true)
 
 import Std
 
@@ -2548,5 +2579,36 @@ def «identityConversionRequiresSameScalar» : Prop :=
   ∀ (target source : «Type»),
   «Type$AllowsIdentityConversion» target source = true →
   target.«field:Basic» = source.«field:Basic»
+
+def «methodDispatchRequiresDirectValueReceiver» : Prop :=
+  ∀ (call : CallExpr) (signature : «Type») pos,
+  call.«field:Selection».«field:Kind» ≠ NoSelection →
+  ((«CallExpr$ValidateReceiver» call signature pos).«field:Code» = Valid ↔
+  signature.«field:ValueReceiver» = true ∧ call.«field:Selection».«field:Direct» = true)
+
+def «packageVariablesRejected» : Prop :=
+  ∀ (p : Program) (declaration : Declaration) (object : «Object»),
+  object.«field:Kind» = Variable →
+  «Program$CheckDeclaration» p declaration object = Diagnostic.mk UnsupportedPackageVariable declaration.«field:Pos» []
+
+def «rawLoopsRejected» : Prop :=
+  ∀ pos (loop : LoopStmt),
+  «Statement$Validate» (Statement.mk pos (StmtForm.LoopStmt loop)) =
+  Diagnostic.mk RawLoop pos []
+
+def «nonEnumSwitchesRejected» : Prop :=
+  ∀ (s : SwitchStmt) (method : «Object») pos,
+  s.«field:CaseMethod» = 0 ∨ method.«field:EnumCase» = 0 →
+  «SwitchStmt$ValidateCaseMethod» s method pos = Diagnostic.mk InvalidEnumSwitch pos []
+
+def «genericSignaturesRejected» : Prop :=
+  ∀ (f : Function) (signature : «Type») (result : «Object»),
+  signature.«field:Generic» = true →
+  «Function$ValidateSignature» f signature result = Diagnostic.mk InvalidFunctionSignature f.«field:Pos» []
+
+def «signatureRequiresUnnamedResultAndValueReceiver» : Prop :=
+  ∀ (f : Function) (signature : «Type») (result : «Object»),
+  («Function$ValidateSignature» f signature result).«field:Code» = Valid →
+  result.«field:Name» = [] ∧ (signature.«field:Receiver» ≠ 0 → signature.«field:ValueReceiver» = true)
 
 end GoLean.«github.com/frederik-jatzkowski/go-lean/internal/core/loaded».Laws

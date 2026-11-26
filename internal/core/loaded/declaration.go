@@ -4,6 +4,9 @@ package loaded
 // body are visited.
 //
 //golean:export
+//golean:verify packageVariablesRejected : ∀ (p : Program) (declaration : Declaration) (object : «Object»),
+//golean:verify+ object.«field:Kind» = Variable →
+//golean:verify+ «Program$CheckDeclaration» p declaration object = Diagnostic.mk UnsupportedPackageVariable declaration.«field:Pos» []
 func (p Program) CheckDeclaration(declaration Declaration, object Object) Diagnostic {
 	if object.Kind == FunctionObject {
 		signature := p.TypeOrMissing(object.Type)

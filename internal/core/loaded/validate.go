@@ -194,6 +194,9 @@ func checkLocalName(index uint, state shortDeclarationCheck) lean.FoldControl[sh
 // block or the types and identities of referenced objects belong to traversal.
 //
 //golean:export
+//golean:verify rawLoopsRejected : ∀ pos (loop : LoopStmt),
+//golean:verify+ «Statement$Validate» (Statement.mk pos (StmtForm.LoopStmt loop)) =
+//golean:verify+ Diagnostic.mk RawLoop pos []
 func (s Statement) Validate() Diagnostic {
 	switch form := s.Form.Case().(type) {
 	case UnsupportedStmt:
@@ -228,6 +231,12 @@ func (s Statement) Validate() Diagnostic {
 // ValidateSignature checks a function's signature before lowering its types.
 //
 //golean:export
+//golean:verify genericSignaturesRejected : ∀ (f : Function) (signature : «Type») (result : «Object»),
+//golean:verify+ signature.«field:Generic» = true →
+//golean:verify+ «Function$ValidateSignature» f signature result = Diagnostic.mk InvalidFunctionSignature f.«field:Pos» []
+//golean:verify signatureRequiresUnnamedResultAndValueReceiver : ∀ (f : Function) (signature : «Type») (result : «Object»),
+//golean:verify+ («Function$ValidateSignature» f signature result).«field:Code» = Valid →
+//golean:verify+ result.«field:Name» = [] ∧ (signature.«field:Receiver» ≠ 0 → signature.«field:ValueReceiver» = true)
 func (f Function) ValidateSignature(signature Type, result Object) Diagnostic {
 	if signature.Variadic || signature.Generic || signature.Results.Size() != 1 || !f.HasBody {
 		return Diagnostic{Code: InvalidFunctionSignature, Pos: f.Pos, Detail: ""}
@@ -257,6 +266,10 @@ func (c CallExpr) ValidateTarget(target Object, pos string) Diagnostic {
 // ValidateReceiver checks ordinary Go method dispatch.
 //
 //golean:export
+//golean:verify methodDispatchRequiresDirectValueReceiver : ∀ (call : CallExpr) (signature : «Type») pos,
+//golean:verify+ call.«field:Selection».«field:Kind» ≠ NoSelection →
+//golean:verify+ ((«CallExpr$ValidateReceiver» call signature pos).«field:Code» = Valid ↔
+//golean:verify+ signature.«field:ValueReceiver» = true ∧ call.«field:Selection».«field:Direct» = true)
 func (c CallExpr) ValidateReceiver(signature Type, pos string) Diagnostic {
 	if c.Selection.Kind != NoSelection && (!signature.ValueReceiver || !c.Selection.Direct) {
 		return Diagnostic{Code: InvalidCallReceiver, Pos: pos, Detail: ""}
@@ -268,6 +281,9 @@ func (c CallExpr) ValidateReceiver(signature Type, pos string) Diagnostic {
 // generated case method.
 //
 //golean:export
+//golean:verify nonEnumSwitchesRejected : ∀ (s : SwitchStmt) (method : «Object») pos,
+//golean:verify+ s.«field:CaseMethod» = 0 ∨ method.«field:EnumCase» = 0 →
+//golean:verify+ «SwitchStmt$ValidateCaseMethod» s method pos = Diagnostic.mk InvalidEnumSwitch pos []
 func (s SwitchStmt) ValidateCaseMethod(method Object, pos string) Diagnostic {
 	if s.CaseMethod == 0 || method.EnumCase == 0 {
 		return Diagnostic{Code: InvalidEnumSwitch, Pos: pos, Detail: ""}
